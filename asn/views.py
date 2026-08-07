@@ -30,6 +30,7 @@ from .files import FileListRenderCN, FileListRenderEN, FileDetailRenderCN, FileD
 from rest_framework.settings import api_settings
 from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
+from asnserial.models import AsnSerialRecord
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -835,6 +836,32 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                     if int(data['qty']) <= 0:
                         raise APIException({"detail": "Move QTY Must > 0"})
                     else:
+                        serial_records = AsnSerialRecord.objects.filter(
+                            openid=self.request.auth.openid,
+                            asn_code=qs.asn_code,
+                            goods_code=qs.goods_code,
+                        )
+                        if serial_records.exists():
+                            missing_serials = serial_records.filter(
+                                is_expected=True,
+                                is_received=False,
+                            ).count()
+                            exception_serials = serial_records.filter(
+                                status__in=[
+                                    AsnSerialRecord.UNEXPECTED,
+                                    AsnSerialRecord.DUPLICATE,
+                                    AsnSerialRecord.WRONG_SKU,
+                                    AsnSerialRecord.DAMAGED,
+                                    AsnSerialRecord.REJECTED,
+                                ]
+                            ).count()
+                            accepted_serials = serial_records.filter(
+                                status=AsnSerialRecord.ACCEPTED,
+                            ).count()
+                            if missing_serials or exception_serials or accepted_serials < int(data['qty']):
+                                raise APIException({
+                                    "detail": "SN verification is incomplete; resolve missing or exception serials before putaway"
+                                })
                         staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                                           id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
                         move_qty = qs.goods_actual_qty - qs.sorted_qty - int(data['qty'])

@@ -17,6 +17,7 @@ urlpatterns = [
     path('', TemplateView.as_view(template_name='dist/spa/index.html')),
     path('myip/', views.myip, name='myip'),
     path('asn/', include('asn.urls')),
+    path('asn/serial/', include('asnserial.urls')),
     path('dn/', include('dn.urls')),
     path('staff/', include('staff.urls')),
     path('binset/', include('binset.urls')),
