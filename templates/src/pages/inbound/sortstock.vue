@@ -62,6 +62,9 @@
                {{ props.row.update_time }}
              </q-td>
              <q-td key="action" :props="props" style="width: 50px">
+               <q-btn round flat push color="teal" icon="qr_code_2" @click="openSerialPanel(props.row)">
+                 <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">SN control</q-tooltip>
+               </q-btn>
                <q-btn round flat push color="purple" icon="move_to_inbox" @click="MoveToBin(props.row)">
                  <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">
                    {{ $t('putaway') }}
@@ -148,6 +151,11 @@
          </div>
        </q-card>
      </q-dialog>
+     <asn-serial-panel
+       v-model="serialPanelOpen"
+       :asn-code="serialAsnCode"
+       :goods-code="serialGoodsCode"
+     />
     </div>
 </template>
     <router-view />
@@ -155,9 +163,13 @@
 <script>
 import { getauth, postauth } from 'boot/axios_request'
 import { SessionStorage } from 'quasar'
+import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
 
 export default {
   name: 'Pagesorted',
+  components: {
+    AsnSerialPanel
+  },
   data () {
     return {
       openid: '',
@@ -197,10 +209,18 @@ export default {
       current: 1,
       max: 0,
       total: 0,
-      paginationIpt: 1
+      paginationIpt: 1,
+      serialPanelOpen: false,
+      serialAsnCode: '',
+      serialGoodsCode: ''
     }
   },
   methods: {
+    openSerialPanel (e) {
+      this.serialAsnCode = e.asn_code
+      this.serialGoodsCode = e.goods_code
+      this.serialPanelOpen = true
+    },
     getList () {
       var _this = this
       if (_this.$q.localStorage.has('auth')) {

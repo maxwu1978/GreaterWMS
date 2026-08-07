@@ -67,6 +67,16 @@
                 round
                 flat
                 push
+                color="teal"
+                icon="qr_code_2"
+                @click="openSerialPanel(props.row)"
+              >
+                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">SN control</q-tooltip>
+              </q-btn>
+              <q-btn
+                round
+                flat
+                push
                 color="positive"
                 icon="img:statics/inbound/preloadstock.png"
                 @click="preloadData(props.row)"
@@ -689,6 +699,10 @@
         </div>
       </q-card>
     </q-dialog>
+    <asn-serial-panel
+      v-model="serialPanelOpen"
+      :asn-code="serialAsnCode"
+    />
   </div>
 </template>
 <router-view />
@@ -696,9 +710,13 @@
 <script>
 import { getauth, postauth, putauth, deleteauth, ViewPrintAuth } from 'boot/axios_request'
 import { SessionStorage, LocalStorage } from 'quasar'
+import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
 
 export default {
   name: 'Pageasnlist',
+  components: {
+    AsnSerialPanel
+  },
   data () {
     return {
       openid: '',
@@ -785,10 +803,16 @@ export default {
       current: 1,
       max: 0,
       total: 0,
-      paginationIpt: 1
+      paginationIpt: 1,
+      serialPanelOpen: false,
+      serialAsnCode: ''
     }
   },
   methods: {
+    openSerialPanel (e) {
+      this.serialAsnCode = e.asn_code
+      this.serialPanelOpen = true
+    },
     getList () {
       var _this = this
       if (LocalStorage.has('auth')) {

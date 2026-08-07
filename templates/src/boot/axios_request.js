@@ -48,9 +48,12 @@ axiosInstanceAuth.interceptors.request.use(
     const auth = LocalStorage.getItem('auth')
     const login = SessionStorage.getItem('axios_check')
     if (auth || login) {
-      config.headers.post['Content-Type'] = 'application/json, charset="utf-8"'
-      config.headers.patch['Content-Type'] = 'application/json, charset="utf-8"'
-      config.headers.put['Content-Type'] = 'application/json, charset="utf-8"'
+      const isFormData = typeof FormData !== 'undefined' && config.data instanceof FormData
+      if (!isFormData) {
+        config.headers.post['Content-Type'] = 'application/json, charset="utf-8"'
+        config.headers.patch['Content-Type'] = 'application/json, charset="utf-8"'
+        config.headers.put['Content-Type'] = 'application/json, charset="utf-8"'
+      }
       config.headers.token = LocalStorage.getItem('openid')
       config.headers.operator = LocalStorage.getItem('login_id')
       config.headers.language = lang
@@ -605,6 +608,10 @@ function postauth (url, data) {
   return axiosInstanceAuth.post(url, data)
 }
 
+function postauthfile (url, data) {
+  return axiosInstanceAuth.post(url, data)
+}
+
 function putauth (url, data) {
   return axiosInstanceAuth.put(url, data)
 }
@@ -635,4 +642,4 @@ function getfile (url) {
 
 Vue.prototype.$axios = axios
 
-export { baseurl, get, versioncheck, post, getauth, postauth, putauth, deleteauth, patchauth, ViewPrintAuth, getfile, scangetauth, scanpostauth }
+export { baseurl, get, versioncheck, post, getauth, postauth, postauthfile, putauth, deleteauth, patchauth, ViewPrintAuth, getfile, scangetauth, scanpostauth }
