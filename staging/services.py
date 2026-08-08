@@ -84,18 +84,22 @@ def staging_slots(openid, flow=None):
     assignments = {
         item.bin_name: item
         for item in StagingAssignment.objects.filter(
-            openid=openid, status=StagingAssignment.ACTIVE
+            openid=openid,
+            status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
         )
     }
     result = []
     for slot in slots.order_by('staging_zone', 'staging_slot'):
         assignment = assignments.get(slot.bin_name)
+        occupied = assignment is not None and assignment.status == StagingAssignment.ACTIVE
+        reserved = assignment is not None and assignment.status == StagingAssignment.RESERVED
         result.append({
             'bin_name': slot.bin_name,
             'zone': slot.staging_zone,
             'slot': slot.staging_slot,
             'capacity': slot.slot_capacity,
-            'occupied': assignment is not None,
+            'occupied': occupied,
+            'reserved': reserved,
             'available': assignment is None,
             'assignment': None if assignment is None else {
                 'flow': assignment.flow,
@@ -130,7 +134,7 @@ def reserve_staging_slot(openid, flow, reference_code, bin_name, quantity=0,
         openid=openid,
         flow=flow,
         reference_code=str(reference_code),
-        status=StagingAssignment.ACTIVE,
+        status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
     ).first()
     if existing_reference:
         if existing_reference.bin_name != slot.bin_name:
@@ -138,7 +142,9 @@ def reserve_staging_slot(openid, flow, reference_code, bin_name, quantity=0,
         return existing_reference
 
     if StagingAssignment.objects.select_for_update().filter(
-        openid=openid, bin_name=slot.bin_name, status=StagingAssignment.ACTIVE
+        openid=openid,
+        bin_name=slot.bin_name,
+        status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
     ).exists():
         raise StagingError('Selected staging location is occupied')
 
@@ -150,6 +156,7 @@ def reserve_staging_slot(openid, flow, reference_code, bin_name, quantity=0,
         quantity=int(quantity or 0),
         bin_name=slot.bin_name,
         creater=str(creater or ''),
+        status=StagingAssignment.RESERVED,
     )
 
 
@@ -158,5 +165,15 @@ def release_staging_slot(openid, flow, reference_code):
         openid=openid,
         flow=flow,
         reference_code=str(reference_code),
-        status=StagingAssignment.ACTIVE,
+        status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
     ).update(status=StagingAssignment.RELEASED, release_time=timezone.now())
+
+
+def occupy_staging_slot(openid, flow, reference_code):
+    """Mark a reserved staging location occupied after physical unloading."""
+    return StagingAssignment.objects.filter(
+        openid=openid,
+        flow=flow,
+        reference_code=str(reference_code),
+        status=StagingAssignment.RESERVED,
+    ).update(status=StagingAssignment.ACTIVE)

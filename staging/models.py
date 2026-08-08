@@ -4,6 +4,7 @@ from django.db import models
 class StagingAssignment(models.Model):
     INBOUND = 'INBOUND'
     OUTBOUND = 'OUTBOUND'
+    RESERVED = 'RESERVED'
     ACTIVE = 'ACTIVE'
     RELEASED = 'RELEASED'
 
@@ -12,7 +13,15 @@ class StagingAssignment(models.Model):
     goods_code = models.CharField(max_length=255, default='', blank=True)
     quantity = models.BigIntegerField(default=0)
     bin_name = models.CharField(max_length=255)
-    status = models.CharField(max_length=12, default=ACTIVE, choices=[(ACTIVE, 'Active'), (RELEASED, 'Released')])
+    status = models.CharField(
+        max_length=12,
+        default=RESERVED,
+        choices=[
+            (RESERVED, 'Reserved'),
+            (ACTIVE, 'Occupied'),
+            (RELEASED, 'Released'),
+        ],
+    )
     creater = models.CharField(max_length=255, default='', blank=True)
     openid = models.CharField(max_length=255)
     create_time = models.DateTimeField(auto_now_add=True)

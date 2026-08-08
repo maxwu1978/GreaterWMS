@@ -1,7 +1,7 @@
 <template>
   <div class="staging-slot-picker">
     <div class="text-caption text-grey-7 q-mb-sm">
-      Select one available staging slot. Occupied slots show the active order.
+      Select one available staging slot. Reserved and occupied slots are unavailable.
     </div>
     <div v-if="loading" class="text-grey q-pa-sm">Loading staging occupancy...</div>
     <div v-for="zone in zones" :key="zone.name" class="q-mb-md">
@@ -17,13 +17,13 @@
             dense
             no-caps
             :outline="selected !== slot.bin_name"
-            :color="slot.occupied ? 'grey-6' : (selected === slot.bin_name ? 'primary' : 'positive')"
-            :disable="slot.occupied"
+            :color="slot.occupied ? 'grey-6' : (slot.reserved ? 'amber-7' : (selected === slot.bin_name ? 'primary' : 'positive'))"
+            :disable="slot.occupied || slot.reserved"
             :label="String(slot.slot).padStart(2, '0')"
             @click="selectSlot(slot)"
           >
-            <q-tooltip v-if="slot.occupied">
-              Occupied: {{ slot.assignment.reference_code }}
+            <q-tooltip v-if="slot.occupied || slot.reserved">
+              {{ slot.occupied ? 'Occupied' : 'Reserved' }}: {{ slot.assignment.reference_code }}
             </q-tooltip>
           </q-btn>
         </div>

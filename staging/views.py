@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from .models import StagingAssignment
 from .services import (
     StagingError,
+    occupy_staging_slot,
     release_staging_slot,
     reserve_staging_slot,
     staging_slots,
@@ -30,7 +31,9 @@ class StagingAssignmentsView(APIView):
         if flow:
             queryset = queryset.filter(flow=flow)
         if request.query_params.get('active', 'true').lower() == 'true':
-            queryset = queryset.filter(status=StagingAssignment.ACTIVE)
+            queryset = queryset.filter(
+                status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE)
+            )
         return Response([
             {
                 'id': item.id,
@@ -71,3 +74,13 @@ class StagingReleaseView(APIView):
             raise APIException({'detail': 'Flow and reference_code are required'})
         released = release_staging_slot(request.auth.openid, flow, reference_code)
         return Response({'released': released}, status=status.HTTP_200_OK)
+
+
+class StagingOccupyView(APIView):
+    def post(self, request):
+        flow = str(request.data.get('flow', '')).upper()
+        reference_code = request.data.get('reference_code', '')
+        if flow not in (StagingAssignment.INBOUND, StagingAssignment.OUTBOUND) or not reference_code:
+            raise APIException({'detail': 'Flow and reference_code are required'})
+        occupied = occupy_staging_slot(request.auth.openid, flow, reference_code)
+        return Response({'occupied': occupied}, status=status.HTTP_200_OK)

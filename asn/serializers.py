@@ -18,7 +18,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             openid=obj.openid,
             flow=StagingAssignment.INBOUND,
             reference_code=obj.asn_code,
-            status=StagingAssignment.ACTIVE,
+            status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
         ).first()
         return assignment.bin_name if assignment else ''
     class Meta:
@@ -75,7 +75,7 @@ class ASNDetailGetSerializer(serializers.ModelSerializer):
             openid=obj.openid,
             flow=StagingAssignment.INBOUND,
             reference_code=obj.asn_code,
-            status=StagingAssignment.ACTIVE,
+            status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
         ).first()
         return assignment.bin_name if assignment else ''
     class Meta:

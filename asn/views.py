@@ -32,7 +32,7 @@ from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
 from asnserial.models import AsnSerialRecord
 from staging.models import StagingAssignment
-from staging.services import StagingError, release_staging_slot, reserve_staging_slot
+from staging.services import StagingError, occupy_staging_slot, release_staging_slot, reserve_staging_slot
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -609,6 +609,11 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
         else:
             if qs.asn_status == 2:
                 qs.asn_status = 3
+                occupy_staging_slot(
+                    self.request.auth.openid,
+                    StagingAssignment.INBOUND,
+                    qs.asn_code,
+                )
                 asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=2, is_delete=False)
                 for i in range(len(asn_detail_list)):
