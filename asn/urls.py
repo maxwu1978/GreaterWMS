@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
 path(r'list/', views.AsnListViewSet.as_view({"get": "list", "post": "create"}), name="asnlist"),
+re_path(r'^cancel/(?P<pk>\d+)/$', views.AsnCancelView.as_view(), name="asn-cancel"),
 re_path(r'^list/(?P<pk>\d+)/$', views.AsnListViewSet.as_view({
     'get': 'retrieve',
     'put': 'update',

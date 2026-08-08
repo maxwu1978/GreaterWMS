@@ -9,6 +9,7 @@ from utils.md5 import Md5
 from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from .filter import AsnListFilter, AsnDetailFilter
 from rest_framework.exceptions import APIException
 from supplier.models import ListModel as supplier
@@ -23,6 +24,7 @@ from cyclecount.models import QTYRecorder as qtychangerecorder
 from cyclecount.models import CyclecountModeDayModel as cyclecount
 from django.db.models import Q
 from django.db.models import Sum
+from django.db import transaction
 from .serializers import FileListRenderSerializer, FileDetailRenderSerializer
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -144,6 +146,67 @@ class AsnListViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data, status=200, headers=headers)
             else:
                 raise APIException({"detail": "This ASN Status Is Not '1'"})
+
+
+class AsnCancelView(APIView):
+    """Cancel a pre-delivery or pre-unload ASN without leaving stock residue."""
+
+    @transaction.atomic
+    def post(self, request, pk):
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=request.auth.openid,
+            id=pk,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({"detail": "ASN does not exist"})
+        if asn.asn_status not in (1, 2):
+            raise APIException({"detail": "Only ASN Status 1 or 2 can be cancelled"})
+
+        details = list(AsnDetailModel.objects.select_for_update().filter(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+            is_delete=False,
+        ))
+        for detail in details:
+            stock = stocklist.objects.select_for_update().filter(
+                openid=request.auth.openid,
+                goods_code=str(detail.goods_code),
+            ).first()
+            if stock is None:
+                raise APIException({"detail": "Stock record does not exist for %s" % detail.goods_code})
+            quantity = int(detail.goods_qty)
+            if asn.asn_status == 1:
+                stock.asn_stock = max(0, stock.asn_stock - quantity)
+            else:
+                stock.pre_load_stock = max(0, stock.pre_load_stock - quantity)
+            stock.goods_qty = max(0, stock.goods_qty - quantity)
+            stock.save()
+
+        if asn.asn_status == 2:
+            release_staging_slot(request.auth.openid, StagingAssignment.INBOUND, asn.asn_code)
+
+        # Serial records have no soft-delete field in the current schema. They
+        # are scoped to the cancelled ASN and must not remain searchable.
+        from asnserial.models import AsnSerialRecord
+        serial_deleted, _ = AsnSerialRecord.objects.filter(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+        ).delete()
+        detail_count = len(details)
+        AsnDetailModel.objects.filter(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+            is_delete=False,
+        ).update(is_delete=True)
+        asn.is_delete = True
+        asn.save()
+        return Response({
+            "detail": "ASN cancelled",
+            "asn_code": asn.asn_code,
+            "detail_count": detail_count,
+            "serial_deleted": serial_deleted,
+        }, status=200)
 
 class AsnDetailViewSet(viewsets.ModelViewSet):
     """
