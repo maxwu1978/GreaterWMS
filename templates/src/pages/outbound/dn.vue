@@ -782,6 +782,11 @@
               <q-icon name="cancel" @click.stop="dispatchFormData.driver = ''" class="cursor-pointer" />
             </template>
           </q-select>
+          <StagingSlotPicker
+            flow="OUTBOUND"
+            v-model="dispatchFormData.staging_bin"
+            class="q-mt-md"
+          />
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="dispatchDataCancel()">{{ $t('cancel') }}</q-btn>
@@ -845,9 +850,13 @@
 <script>
 import { getauth, postauth, putauth, deleteauth, ViewPrintAuth } from 'boot/axios_request'
 import { LocalStorage } from 'quasar'
+import StagingSlotPicker from '../../components/StagingSlotPicker.vue'
 
 export default {
   name: 'Pagednlist',
+  components: {
+    StagingSlotPicker
+  },
   data () {
     return {
       openid: '',
@@ -933,7 +942,8 @@ export default {
       dispatchForm: false,
       dispatchFormData: {
         dn_code: '',
-        driver: ''
+        driver: '',
+        staging_bin: ''
       },
       podid: 0,
       podForm: false,
@@ -1722,13 +1732,14 @@ export default {
         })
       } else {
         _this.dispatchFormData.dn_code = e.dn_code
+        _this.dispatchFormData.staging_bin = ''
         _this.dispatchid = e.id
         _this.dispatchForm = true
       }
     },
     dispatchDataCancel () {
       var _this = this
-      _this.dispatchFormData = { dn_code: '', driver: '' }
+      _this.dispatchFormData = { dn_code: '', driver: '', staging_bin: '' }
       _this.dispatchForm = false
     },
     dispatchDataSubmit () {

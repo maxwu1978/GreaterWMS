@@ -10,6 +10,17 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     creater = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
+    staging_bin = serializers.SerializerMethodField()
+
+    def get_staging_bin(self, obj):
+        from staging.models import StagingAssignment
+        assignment = StagingAssignment.objects.filter(
+            openid=obj.openid,
+            flow=StagingAssignment.INBOUND,
+            reference_code=obj.asn_code,
+            status=StagingAssignment.ACTIVE,
+        ).first()
+        return assignment.bin_name if assignment else ''
     class Meta:
         model = AsnListModel
         exclude = ['openid', 'is_delete', ]
@@ -56,6 +67,17 @@ class ASNDetailGetSerializer(serializers.ModelSerializer):
     creater = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
+    staging_bin = serializers.SerializerMethodField()
+
+    def get_staging_bin(self, obj):
+        from staging.models import StagingAssignment
+        assignment = StagingAssignment.objects.filter(
+            openid=obj.openid,
+            flow=StagingAssignment.INBOUND,
+            reference_code=obj.asn_code,
+            status=StagingAssignment.ACTIVE,
+        ).first()
+        return assignment.bin_name if assignment else ''
     class Meta:
         model = AsnDetailModel
         exclude = ['openid', 'is_delete', ]

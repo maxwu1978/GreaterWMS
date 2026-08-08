@@ -21,6 +21,7 @@ urlpatterns = [
     path('dn/', include('dn.urls')),
     path('staff/', include('staff.urls')),
     path('binset/', include('binset.urls')),
+    path('staging/', include('staging.urls')),
     path('binsize/', include('binsize.urls')),
     path('binproperty/', include('binproperty.urls')),
     path('capital/', include('capital.urls')),

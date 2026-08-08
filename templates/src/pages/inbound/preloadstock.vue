@@ -37,6 +37,9 @@
                <q-td key="asn_code" :props="props">
                  {{ props.row.asn_code }}
                </q-td>
+               <q-td key="staging_bin" :props="props">
+                 {{ props.row.staging_bin || '-' }}
+               </q-td>
                <q-td key="goods_code" :props="props">
                  {{ props.row.goods_code }}
                </q-td>
@@ -118,6 +121,7 @@ export default {
       warehouse_list: [],
       columns: [
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
+        { name: 'staging_bin', label: 'Staging Location', field: 'staging_bin', align: 'center' },
         { name: 'goods_code', label: this.$t('goods.view_goodslist.goods_code'), field: 'goods_code', align: 'center' },
         { name: 'goods_desc', label: this.$t('goods.view_goodslist.goods_desc'), field: 'goods_desc', align: 'center' },
         { name: 'goods_qty', label: this.$t('inbound.view_asn.goods_qty'), field: 'goods_qty', align: 'center' },

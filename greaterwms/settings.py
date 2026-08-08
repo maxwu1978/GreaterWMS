@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'asnserial.apps.AsnserialConfig',
     'dn.apps.DnConfig',
     'binset.apps.BinsetConfig',
+    'staging.apps.StagingConfig',
     'binsize.apps.BinsizeConfig',
     'binproperty.apps.BinpropertyConfig',
     'customer.apps.CustomerConfig',

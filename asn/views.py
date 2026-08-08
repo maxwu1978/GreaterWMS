@@ -31,6 +31,8 @@ from rest_framework.settings import api_settings
 from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
 from asnserial.models import AsnSerialRecord
+from staging.models import StagingAssignment
+from staging.services import StagingError, release_staging_slot, reserve_staging_slot
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -531,9 +533,24 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
             if qs.asn_status == 1:
                 if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=1, is_delete=False).exists():
+                    staging_bin = request.data.get('staging_bin')
+                    if not staging_bin:
+                        raise APIException({"detail": "Please select an inbound staging location"})
                     qs.asn_status = 2
                     asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                     asn_status=1, is_delete=False)
+                    try:
+                        reserve_staging_slot(
+                            self.request.auth.openid,
+                            StagingAssignment.INBOUND,
+                            qs.asn_code,
+                            staging_bin,
+                            asn_detail_list.aggregate(sum=Sum('goods_qty'))['sum'] or 0,
+                            '',
+                            request.META.get('HTTP_OPERATOR', ''),
+                        )
+                    except StagingError as exc:
+                        raise APIException({"detail": str(exc)})
                     for i in range(len(asn_detail_list)):
                         goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
                                                                     goods_code=str(asn_detail_list[i].goods_code)).first()
@@ -604,6 +621,7 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
                     goods_qty_change.save()
                 asn_detail_list.update(asn_status=3)
                 qs.save()
+                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
                 serializer = self.get_serializer(qs, many=False)
                 headers = self.get_success_headers(serializer.data)
                 return Response(serializer.data, status=200, headers=headers)
@@ -829,6 +847,10 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                     bin_detail = binset.objects.filter(openid=self.request.auth.openid,
                                                        bin_name=str(data['bin_name']),
                                                        is_delete=False).first()
+                    if bin_detail is None:
+                        raise APIException({"detail": "Bin does not exist"})
+                    if bin_detail.location_role == 'STAGING':
+                        raise APIException({"detail": "Staging locations cannot be used for final putaway"})
                     asn_detail = AsnListModel.objects.filter(openid=self.request.auth.openid,
                                                              asn_code=str(data['asn_code'])).first()
                     goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,

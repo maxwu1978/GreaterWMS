@@ -596,7 +596,13 @@
             <q-tooltip content-class="bg-amber text-black shadow-4">{{ $t('index.close') }}</q-tooltip>
           </q-btn>
         </q-bar>
-        <q-card-section style="max-height: 325px; width: 400px" class="scroll">{{ $t('deletetip') }}</q-card-section>
+        <q-card-section style="max-height: 500px; width: 500px" class="scroll">
+          <div class="text-subtitle2 q-mb-sm">{{ $t('confirmdelivery') }}: choose staging location</div>
+          <StagingSlotPicker
+            flow="INBOUND"
+            v-model="preloadStagingBin"
+          />
+        </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="preloadDataCancel()">{{ $t('cancel') }}</q-btn>
           <q-btn color="primary" @click="preloadDataSubmit()">{{ $t('submit') }}</q-btn>
@@ -711,11 +717,13 @@
 import { getauth, postauth, putauth, deleteauth, ViewPrintAuth } from 'boot/axios_request'
 import { SessionStorage, LocalStorage } from 'quasar'
 import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
+import StagingSlotPicker from '../../components/StagingSlotPicker.vue'
 
 export default {
   name: 'Pageasnlist',
   components: {
-    AsnSerialPanel
+    AsnSerialPanel,
+    StagingSlotPicker
   },
   data () {
     return {
@@ -788,6 +796,7 @@ export default {
       deleteid: 0,
       preloadForm: false,
       preloadid: 0,
+      preloadStagingBin: '',
       presortForm: false,
       presortid: 0,
       viewForm: false,
@@ -1251,11 +1260,22 @@ export default {
       } else {
         _this.preloadForm = true
         _this.preloadid = e.id
+        _this.preloadStagingBin = ''
       }
     },
     preloadDataSubmit () {
       var _this = this
-      postauth(_this.pathname + 'preload/' + _this.preloadid + '/', {})
+      if (!_this.preloadStagingBin) {
+        _this.$q.notify({
+          message: 'Please select an inbound staging location',
+          icon: 'close',
+          color: 'negative'
+        })
+        return
+      }
+      postauth(_this.pathname + 'preload/' + _this.preloadid + '/', {
+        staging_bin: _this.preloadStagingBin
+      })
         .then(res => {
           _this.table_list = []
           _this.preloadDataCancel()
@@ -1280,6 +1300,7 @@ export default {
       var _this = this
       _this.preloadForm = false
       _this.preloadid = 0
+      _this.preloadStagingBin = ''
     },
     presortData (e) {
       var _this = this

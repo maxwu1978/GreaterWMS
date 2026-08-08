@@ -32,6 +32,8 @@ from django.utils import timezone
 from .files import FileListRenderCN, FileListRenderEN, FileDetailRenderCN, FileDetailRenderEN
 from rest_framework.settings import api_settings
 from staff.models import ListModel as staff
+from staging.models import StagingAssignment
+from staging.services import StagingError, release_staging_slot, reserve_staging_slot
 
 class DnListViewSet(viewsets.ModelViewSet):
     """
@@ -1849,8 +1851,10 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
         if qs.dn_status != 4:
             raise APIException({"detail": "This DN Status Not Picked"})
         else:
-            qs.dn_status = 5
             data = self.request.data
+            staging_bin = data.get('staging_bin')
+            if not staging_bin:
+                raise APIException({"detail": "Please select an outbound staging location"})
             staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                               id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
             if driverlist.objects.filter(openid=self.request.auth.openid,
@@ -1863,6 +1867,19 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                                                          dn_code=str(data['dn_code']),
                                                          dn_status=4, customer=qs.customer,
                                                          )
+                try:
+                    reserve_staging_slot(
+                        self.request.auth.openid,
+                        StagingAssignment.OUTBOUND,
+                        qs.dn_code,
+                        staging_bin,
+                        dn_detail.aggregate(sum=Sum('picked_qty'))['sum'] or 0,
+                        '',
+                        request.META.get('HTTP_OPERATOR', ''),
+                    )
+                except StagingError as exc:
+                    raise APIException({"detail": str(exc)})
+                qs.dn_status = 5
                 pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
                                                                   dn_code=str(data['dn_code']))
                 for i in range(len(dn_detail)):
@@ -1900,6 +1917,7 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                                               contact=driver.contact,
                                               creater=str(staff_name))
                 qs.save()
+                release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
                 return Response({"detail": "success"}, status=200)
             else:
                 raise APIException({"detail": "Driver Does Not Exists"})
