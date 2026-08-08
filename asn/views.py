@@ -208,6 +208,45 @@ class AsnCancelView(APIView):
             "serial_deleted": serial_deleted,
         }, status=200)
 
+
+class AsnCleanupCancelledSerialsView(APIView):
+    """Remove serial records left by the legacy soft-delete path."""
+
+    @transaction.atomic
+    def post(self, request):
+        asn_codes = request.data.get('asn_codes') or []
+        if not isinstance(asn_codes, list) or not asn_codes:
+            raise APIException({"detail": "asn_codes must be a non-empty list"})
+        if len(asn_codes) > 100:
+            raise APIException({"detail": "A maximum of 100 ASN codes can be cleaned per request"})
+
+        codes = [str(code).strip() for code in asn_codes if str(code).strip()]
+        deleted_orders = set(AsnListModel.objects.filter(
+            openid=request.auth.openid,
+            asn_code__in=codes,
+            is_delete=True,
+        ).values_list('asn_code', flat=True))
+        live_orders = set(AsnListModel.objects.filter(
+            openid=request.auth.openid,
+            asn_code__in=codes,
+            is_delete=False,
+        ).values_list('asn_code', flat=True))
+        blocked = sorted(deleted_orders & live_orders)
+        if blocked:
+            raise APIException({"detail": "Cannot clean codes that also have an active ASN", "asn_codes": blocked})
+
+        eligible = sorted(deleted_orders - live_orders)
+        serial_deleted, _ = AsnSerialRecord.objects.filter(
+            openid=request.auth.openid,
+            asn_code__in=eligible,
+        ).delete()
+        return Response({
+            "detail": "Cancelled ASN serial records cleaned",
+            "asn_codes": eligible,
+            "serial_deleted": serial_deleted,
+            "not_found": sorted(set(codes) - set(eligible)),
+        }, status=200)
+
 class AsnDetailViewSet(viewsets.ModelViewSet):
     """
         retrieve:
