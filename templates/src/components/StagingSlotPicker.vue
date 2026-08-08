@@ -16,9 +16,9 @@
             class="full-width"
             dense
             no-caps
-            :outline="selected !== slot.bin_name"
-            :color="slot.occupied ? 'grey-6' : (slot.reserved ? 'amber-7' : (selected === slot.bin_name ? 'primary' : 'positive'))"
-            :disable="slot.occupied || slot.reserved"
+            :outline="!isSelected(slot.bin_name)"
+            :color="slot.occupied ? 'grey-6' : (slot.reserved ? 'amber-7' : (isSelected(slot.bin_name) ? 'primary' : 'positive'))"
+            :disable="slot.occupied || slot.reserved || (!isSelected(slot.bin_name) && multiple && maxSelections > 0 && selected.length >= maxSelections)"
             :label="String(slot.slot).padStart(2, '0')"
             @click="selectSlot(slot)"
           >
@@ -29,8 +29,8 @@
         </div>
       </div>
     </div>
-    <div v-if="selected" class="text-primary text-caption q-mt-sm">
-      Selected: {{ selected }}
+    <div v-if="selected.length" class="text-primary text-caption q-mt-sm">
+      Selected {{ selected.length }}: {{ selected.join(', ') }}
     </div>
   </div>
 </template>
@@ -42,13 +42,15 @@ export default {
   name: 'StagingSlotPicker',
   props: {
     flow: { type: String, required: true },
-    value: { type: String, default: '' }
+    value: { type: [String, Array], default: '' },
+    multiple: { type: Boolean, default: false },
+    maxSelections: { type: Number, default: 1 }
   },
   data () {
     return {
       loading: false,
       slots: [],
-      selected: this.value
+      selected: this.normalize(this.value)
     }
   },
   computed: {
@@ -65,10 +67,17 @@ export default {
   },
   watch: {
     value (value) {
-      this.selected = value
+      this.selected = this.normalize(value)
     }
   },
   methods: {
+    normalize (value) {
+      if (Array.isArray(value)) return value.slice()
+      return value ? [value] : []
+    },
+    isSelected (binName) {
+      return this.selected.indexOf(binName) !== -1
+    },
     load () {
       this.loading = true
       getauth('staging/slots/?flow=' + encodeURIComponent(this.flow))
@@ -81,8 +90,19 @@ export default {
         })
     },
     selectSlot (slot) {
-      this.selected = slot.bin_name
-      this.$emit('input', slot.bin_name)
+      if (this.multiple) {
+        const index = this.selected.indexOf(slot.bin_name)
+        if (index >= 0) {
+          this.selected.splice(index, 1)
+        } else {
+          if (this.maxSelections > 0 && this.selected.length >= this.maxSelections) return
+          this.selected.push(slot.bin_name)
+        }
+        this.$emit('input', this.selected.slice())
+      } else {
+        this.selected = [slot.bin_name]
+        this.$emit('input', slot.bin_name)
+      }
       this.$emit('select', slot)
     },
     refresh () {

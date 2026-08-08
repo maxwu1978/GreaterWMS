@@ -32,7 +32,12 @@ from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
 from asnserial.models import AsnSerialRecord
 from staging.models import StagingAssignment
-from staging.services import StagingError, occupy_staging_slot, release_staging_slot, reserve_staging_slot
+from staging.services import (
+    StagingError,
+    occupy_staging_slot,
+    release_staging_slot,
+    reserve_staging_slots,
+)
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -533,24 +538,28 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
             if qs.asn_status == 1:
                 if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=1, is_delete=False).exists():
-                    staging_bin = request.data.get('staging_bin')
-                    if not staging_bin:
-                        raise APIException({"detail": "Please select an inbound staging location"})
-                    qs.asn_status = 2
                     asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                     asn_status=1, is_delete=False)
+                    quantity = asn_detail_list.aggregate(sum=Sum('goods_qty'))['sum'] or 0
+                    staging_bins = request.data.get('staging_bins')
+                    if not staging_bins:
+                        staging_bin = request.data.get('staging_bin')
+                        staging_bins = [staging_bin] if staging_bin else []
+                    if not staging_bins:
+                        raise APIException({"detail": "Please select inbound staging locations"})
                     try:
-                        reserve_staging_slot(
+                        reserve_staging_slots(
                             self.request.auth.openid,
                             StagingAssignment.INBOUND,
                             qs.asn_code,
-                            staging_bin,
-                            asn_detail_list.aggregate(sum=Sum('goods_qty'))['sum'] or 0,
+                            staging_bins,
+                            quantity,
                             '',
                             request.META.get('HTTP_OPERATOR', ''),
                         )
                     except StagingError as exc:
                         raise APIException({"detail": str(exc)})
+                    qs.asn_status = 2
                     for i in range(len(asn_detail_list)):
                         goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
                                                                     goods_code=str(asn_detail_list[i].goods_code)).first()

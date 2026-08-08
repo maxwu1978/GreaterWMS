@@ -160,6 +160,68 @@ def reserve_staging_slot(openid, flow, reference_code, bin_name, quantity=0,
     )
 
 
+@transaction.atomic
+def reserve_staging_slots(openid, flow, reference_code, bin_names, quantity=0,
+                          goods_code='', creater=''):
+    """Reserve one standard staging slot for each inbound load unit."""
+    if flow != StagingAssignment.INBOUND:
+        raise StagingError('Multiple staging locations are supported for inbound loads only')
+    if not reference_code:
+        raise StagingError('Reference code is required')
+    try:
+        quantity = int(quantity or 0)
+    except (TypeError, ValueError):
+        raise StagingError('Inbound quantity must be an integer')
+    names = [str(name).strip() for name in (bin_names or []) if str(name).strip()]
+    if quantity < 1:
+        raise StagingError('Inbound quantity must be greater than zero')
+    if len(names) != quantity or len(set(names)) != len(names):
+        raise StagingError('Select exactly %s standard staging locations' % quantity)
+
+    ensure_staging_slots(openid, creater=creater or 'system')
+    slots = list(Bin.objects.select_for_update().filter(
+        openid=openid,
+        bin_name__in=names,
+        location_role='STAGING',
+        staging_slot__gt=0,
+        is_delete=False,
+    ).filter(Q(staging_flow=flow) | Q(staging_flow='BOTH')))
+    if len(slots) != len(names):
+        raise StagingError('One or more selected locations are not valid staging slots')
+
+    active_statuses = (StagingAssignment.RESERVED, StagingAssignment.ACTIVE)
+    existing = list(StagingAssignment.objects.select_for_update().filter(
+        openid=openid,
+        flow=flow,
+        reference_code=str(reference_code),
+        status__in=active_statuses,
+    ))
+    existing_names = {item.bin_name for item in existing}
+    if existing_names:
+        if existing_names == set(names):
+            return existing
+        raise StagingError('This order already has staging locations')
+
+    occupied_names = set(StagingAssignment.objects.select_for_update().filter(
+        openid=openid,
+        bin_name__in=names,
+        status__in=active_statuses,
+    ).values_list('bin_name', flat=True))
+    if occupied_names:
+        raise StagingError('Selected staging locations are occupied: %s' % ', '.join(sorted(occupied_names)))
+
+    return [StagingAssignment.objects.create(
+        openid=openid,
+        flow=flow,
+        reference_code=str(reference_code),
+        goods_code=str(goods_code or ''),
+        quantity=1,
+        bin_name=name,
+        creater=str(creater or ''),
+        status=StagingAssignment.RESERVED,
+    ) for name in names]
+
+
 def release_staging_slot(openid, flow, reference_code):
     return StagingAssignment.objects.filter(
         openid=openid,

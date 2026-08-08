@@ -601,7 +601,12 @@
           <StagingSlotPicker
             flow="INBOUND"
             v-model="preloadStagingBin"
+            :multiple="true"
+            :max-selections="preloadRequiredSlots"
           />
+          <div class="text-caption text-grey-7 q-mt-sm">
+            Required standard staging locations: {{ preloadRequiredSlots }}
+          </div>
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="preloadDataCancel()">{{ $t('cancel') }}</q-btn>
@@ -796,7 +801,8 @@ export default {
       deleteid: 0,
       preloadForm: false,
       preloadid: 0,
-      preloadStagingBin: '',
+      preloadStagingBin: [],
+      preloadRequiredSlots: 0,
       presortForm: false,
       presortid: 0,
       viewForm: false,
@@ -1260,21 +1266,34 @@ export default {
       } else {
         _this.preloadForm = true
         _this.preloadid = e.id
-        _this.preloadStagingBin = ''
+        _this.preloadStagingBin = []
+        _this.preloadRequiredSlots = 0
+        getauth(_this.pathname + 'detail/?asn_code=' + e.asn_code).then(res => {
+          _this.preloadRequiredSlots = (res.results || []).reduce((total, item) => {
+            return total + Number(item.goods_qty || 0)
+          }, 0)
+        }).catch(err => {
+          _this.preloadForm = false
+          _this.$q.notify({
+            message: err.detail,
+            icon: 'close',
+            color: 'negative'
+          })
+        })
       }
     },
     preloadDataSubmit () {
       var _this = this
-      if (!_this.preloadStagingBin) {
+      if (!_this.preloadRequiredSlots || _this.preloadStagingBin.length !== _this.preloadRequiredSlots) {
         _this.$q.notify({
-          message: 'Please select an inbound staging location',
+          message: 'Please select exactly ' + _this.preloadRequiredSlots + ' staging locations',
           icon: 'close',
           color: 'negative'
         })
         return
       }
       postauth(_this.pathname + 'preload/' + _this.preloadid + '/', {
-        staging_bin: _this.preloadStagingBin
+        staging_bins: _this.preloadStagingBin
       })
         .then(res => {
           _this.table_list = []
@@ -1300,7 +1319,8 @@ export default {
       var _this = this
       _this.preloadForm = false
       _this.preloadid = 0
-      _this.preloadStagingBin = ''
+      _this.preloadStagingBin = []
+      _this.preloadRequiredSlots = 0
     },
     presortData (e) {
       var _this = this

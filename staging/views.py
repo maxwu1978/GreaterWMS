@@ -9,6 +9,7 @@ from .services import (
     occupy_staging_slot,
     release_staging_slot,
     reserve_staging_slot,
+    reserve_staging_slots,
     staging_slots,
 )
 
@@ -52,9 +53,26 @@ class StagingAssignmentsView(APIView):
     def post(self, request):
         data = request.data
         try:
+            flow = str(data.get('flow', '')).upper()
+            if data.get('bin_names'):
+                assignments = reserve_staging_slots(
+                    request.auth.openid,
+                    flow,
+                    data.get('reference_code', ''),
+                    data.get('bin_names'),
+                    data.get('quantity', 0),
+                    data.get('goods_code', ''),
+                    request.META.get('HTTP_OPERATOR', ''),
+                )
+                return Response({
+                    'assignments': [
+                        {'id': item.id, 'bin_name': item.bin_name, 'status': item.status}
+                        for item in assignments
+                    ]
+                })
             assignment = reserve_staging_slot(
                 request.auth.openid,
-                str(data.get('flow', '')).upper(),
+                flow,
                 data.get('reference_code', ''),
                 data.get('bin_name', ''),
                 data.get('quantity', 0),

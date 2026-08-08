@@ -11,16 +11,22 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     staging_bin = serializers.SerializerMethodField()
+    staging_bins = serializers.SerializerMethodField()
 
-    def get_staging_bin(self, obj):
+    def _get_staging_bins(self, obj):
         from staging.models import StagingAssignment
-        assignment = StagingAssignment.objects.filter(
+        return list(StagingAssignment.objects.filter(
             openid=obj.openid,
             flow=StagingAssignment.INBOUND,
             reference_code=obj.asn_code,
             status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
-        ).first()
-        return assignment.bin_name if assignment else ''
+        ).order_by('id').values_list('bin_name', flat=True))
+
+    def get_staging_bin(self, obj):
+        return ', '.join(self._get_staging_bins(obj))
+
+    def get_staging_bins(self, obj):
+        return self._get_staging_bins(obj)
     class Meta:
         model = AsnListModel
         exclude = ['openid', 'is_delete', ]
@@ -68,16 +74,22 @@ class ASNDetailGetSerializer(serializers.ModelSerializer):
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     staging_bin = serializers.SerializerMethodField()
+    staging_bins = serializers.SerializerMethodField()
 
-    def get_staging_bin(self, obj):
+    def _get_staging_bins(self, obj):
         from staging.models import StagingAssignment
-        assignment = StagingAssignment.objects.filter(
+        return list(StagingAssignment.objects.filter(
             openid=obj.openid,
             flow=StagingAssignment.INBOUND,
             reference_code=obj.asn_code,
             status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
-        ).first()
-        return assignment.bin_name if assignment else ''
+        ).order_by('id').values_list('bin_name', flat=True))
+
+    def get_staging_bin(self, obj):
+        return ', '.join(self._get_staging_bins(obj))
+
+    def get_staging_bins(self, obj):
+        return self._get_staging_bins(obj)
     class Meta:
         model = AsnDetailModel
         exclude = ['openid', 'is_delete', ]
