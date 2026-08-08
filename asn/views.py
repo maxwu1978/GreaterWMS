@@ -621,7 +621,6 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
                     goods_qty_change.save()
                 asn_detail_list.update(asn_status=3)
                 qs.save()
-                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
                 serializer = self.get_serializer(qs, many=False)
                 headers = self.get_success_headers(serializer.data)
                 return Response(serializer.data, status=200, headers=headers)
@@ -729,6 +728,9 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
             else:
                 qs.asn_status = 5
             qs.save()
+            if qs.asn_status == 5:
+                # No physical goods remain to be put away (for example, a fully short shipment).
+                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
             return Response({"detail": "success"}, status=200)
 
     def update(self, request, *args, **kwargs):
@@ -795,6 +797,8 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
             else:
                 qs.asn_status = 5
             qs.save()
+            if qs.asn_status == 5:
+                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
             return Response({"detail": "success"}, status=200)
 
 class MoveToBinViewSet(viewsets.ModelViewSet):
@@ -1018,6 +1022,8 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             if bin_detail.empty_label is True:
                                 bin_detail.empty_label = False
                                 bin_detail.save()
+                            if asn_detail.asn_status == 5:
+                                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, asn_detail.asn_code)
                         elif move_qty < 0:
                             raise APIException({"detail": "Move Qty must < Actual Arrive Qty"})
                         return Response({"detail": "success"}, status=200)
@@ -1178,6 +1184,8 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             if bin_detail.empty_label == True:
                                 bin_detail.empty_label = False
                                 bin_detail.save()
+                            if asn_detail.asn_status == 5:
+                                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, asn_detail.asn_code)
                 return Response({"detail": "success"}, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
