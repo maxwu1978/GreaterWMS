@@ -11,8 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 from django.core.management.utils import get_random_secret_key
-get_random_secret_key()
-SECRET_KEY = get_random_secret_key()
+
+SECRET_KEY = os.environ.get('SECRET_KEY') or get_random_secret_key()
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -101,11 +101,21 @@ WSGI_APPLICATION = 'greaterwms.wsgi.application'
 CSRF_COOKIE_SAMESITE = None
 
 # Database
-# Render provides DATABASE_URL for the managed PostgreSQL instance. Keep the
-# SQLite fallback so the project remains easy to run locally without a DB.
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL and urlparse(DATABASE_URL).scheme in ('postgres', 'postgresql'):
-    database_url = urlparse(DATABASE_URL)
+# Render provides DATABASE_URL for the managed PostgreSQL instance. SQLite is
+# only a local-development fallback; silently using it in production loses all
+# data when the service instance is recreated.
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = 'postgresql://' + DATABASE_URL[len('postgres://'):]
+
+database_url = urlparse(DATABASE_URL)
+is_render_runtime = bool(
+    os.environ.get('RENDER')
+    or os.environ.get('RENDER_SERVICE_ID')
+    or os.environ.get('RENDER_EXTERNAL_URL')
+)
+
+if database_url.scheme in ('postgres', 'postgresql'):
     database_options = {
         key: values[-1]
         for key, values in parse_qs(database_url.query).items()
@@ -125,6 +135,10 @@ if DATABASE_URL and urlparse(DATABASE_URL).scheme in ('postgres', 'postgresql'):
             'OPTIONS': database_options,
         }
     }
+elif is_render_runtime:
+    raise RuntimeError(
+        'DATABASE_URL must point to the Render PostgreSQL database in production.'
+    )
 else:
     DATABASES = {
         'default': {
