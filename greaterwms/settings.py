@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from urllib.parse import parse_qs, unquote, urlparse
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -100,17 +101,40 @@ WSGI_APPLICATION = 'greaterwms.wsgi.application'
 CSRF_COOKIE_SAMESITE = None
 
 # Database
-# https://docs.djangoproject.com/en/3.1/ref/settings/#databases
-# update
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        'OPTIONS': {
-            'timeout': 20,
+# Render provides DATABASE_URL for the managed PostgreSQL instance. Keep the
+# SQLite fallback so the project remains easy to run locally without a DB.
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL and urlparse(DATABASE_URL).scheme in ('postgres', 'postgresql'):
+    database_url = urlparse(DATABASE_URL)
+    database_options = {
+        key: values[-1]
+        for key, values in parse_qs(database_url.query).items()
+    }
+    if 'sslmode' not in database_options:
+        database_options['sslmode'] = 'require' if os.environ.get('RENDER') else 'prefer'
+
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': unquote(database_url.path.lstrip('/')),
+            'USER': unquote(database_url.username or ''),
+            'PASSWORD': unquote(database_url.password or ''),
+            'HOST': database_url.hostname,
+            'PORT': database_url.port or '',
+            'CONN_MAX_AGE': 60,
+            'OPTIONS': database_options,
         }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+            'OPTIONS': {
+                'timeout': 20,
+            }
+        }
+    }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
