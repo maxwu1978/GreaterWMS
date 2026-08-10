@@ -231,6 +231,20 @@ export default {
   font-weight: 700;
 }
 
+.operations-board__table >>> .q-table__middle {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.operations-board__table >>> .q-table {
+  min-width: 920px;
+}
+
+.operations-board__table >>> .q-table th,
+.operations-board__table >>> .q-table td {
+  white-space: nowrap;
+}
+
 .operations-board__table >>> .q-table tbody tr:hover {
   background: #f8f9fb;
 }
