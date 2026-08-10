@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from rest_framework import viewsets
 from asn.models import AsnDetailModel
 from dn.models import DnDetailModel
@@ -200,3 +202,158 @@ class SalesViewSet(viewsets.ModelViewSet):
         context['dataset'] = dataset
         context['series'] = series
         return Response(context)
+
+
+class OperationsBoardViewSet(viewsets.ViewSet):
+    """Return the active warehouse work queue for the GreaterWMS dashboard."""
+
+    def list(self, request, *args, **kwargs):
+        auth = getattr(request, 'auth', None)
+        openid = getattr(auth, 'openid', None)
+        if not openid:
+            return Response({'detail': 'auth required'}, status=401)
+
+        now = timezone.now()
+        items = []
+        items.extend(self._inbound_items(openid, now))
+        items.extend(self._outbound_items(openid, now))
+        lane_order = {'blocked': 0, 'delayed': 1, 'now': 2, 'next': 3}
+        items.sort(key=lambda item: (lane_order[item['lane']], item['sort_time']))
+
+        counts = {
+            'total': len(items),
+            'now': sum(item['lane'] == 'now' for item in items),
+            'next': sum(item['lane'] == 'next' for item in items),
+            'delayed': sum(item['lane'] == 'delayed' for item in items),
+            'blocked': sum(item['lane'] == 'blocked' for item in items),
+        }
+        for item in items:
+            item.pop('sort_time', None)
+        return Response({
+            'generated_at': now.isoformat(),
+            'items': items[:100],
+            'counts': counts,
+        })
+
+    @staticmethod
+    def _lane(timestamp, *, blocked, planned):
+        if blocked:
+            return 'blocked'
+        if timestamp and timezone.now() - timestamp > timedelta(hours=24):
+            return 'delayed'
+        return 'next' if planned else 'now'
+
+    @staticmethod
+    def _timestamp(row):
+        return row.update_time or row.create_time
+
+    def _inbound_items(self, openid, now):
+        status_map = {
+            1: ('Unload', 'Stage', 'asn', True),
+            2: ('Receive', 'Stage', 'predeliverystock', False),
+            3: ('Inspect', 'Stage', 'presortstock', False),
+            4: ('Putaway', 'Storage', 'sortstock', False),
+        }
+        grouped = {}
+        rows = AsnDetailModel.objects.filter(
+            openid=openid,
+            asn_status__in=status_map.keys(),
+            is_delete=False,
+        ).order_by('-update_time', '-id')
+        for row in rows:
+            current = grouped.setdefault(row.asn_code, {
+                'category': 'inbound',
+                'reference': row.asn_code,
+                'operation': 'Unload',
+                'location': 'Stage',
+                'action_route': 'asn',
+                'status': 99,
+                'quantity': 0,
+                'progress_quantity': 0,
+                'blocked': False,
+                'timestamp': self._timestamp(row),
+            })
+            if row.asn_status < current['status']:
+                current['status'] = row.asn_status
+            operation, location, route, planned = status_map[current['status']]
+            current.update({
+                'operation': operation,
+                'location': location,
+                'action_route': route,
+                'planned': planned,
+            })
+            current['quantity'] += int(row.goods_qty or 0)
+            current['progress_quantity'] += int(row.goods_actual_qty or row.sorted_qty or 0)
+            current['blocked'] = current['blocked'] or any([
+                row.goods_shortage_qty,
+                row.goods_more_qty,
+                row.goods_damage_qty,
+            ])
+            current['timestamp'] = max(current['timestamp'], self._timestamp(row))
+
+        return [self._format_item(item, now) for item in grouped.values()]
+
+    def _outbound_items(self, openid, now):
+        status_map = {
+            1: ('Release', 'Shipping', 'freshorder', True),
+            2: ('Release', 'Shipping', 'neworder', True),
+            3: ('Pick', 'Storage', 'pickstock', False),
+            4: ('Pack', 'Shipping', 'pickedstock', False),
+            5: ('Ship', 'Dock', 'shippedstock', False),
+        }
+        grouped = {}
+        rows = DnDetailModel.objects.filter(
+            openid=openid,
+            dn_status__in=status_map.keys(),
+            is_delete=False,
+        ).order_by('-update_time', '-id')
+        for row in rows:
+            current = grouped.setdefault(row.dn_code, {
+                'category': 'outbound',
+                'reference': row.dn_code,
+                'operation': 'Release',
+                'location': 'Shipping',
+                'action_route': 'neworder',
+                'status': 99,
+                'quantity': 0,
+                'progress_quantity': 0,
+                'blocked': False,
+                'timestamp': self._timestamp(row),
+            })
+            if row.dn_status < current['status']:
+                current['status'] = row.dn_status
+            operation, location, route, planned = status_map[current['status']]
+            current.update({
+                'operation': operation,
+                'location': location,
+                'action_route': route,
+                'planned': planned,
+            })
+            current['quantity'] += int(row.goods_qty or 0)
+            current['progress_quantity'] += int(row.picked_qty or row.delivery_actual_qty or 0)
+            current['blocked'] = current['blocked'] or bool(
+                row.back_order_label or row.delivery_shortage_qty or row.delivery_more_qty or row.delivery_damage_qty
+            )
+            current['timestamp'] = max(current['timestamp'], self._timestamp(row))
+
+        return [self._format_item(item, now) for item in grouped.values()]
+
+    def _format_item(self, item, now):
+        timestamp = item['timestamp']
+        lane = self._lane(timestamp, blocked=item['blocked'], planned=item['planned'])
+        quantity = item['quantity']
+        progress = min(item['progress_quantity'], quantity)
+        return {
+            'id': '%s-%s' % (item['category'], item['reference']),
+            'category': item['category'],
+            'operation': item['operation'],
+            'lane': lane,
+            'reference': item['reference'],
+            'location': item['location'],
+            'quantity': max(quantity - progress, 0),
+            'progress_quantity': progress,
+            'total_quantity': quantity,
+            'time': timestamp.strftime('%m-%d %H:%M') if timestamp else '',
+            'action_route': item['action_route'],
+            'sort_time': timestamp or now,
+        }

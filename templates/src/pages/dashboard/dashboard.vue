@@ -1,7 +1,8 @@
 <template>
-  <q-page class="flex flex-top">
+  <q-page class="flex flex-top column q-pa-md">
+    <operations-board />
     <template>
-      <div class="q-pa-md">
+      <div class="q-mt-md">
         <div class="q-gutter-y-md" style="max-width: 100%">
           <q-tabs v-model="detaillink">
             <transition appear enter-active-class="animated zoomIn">
@@ -40,8 +41,13 @@
 </template>
 
 <script>
+import OperationsBoard from './operationsBoard.vue'
+
 export default {
   name: 'Pagedashboard',
+  components: {
+    OperationsBoard
+  },
   data () {
     return {
       detaillink: 'outbounddashboard'
