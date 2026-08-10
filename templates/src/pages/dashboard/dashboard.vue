@@ -36,7 +36,7 @@
         </div>
       </div>
     </template>
-    <div class="main-table2"><router-view /></div>
+    <div class="operations-dashboard__details"><router-view /></div>
   </q-page>
 </template>
 
@@ -56,3 +56,10 @@ export default {
   methods: {}
 }
 </script>
+
+<style scoped>
+.operations-dashboard__details {
+  width: 100%;
+  margin-top: 16px;
+}
+</style>

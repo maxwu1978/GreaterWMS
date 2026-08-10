@@ -1,5 +1,5 @@
 <template>
-  <q-card class="shadow-11" :style="{ height: height }">
+  <q-card v-if="hasChartData" class="shadow-11" :style="{ height: height }">
     <q-card-section>
       <div class="text-h6 text-grey-8 text-weight-bolder">
         {{ selected_product + $t('index.chart') }}
@@ -7,6 +7,9 @@
       </div>
     </q-card-section>
     <q-card-section :style="{ height: height2, marginTop:'10px' }"><IEcharts :option="barChartOption" :resizable="true" /></q-card-section>
+  </q-card>
+  <q-card v-else class="shadow-11 dashboard-empty-state">
+    <q-card-section class="text-grey-6">{{ $t('no_data') }}</q-card-section>
   </q-card>
 </template>
 
@@ -74,6 +77,14 @@ export default {
       }
     }
   },
+  computed: {
+    hasChartData () {
+      return Array.isArray(this.barChartOption.dataset.source) &&
+        this.barChartOption.dataset.source.length > 0 &&
+        Array.isArray(this.barChartOption.series) &&
+        this.barChartOption.series.length > 0
+    }
+  },
   created() {
     var _this = this
     if (LocalStorage.has('openid')) {
@@ -113,3 +124,9 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+.dashboard-empty-state {
+  min-height: 56px;
+}
+</style>
