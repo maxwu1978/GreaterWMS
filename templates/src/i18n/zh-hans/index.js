@@ -361,6 +361,7 @@ export default {
   },
   inbound: {
     asn: '到货通知书',
+    packlist: '装箱单',
     predeliverystock: '待到货',
     preloadstock: '待卸货',
     presortstock: '待分拣',

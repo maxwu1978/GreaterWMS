@@ -984,23 +984,24 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             goods_code=qs.goods_code,
                         )
                         if serial_records.exists():
+                            strict_serial_check = serial_records.filter(is_expected=True).exists()
                             missing_serials = serial_records.filter(
                                 is_expected=True,
                                 is_received=False,
                             ).count()
-                            exception_serials = serial_records.filter(
-                                status__in=[
-                                    AsnSerialRecord.UNEXPECTED,
-                                    AsnSerialRecord.DUPLICATE,
-                                    AsnSerialRecord.WRONG_SKU,
-                                    AsnSerialRecord.DAMAGED,
-                                    AsnSerialRecord.REJECTED,
-                                ]
-                            ).count()
+                            exception_statuses = [
+                                AsnSerialRecord.DUPLICATE,
+                                AsnSerialRecord.WRONG_SKU,
+                                AsnSerialRecord.DAMAGED,
+                                AsnSerialRecord.REJECTED,
+                            ]
+                            if strict_serial_check:
+                                exception_statuses.append(AsnSerialRecord.UNEXPECTED)
+                            exception_serials = serial_records.filter(status__in=exception_statuses).count()
                             accepted_serials = serial_records.filter(
                                 status=AsnSerialRecord.ACCEPTED,
                             ).count()
-                            if missing_serials or exception_serials or accepted_serials < int(data['qty']):
+                            if exception_serials or (strict_serial_check and (missing_serials or accepted_serials < int(data['qty']))):
                                 raise APIException({
                                     "detail": "SN verification is incomplete; resolve missing or exception serials before putaway"
                                 })

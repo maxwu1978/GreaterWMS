@@ -27,7 +27,10 @@
         </div>
 
         <q-banner v-if="summary" :class="summary.ready_for_putaway ? 'bg-green-1' : 'bg-orange-1'">
-          {{ summary.ready_for_putaway ? 'SN check passed. Putaway is allowed.' : 'SN check is incomplete. Resolve missing or exception SN before putaway.' }}
+          <span v-if="summary.verification_mode === 'ASN_ONLY'">No Pack List is attached. Scans will be recorded as unverified physical receipt.</span>
+          <span v-else-if="summary.verification_mode === 'PACK_LIST_QTY'">Pack List quantities are attached, but it has no SN. Physical scans are recorded without SN matching.</span>
+          <span v-else-if="summary.verification_mode === 'PACK_LIST_PENDING'">Pack List SN is pending confirmation. Confirm the document before using it as the receiving baseline.</span>
+          <span v-else>{{ summary.ready_for_putaway ? 'SN check passed. Putaway is allowed.' : 'SN check is incomplete. Resolve missing or exception SN before putaway.' }}</span>
         </q-banner>
 
         <q-separator />

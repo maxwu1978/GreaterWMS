@@ -77,6 +77,16 @@
                 round
                 flat
                 push
+                color="indigo"
+                icon="description"
+                @click="openPackList(props.row)"
+              >
+                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">Pack List</q-tooltip>
+              </q-btn>
+              <q-btn
+                round
+                flat
+                push
                 color="positive"
                 icon="img:statics/inbound/preloadstock.png"
                 @click="preloadData(props.row)"
@@ -827,6 +837,9 @@ export default {
     openSerialPanel (e) {
       this.serialAsnCode = e.asn_code
       this.serialPanelOpen = true
+    },
+    openPackList (e) {
+      this.$router.push({ name: 'packlist', query: { asn_code: e.asn_code } })
     },
     getList () {
       var _this = this

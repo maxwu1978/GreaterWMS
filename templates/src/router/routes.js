@@ -71,6 +71,11 @@ const routes = [{
         path: 'asnfinish',
         name: 'asnfinish',
         component: () => import('pages/inbound/asnfinish.vue')
+      },
+      {
+        path: 'packlist',
+        name: 'packlist',
+        component: () => import('pages/inbound/packlist.vue')
       }
       ]
     },

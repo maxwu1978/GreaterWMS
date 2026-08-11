@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -10,7 +11,7 @@ from rest_framework.exceptions import APIException
 from asn.models import AsnDetailModel, AsnListModel
 from staff.models import ListModel as Staff
 
-from .models import AsnSerialRecord
+from .models import AsnSerialRecord, PackListDocument, PackListLine
 
 
 EXCEPTION_STATUSES = {
@@ -74,6 +75,54 @@ def _date_value(value):
     return None
 
 
+def _number(value, default=Decimal('0')):
+    try:
+        return Decimal(str(value or default).replace(',', '').strip())
+    except (InvalidOperation, AttributeError):
+        return default
+
+
+def _current_pack_list(openid, asn_code):
+    return PackListDocument.objects.filter(
+        openid=openid,
+        asn_code=asn_code,
+        status=PackListDocument.CONFIRMED,
+    ).order_by('-version', '-id').first()
+
+
+def _pack_list_json(document):
+    serials = document.serial_records.all()
+    return {
+        'id': document.id,
+        'asn_code': document.asn_code,
+        'version': document.version,
+        'source_type': document.source_type,
+        'source_file': document.source_file,
+        'source_url': document.source_url,
+        'status': document.status,
+        'has_serials': document.has_serials,
+        'note': document.note,
+        'created_by': document.created_by,
+        'confirmed_by': document.confirmed_by,
+        'confirmed_at': document.confirmed_at.isoformat() if document.confirmed_at else None,
+        'create_time': document.create_time.isoformat() if document.create_time else None,
+        'line_count': document.lines.count(),
+        'total_qty': sum(line.goods_qty for line in document.lines.all()),
+        'lines': [
+            {
+                'goods_code': line.goods_code,
+                'customer_goods_code': line.customer_goods_code,
+                'goods_qty': line.goods_qty,
+                'goods_desc': line.goods_desc,
+                'source_row': line.source_row,
+            }
+            for line in document.lines.all()
+        ],
+        'expected_serial_count': serials.filter(is_expected=True).count(),
+        'received_serial_count': serials.filter(is_received=True).count(),
+    }
+
+
 def _record_json(record):
     return {
         'id': record.id,
@@ -99,19 +148,36 @@ def _record_json(record):
         'received_by': record.received_by,
         'expected_at': record.expected_at.isoformat() if record.expected_at else None,
         'received_at': record.received_at.isoformat() if record.received_at else None,
+        'pack_list_id': record.pack_list_id,
     }
 
 
 def _summary(openid, asn_code):
     details = AsnDetailModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False)
     records = AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code)
+    pack_lists = PackListDocument.objects.filter(openid=openid, asn_code=asn_code)
+    current_pack_list = _current_pack_list(openid, asn_code)
+    pending_pack_list = pack_lists.filter(status=PackListDocument.PENDING).order_by('-version', '-id').first()
+    has_expected_serials = records.filter(is_expected=True).exists()
+    if current_pack_list and current_pack_list.has_serials:
+        verification_mode = 'PACK_LIST'
+    elif pending_pack_list and pending_pack_list.has_serials:
+        verification_mode = 'PACK_LIST_PENDING'
+    elif has_expected_serials:
+        verification_mode = 'MANUAL_SN'
+    elif current_pack_list:
+        verification_mode = 'PACK_LIST_QTY'
+    else:
+        verification_mode = 'ASN_ONLY'
+    strict_serial_check = has_expected_serials
+    exception_statuses = EXCEPTION_STATUSES if strict_serial_check else EXCEPTION_STATUSES - {AsnSerialRecord.UNEXPECTED}
     lines = []
     for detail in details:
         line_records = records.filter(goods_code=detail.goods_code)
         expected_count = line_records.filter(is_expected=True).count()
         received_count = line_records.filter(is_received=True).count()
         accepted_count = line_records.filter(status=AsnSerialRecord.ACCEPTED).count()
-        exception_count = line_records.filter(status__in=EXCEPTION_STATUSES).count()
+        exception_count = line_records.filter(status__in=exception_statuses).count()
         missing_count = line_records.filter(is_expected=True, is_received=False).count()
         lines.append({
             'goods_code': detail.goods_code,
@@ -123,24 +189,45 @@ def _summary(openid, asn_code):
             'exception_count': exception_count,
             'ready_for_putaway': (
                 not line_records.exists()
-                or (missing_count == 0 and exception_count == 0 and accepted_count >= detail.goods_actual_qty)
+                or (not strict_serial_check and exception_count == 0)
+                or (strict_serial_check and missing_count == 0 and exception_count == 0 and accepted_count >= detail.goods_actual_qty)
             ),
         })
-    exception_total = records.filter(status__in=EXCEPTION_STATUSES).count()
+    exception_total = records.filter(status__in=exception_statuses).count()
     missing_total = records.filter(is_expected=True, is_received=False).count()
     return {
         'asn_code': asn_code,
+        'pack_list_present': pack_lists.exists(),
+        'pack_list_confirmed': bool(current_pack_list),
+        'pack_list_has_serials': bool(current_pack_list and current_pack_list.has_serials),
+        'current_pack_list': _pack_list_json(current_pack_list) if current_pack_list else None,
+        'verification_mode': verification_mode,
+        'verification_note': (
+            'Receiving scans are not checked against a Pack List yet.'
+            if verification_mode == 'ASN_ONLY' else
+            'Pack List has quantities only; physical scans are recorded without SN validation.'
+            if verification_mode == 'PACK_LIST_QTY' else
+            'Pack List with expected SN is pending confirmation.'
+            if verification_mode == 'PACK_LIST_PENDING' else
+            'Expected SN comes from a Pack List.'
+            if verification_mode == 'PACK_LIST' else
+            'Expected SN was entered manually.'
+        ),
         'lines': lines,
         'total_expected_serials': records.filter(is_expected=True).count(),
         'total_received_serials': records.filter(is_received=True).count(),
         'total_accepted_serials': records.filter(status=AsnSerialRecord.ACCEPTED).count(),
         'total_exception_serials': exception_total,
         'total_missing_serials': missing_total,
-        'ready_for_putaway': records.count() == 0 or (exception_total == 0 and missing_total == 0),
+        'ready_for_putaway': (
+            records.count() == 0
+            or (not strict_serial_check and exception_total == 0)
+            or (strict_serial_check and exception_total == 0 and missing_total == 0)
+        ),
     }
 
 
-def _save_expected(openid, request, asn_code, goods_code, serial_number, row=None, source='manual'):
+def _save_expected(openid, request, asn_code, goods_code, serial_number, row=None, source='manual', pack_list=None):
     serial_number = _clean(serial_number)
     if not serial_number:
         raise APIException({'detail': 'Serial Number is required'})
@@ -164,6 +251,7 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         record.shipout_ref = _clean(metadata.get('shipout_ref')) or record.shipout_ref
         record.source_file = str(metadata.get('source_file') or record.source_file)
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
+        record.pack_list = pack_list or record.pack_list
         record.expected_by = _operator_name(request, openid)
         record.expected_at = record.expected_at or now
         if record.is_received and record.scanned_goods_code == goods_code and record.status not in EXCEPTION_STATUSES:
@@ -195,8 +283,14 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         is_expected=True,
         expected_by=_operator_name(request, openid),
         expected_at=now,
+        pack_list=pack_list,
     )
     return record, True
+
+
+def _scan_status_without_pack_list(openid, asn_code):
+    pack_list = _current_pack_list(openid, asn_code)
+    return AsnSerialRecord.UNEXPECTED if pack_list and pack_list.has_serials else AsnSerialRecord.UNVERIFIED
 
 
 def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, row=None, source='manual'):
@@ -235,7 +329,7 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         elif record.is_expected:
             record.status = AsnSerialRecord.ACCEPTED
         else:
-            record.status = AsnSerialRecord.UNEXPECTED
+            record.status = _scan_status_without_pack_list(openid, asn_code)
         record.save()
         return record, False
     record = AsnSerialRecord.objects.create(
@@ -251,7 +345,7 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         shipout_ref=_clean(metadata.get('shipout_ref')),
         source_file=str(metadata.get('source_file') or ''),
         source_row=int(metadata.get('source_row') or 0),
-        status=AsnSerialRecord.DAMAGED if damaged else AsnSerialRecord.UNEXPECTED,
+        status=AsnSerialRecord.DAMAGED if damaged else _scan_status_without_pack_list(openid, asn_code),
         is_expected=False,
         is_received=True,
         scan_count=1,
@@ -333,6 +427,255 @@ class ScanSerialView(APIView):
             row=data,
         )
         return Response({'detail': 'success', 'created': created, 'record': _record_json(record), 'summary': _summary(openid, asn_code)})
+
+
+def _header_key(value):
+    return ''.join(char for char in str(value or '').upper() if char.isalnum())
+
+
+def _first_column(index, names):
+    for name in names:
+        if _header_key(name) in index:
+            return index[_header_key(name)]
+    return None
+
+
+def _pack_list_rows_from_workbook(upload):
+    try:
+        workbook = load_workbook(upload, read_only=True, data_only=True)
+        sheet = workbook.active
+        values = list(sheet.iter_rows(values_only=True))
+    except Exception as exc:
+        raise APIException({'detail': 'Unable to read Pack List Excel file: ' + str(exc)})
+    if not values:
+        raise APIException({'detail': 'Pack List Excel file is empty'})
+    index = {
+        _header_key(value): position
+        for position, value in enumerate(values[0])
+        if _header_key(value)
+    }
+    sku_column = _first_column(index, ('SKU#', 'SKU', 'Goods Code', 'GoodsCode', 'Item', 'Part Number'))
+    qty_column = _first_column(index, ('Qty', 'Quantity', 'Total Qty', 'Goods Qty', 'ASN Qty'))
+    serial_column = _first_column(index, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
+    customer_sku_column = _first_column(index, ('Customer SKU', 'Customer Part Number', 'Customer Item'))
+    desc_column = _first_column(index, ('Description', 'Goods Description', 'Product Description'))
+    weight_column = _first_column(index, ('Weight', 'Goods Weight'))
+    volume_column = _first_column(index, ('Volume', 'Goods Volume'))
+    if sku_column is None:
+        raise APIException({'detail': 'Pack List must contain a SKU or Goods Code column'})
+    rows = []
+    for row_number, values_row in enumerate(values[1:], start=2):
+        def value_at(column):
+            return values_row[column] if column is not None and column < len(values_row) else ''
+
+        goods_code = _clean(value_at(sku_column))
+        serial_number = _clean(value_at(serial_column))
+        if not goods_code and not serial_number:
+            continue
+        qty_value = value_at(qty_column)
+        qty = int(_number(qty_value, Decimal('1') if serial_number else Decimal('0')))
+        rows.append({
+            'goods_code': goods_code,
+            'customer_goods_code': _clean(value_at(customer_sku_column)),
+            'serial_number': serial_number,
+            'goods_qty': qty,
+            'goods_desc': str(value_at(desc_column) or '').strip(),
+            'goods_weight': _number(value_at(weight_column)),
+            'goods_volume': _number(value_at(volume_column)),
+            'source_row': row_number,
+        })
+    if not rows:
+        raise APIException({'detail': 'Pack List contains no usable rows'})
+    return rows
+
+
+def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_url='', note=''):
+    asn = AsnListModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False).first()
+    if not asn:
+        raise APIException({'detail': 'ASN Code does not exists'})
+    normalized_rows = []
+    quantities = {}
+    serial_numbers = set()
+    has_serials = False
+    for position, raw_row in enumerate(rows, start=1):
+        if isinstance(raw_row, str):
+            raw_row = {'goods_code': raw_row, 'goods_qty': 1}
+        goods_code = _clean(raw_row.get('goods_code'))
+        serial_number = _clean(raw_row.get('serial_number'))
+        if not goods_code:
+            raise APIException({'detail': 'Pack List row %s is missing internal SKU' % position})
+        _, detail = _asn_detail(openid, asn_code, goods_code)
+        qty = int(_number(raw_row.get('goods_qty'), Decimal('1') if serial_number else Decimal('0')))
+        if qty <= 0:
+            raise APIException({'detail': 'Pack List row %s quantity must be greater than 0' % position})
+        quantities[goods_code] = quantities.get(goods_code, 0) + qty
+        if quantities[goods_code] > int(detail.goods_qty):
+            raise APIException({'detail': 'Pack List quantity exceeds ASN quantity for SKU ' + goods_code})
+        has_serials = has_serials or bool(serial_number)
+        if serial_number:
+            if serial_number in serial_numbers:
+                raise APIException({'detail': 'Pack List contains duplicate Serial Number ' + serial_number})
+            serial_numbers.add(serial_number)
+        normalized_rows.append({
+            'goods_code': goods_code,
+            'customer_goods_code': _clean(raw_row.get('customer_goods_code')),
+            'serial_number': serial_number,
+            'goods_qty': qty,
+            'goods_desc': str(raw_row.get('goods_desc') or '').strip(),
+            'goods_weight': _number(raw_row.get('goods_weight')),
+            'goods_volume': _number(raw_row.get('goods_volume')),
+            'source_row': int(raw_row.get('source_row') or position),
+        })
+    last_version = PackListDocument.objects.filter(openid=openid, asn_code=asn_code).order_by('-version').values_list('version', flat=True).first() or 0
+    document = PackListDocument.objects.create(
+        openid=openid,
+        asn_code=asn_code,
+        version=int(last_version) + 1,
+        source_type=source_type if source_type in dict(PackListDocument.SOURCE_TYPES) else 'MANUAL',
+        source_file=str(source_file or '')[:255],
+        source_url=str(source_url or '')[:1000],
+        has_serials=has_serials,
+        note=str(note or ''),
+        raw_payload={'row_count': len(normalized_rows), 'has_serials': has_serials},
+        created_by=_operator_name(request, openid),
+    )
+    for row in normalized_rows:
+        PackListLine.objects.create(
+            pack_list=document,
+            openid=openid,
+            asn_code=asn_code,
+            goods_code=row['goods_code'],
+            customer_goods_code=row['customer_goods_code'],
+            goods_qty=row['goods_qty'],
+            goods_desc=row['goods_desc'],
+            goods_weight=row['goods_weight'],
+            goods_volume=row['goods_volume'],
+            source_row=row['source_row'],
+        )
+        if row['serial_number']:
+            _save_expected(
+                openid,
+                request,
+                asn_code,
+                row['goods_code'],
+                row['serial_number'],
+                row=row,
+                source='pack_list',
+                pack_list=document,
+            )
+    return document
+
+
+def _reconcile_pack_list(document):
+    expected = {
+        record.serial_number: record.goods_code
+        for record in document.serial_records.filter(is_expected=True)
+    }
+    records = AsnSerialRecord.objects.filter(openid=document.openid, asn_code=document.asn_code)
+    for record in records.filter(status__in=[AsnSerialRecord.UNVERIFIED, AsnSerialRecord.UNEXPECTED]):
+        expected_goods_code = expected.get(record.serial_number)
+        record.pack_list = document
+        if expected_goods_code and expected_goods_code == record.goods_code:
+            record.is_expected = True
+            record.expected_goods_code = expected_goods_code
+            if record.damaged:
+                record.status = AsnSerialRecord.DAMAGED
+            elif record.scan_count > 1:
+                record.status = AsnSerialRecord.DUPLICATE
+            else:
+                record.status = AsnSerialRecord.ACCEPTED
+        elif document.has_serials:
+            record.status = AsnSerialRecord.UNEXPECTED
+        record.save(update_fields=['pack_list', 'is_expected', 'expected_goods_code', 'status', 'update_time'])
+
+
+class PackListListView(APIView):
+    def get(self, request):
+        openid = _openid(request)
+        asn_code = _clean(request.query_params.get('asn_code'))
+        documents = PackListDocument.objects.filter(openid=openid)
+        if asn_code:
+            documents = documents.filter(asn_code=asn_code)
+        return Response({
+            'count': documents.count(),
+            'results': [_pack_list_json(document) for document in documents],
+            'summary': _summary(openid, asn_code) if asn_code else None,
+        })
+
+
+class PackListCreateView(APIView):
+    def post(self, request):
+        openid = _openid(request)
+        data = request.data
+        asn_code = _clean(data.get('asn_code'))
+        rows = data.get('rows') or []
+        if not asn_code or not rows:
+            raise APIException({'detail': 'ASN Code and Pack List rows are required'})
+        with transaction.atomic():
+            document = _create_pack_list(
+                openid,
+                request,
+                asn_code,
+                rows,
+                source_type=str(data.get('source_type') or 'MANUAL').upper(),
+                source_url=data.get('source_url'),
+                note=data.get('note'),
+            )
+        return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, asn_code)})
+
+
+class PackListImportView(APIView):
+    def post(self, request):
+        openid = _openid(request)
+        upload = request.FILES.get('file')
+        asn_code = _clean(request.data.get('asn_code'))
+        if not upload:
+            raise APIException({'detail': 'Pack List Excel file is required'})
+        if upload.size > 20 * 1024 * 1024:
+            raise APIException({'detail': 'Pack List file is too large'})
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        rows = _pack_list_rows_from_workbook(upload)
+        with transaction.atomic():
+            document = _create_pack_list(
+                openid,
+                request,
+                asn_code,
+                rows,
+                source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
+                source_file=upload.name,
+                source_url=request.data.get('source_url'),
+                note=request.data.get('note'),
+            )
+        return Response({
+            'detail': 'success',
+            'document': _pack_list_json(document),
+            'summary': _summary(openid, asn_code),
+        })
+
+
+class PackListConfirmView(APIView):
+    def post(self, request):
+        openid = _openid(request)
+        try:
+            document_id = int(request.data.get('id'))
+        except (TypeError, ValueError):
+            raise APIException({'detail': 'Pack List id is required'})
+        document = PackListDocument.objects.filter(id=document_id, openid=openid).first()
+        if not document:
+            raise APIException({'detail': 'Pack List does not exist'})
+        with transaction.atomic():
+            PackListDocument.objects.filter(
+                openid=openid,
+                asn_code=document.asn_code,
+                status=PackListDocument.CONFIRMED,
+            ).exclude(id=document.id).update(status=PackListDocument.ARCHIVED)
+            document.status = PackListDocument.CONFIRMED
+            document.confirmed_by = _operator_name(request, openid)
+            document.confirmed_at = timezone.now()
+            document.save(update_fields=['status', 'confirmed_by', 'confirmed_at', 'update_time'])
+            _reconcile_pack_list(document)
+        return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, document.asn_code)})
 
 
 class SerialImportView(APIView):

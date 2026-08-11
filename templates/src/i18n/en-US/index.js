@@ -364,6 +364,7 @@ export default {
   },
   inbound: {
     asn: 'ASN',
+    packlist: 'Pack List',
     predeliverystock: 'Pre Delivery',
     preloadstock: 'Pre Load',
     presortstock: 'Sorting',

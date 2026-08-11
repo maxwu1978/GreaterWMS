@@ -1,6 +1,71 @@
 from django.db import models
 
 
+class PackListDocument(models.Model):
+    PENDING = 'PENDING'
+    CONFIRMED = 'CONFIRMED'
+    ARCHIVED = 'ARCHIVED'
+
+    STATUS_CHOICES = (
+        (PENDING, 'Pending confirmation'),
+        (CONFIRMED, 'Confirmed'),
+        (ARCHIVED, 'Archived'),
+    )
+
+    SOURCE_TYPES = (
+        ('UPLOAD', 'Uploaded file'),
+        ('EMAIL', 'Email attachment'),
+        ('GOOGLE_DRIVE', 'Google Drive'),
+        ('MANUAL', 'Manual entry'),
+    )
+
+    openid = models.CharField(max_length=255)
+    asn_code = models.CharField(max_length=255)
+    version = models.PositiveIntegerField(default=1)
+    source_type = models.CharField(max_length=32, choices=SOURCE_TYPES, default='UPLOAD')
+    source_file = models.CharField(max_length=255, blank=True, default='')
+    source_url = models.CharField(max_length=1000, blank=True, default='')
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=PENDING)
+    has_serials = models.BooleanField(default=False)
+    note = models.TextField(blank=True, default='')
+    raw_payload = models.JSONField(default=dict, blank=True)
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    confirmed_by = models.CharField(max_length=255, blank=True, default='')
+    confirmed_at = models.DateTimeField(blank=True, null=True)
+    create_time = models.DateTimeField(auto_now_add=True)
+    update_time = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'packlistdocument'
+        ordering = ['-version', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'asn_code', 'status']),
+            models.Index(fields=['openid', 'source_type']),
+        ]
+
+
+class PackListLine(models.Model):
+    pack_list = models.ForeignKey(PackListDocument, related_name='lines', on_delete=models.CASCADE)
+    openid = models.CharField(max_length=255)
+    asn_code = models.CharField(max_length=255)
+    goods_code = models.CharField(max_length=255)
+    customer_goods_code = models.CharField(max_length=255, blank=True, default='')
+    goods_qty = models.PositiveIntegerField(default=0)
+    goods_desc = models.CharField(max_length=1000, blank=True, default='')
+    goods_weight = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    goods_volume = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    source_row = models.PositiveIntegerField(default=0)
+    create_time = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'packlistline'
+        ordering = ['source_row', 'goods_code', 'id']
+        indexes = [
+            models.Index(fields=['openid', 'asn_code', 'goods_code']),
+            models.Index(fields=['pack_list', 'goods_code']),
+        ]
+
+
 class AsnSerialRecord(models.Model):
     EXPECTED = 'EXPECTED'
     ACCEPTED = 'ACCEPTED'
@@ -9,6 +74,7 @@ class AsnSerialRecord(models.Model):
     WRONG_SKU = 'WRONG_SKU'
     DAMAGED = 'DAMAGED'
     REJECTED = 'REJECTED'
+    UNVERIFIED = 'UNVERIFIED'
 
     STATUS_CHOICES = (
         (EXPECTED, 'Expected'),
@@ -18,6 +84,7 @@ class AsnSerialRecord(models.Model):
         (WRONG_SKU, 'Wrong SKU'),
         (DAMAGED, 'Damaged'),
         (REJECTED, 'Rejected'),
+        (UNVERIFIED, 'Scanned without Pack List'),
     )
 
     openid = models.CharField(max_length=255)
@@ -43,6 +110,13 @@ class AsnSerialRecord(models.Model):
     received_by = models.CharField(max_length=255, blank=True, default='')
     expected_at = models.DateTimeField(blank=True, null=True)
     received_at = models.DateTimeField(blank=True, null=True)
+    pack_list = models.ForeignKey(
+        PackListDocument,
+        related_name='serial_records',
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
     create_time = models.DateTimeField(auto_now_add=True)
     update_time = models.DateTimeField(auto_now=True)
 
