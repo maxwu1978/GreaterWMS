@@ -10,6 +10,7 @@ urlpatterns = [
     path('scan/', views.ScanSerialView.as_view(), name='asn-serial-scan'),
     path('packlists/', views.PackListListView.as_view(), name='asn-pack-list-list'),
     path('packlists/create/', views.PackListCreateView.as_view(), name='asn-pack-list-create'),
+    path('packlists/preview/', views.PackListPreviewView.as_view(), name='asn-pack-list-preview'),
     path('packlists/import/', views.PackListImportView.as_view(), name='asn-pack-list-import'),
     path('packlists/confirm/', views.PackListConfirmView.as_view(), name='asn-pack-list-confirm'),
     path('import/', views.SerialImportView.as_view(), name='asn-serial-import'),

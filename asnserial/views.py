@@ -1,5 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+from io import BytesIO
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -98,6 +100,7 @@ def _pack_list_json(document):
         'version': document.version,
         'source_type': document.source_type,
         'source_file': document.source_file,
+        'source_sha256': document.source_sha256,
         'source_url': document.source_url,
         'status': document.status,
         'has_serials': document.has_serials,
@@ -443,7 +446,9 @@ def _first_column(index, names):
 
 def _pack_list_rows_from_workbook(upload):
     try:
-        workbook = load_workbook(upload, read_only=True, data_only=True)
+        file_bytes = upload.read()
+        upload.seek(0)
+        workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
         sheet = workbook.active
         values = list(sheet.iter_rows(values_only=True))
     except Exception as exc:
@@ -487,10 +492,10 @@ def _pack_list_rows_from_workbook(upload):
         })
     if not rows:
         raise APIException({'detail': 'Pack List contains no usable rows'})
-    return rows
+    return rows, sha256(file_bytes).hexdigest()
 
 
-def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_url='', note='', package_qty=0):
+def _validate_pack_list_rows(openid, asn_code, rows):
     asn = AsnListModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False).first()
     if not asn:
         raise APIException({'detail': 'ASN Code does not exists'})
@@ -527,6 +532,45 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', sou
             'goods_volume': _number(raw_row.get('goods_volume')),
             'source_row': int(raw_row.get('source_row') or position),
         })
+    return {
+        'asn': asn,
+        'rows': normalized_rows,
+        'has_serials': has_serials,
+        'total_qty': sum(row['goods_qty'] for row in normalized_rows),
+        'expected_serial_count': len(serial_numbers),
+    }
+
+
+def _pack_list_preview_json(asn_code, validation, package_qty, source_sha256, duplicate_document=None):
+    return {
+        'asn_code': asn_code,
+        'status': 'DUPLICATE' if duplicate_document else 'PREVIEW',
+        'source_sha256': source_sha256,
+        'row_count': len(validation['rows']),
+        'total_qty': validation['total_qty'],
+        'has_serials': validation['has_serials'],
+        'expected_serial_count': validation['expected_serial_count'],
+        'package_qty': max(0, int(package_qty or 0)),
+        'duplicate_document': _pack_list_json(duplicate_document) if duplicate_document else None,
+        'lines': [
+            {
+                'goods_code': row['goods_code'],
+                'customer_goods_code': row['customer_goods_code'],
+                'goods_qty': row['goods_qty'],
+                'serial_number': row['serial_number'],
+                'goods_desc': row['goods_desc'],
+                'source_row': row['source_row'],
+            }
+            for row in validation['rows']
+        ],
+    }
+
+
+def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_sha256='', source_url='', note='', package_qty=0):
+    validation = _validate_pack_list_rows(openid, asn_code, rows)
+    asn = validation['asn']
+    normalized_rows = validation['rows']
+    has_serials = validation['has_serials']
     last_version = PackListDocument.objects.filter(openid=openid, asn_code=asn_code).order_by('-version').values_list('version', flat=True).first() or 0
     document = PackListDocument.objects.create(
         openid=openid,
@@ -534,6 +578,7 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', sou
         version=int(last_version) + 1,
         source_type=source_type if source_type in dict(PackListDocument.SOURCE_TYPES) else 'MANUAL',
         source_file=str(source_file or '')[:255],
+        source_sha256=str(source_sha256 or '')[:64],
         source_url=str(source_url or '')[:1000],
         has_serials=has_serials,
         package_qty=max(0, int(package_qty or 0)),
@@ -630,6 +675,36 @@ class PackListCreateView(APIView):
         return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, asn_code)})
 
 
+class PackListPreviewView(APIView):
+    def post(self, request):
+        openid = _openid(request)
+        upload = request.FILES.get('file')
+        asn_code = _clean(request.data.get('asn_code'))
+        if not upload:
+            raise APIException({'detail': 'Pack List Excel file is required'})
+        if upload.size > 20 * 1024 * 1024:
+            raise APIException({'detail': 'Pack List file is too large'})
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        rows, file_hash = _pack_list_rows_from_workbook(upload)
+        validation = _validate_pack_list_rows(openid, asn_code, rows)
+        duplicate_document = PackListDocument.objects.filter(
+            openid=openid,
+            asn_code=asn_code,
+            source_sha256=file_hash,
+        ).order_by('-id').first()
+        return Response({
+            'detail': 'preview',
+            'preview': _pack_list_preview_json(
+                asn_code,
+                validation,
+                request.data.get('package_qty'),
+                file_hash,
+                duplicate_document=duplicate_document,
+            ),
+        })
+
+
 class PackListImportView(APIView):
     def post(self, request):
         openid = _openid(request)
@@ -641,7 +716,19 @@ class PackListImportView(APIView):
             raise APIException({'detail': 'Pack List file is too large'})
         if not asn_code:
             raise APIException({'detail': 'ASN Code is required'})
-        rows = _pack_list_rows_from_workbook(upload)
+        rows, file_hash = _pack_list_rows_from_workbook(upload)
+        existing_document = PackListDocument.objects.filter(
+            openid=openid,
+            asn_code=asn_code,
+            source_sha256=file_hash,
+        ).order_by('-id').first()
+        if existing_document:
+            return Response({
+                'detail': 'already_exists',
+                'duplicate': True,
+                'document': _pack_list_json(existing_document),
+                'summary': _summary(openid, asn_code),
+            })
         with transaction.atomic():
             document = _create_pack_list(
                 openid,
@@ -650,6 +737,7 @@ class PackListImportView(APIView):
                 rows,
                 source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
                 source_file=upload.name,
+                source_sha256=file_hash,
                 source_url=request.data.get('source_url'),
                 note=request.data.get('note'),
                 package_qty=request.data.get('package_qty'),

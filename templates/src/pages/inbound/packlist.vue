@@ -38,7 +38,7 @@
           <q-input v-model="note" outlined dense label="Note" />
         </div>
         <div class="col-12 col-md-3 text-right">
-          <q-btn color="primary" icon="file_upload" label="Import Pack List" :disable="!asnCode || !selectedFile" @click="importFile" />
+          <q-btn color="primary" icon="preview" label="Preview Pack List" :disable="!asnCode || !selectedFile" @click="previewFile" />
         </div>
       </q-card-section>
     </q-card>
@@ -72,6 +72,44 @@
         </q-td>
       </template>
     </q-table>
+
+    <q-dialog v-model="previewOpen">
+      <q-card style="width: 1000px; max-width: 95vw">
+        <q-bar class="bg-light-blue-10 text-white">
+          <div>Pack List Preview</div>
+          <q-space />
+          <q-btn dense flat icon="close" v-close-popup />
+        </q-bar>
+        <q-card-section v-if="previewData">
+          <div class="text-caption q-mb-sm">No data is saved until you confirm the import.</div>
+          <div class="row q-col-gutter-md text-caption q-mb-sm">
+            <div class="col-6 col-md-2">ASN: {{ previewData.asn_code }}</div>
+            <div class="col-6 col-md-2">Rows: {{ previewData.row_count }}</div>
+            <div class="col-6 col-md-2">Qty: {{ previewData.total_qty }}</div>
+            <div class="col-6 col-md-2">SN: {{ previewData.expected_serial_count }}</div>
+            <div class="col-6 col-md-2">Packages: {{ previewData.package_qty || 'Not provided' }}</div>
+            <div class="col-6 col-md-2">File: {{ previewData.status }}</div>
+          </div>
+          <q-banner v-if="previewData.duplicate_document" class="bg-orange-1 q-mb-sm">
+            This file was already imported for this ASN. The existing Pack List will be reused.
+          </q-banner>
+          <q-list bordered separator style="max-height: 420px; overflow-y: auto">
+            <q-item v-for="(line, index) in previewData.lines" :key="index">
+              <q-item-section>
+                <q-item-label>{{ line.goods_code }} · {{ line.goods_qty }}</q-item-label>
+                <q-item-label caption v-if="line.customer_goods_code">Customer SKU: {{ line.customer_goods_code }}</q-item-label>
+                <q-item-label caption v-if="line.serial_number">SN: {{ line.serial_number }}</q-item-label>
+              </q-item-section>
+              <q-item-section side>{{ line.goods_desc }}</q-item-section>
+            </q-item>
+          </q-list>
+          <div class="text-right q-mt-md">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" :label="previewData.duplicate_document ? 'Use Existing Pack List' : 'Import as Pending'" @click="importFile" />
+          </div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
 
     <q-dialog v-model="detailOpen">
       <q-card style="width: 900px; max-width: 95vw">
@@ -119,6 +157,8 @@ export default {
       sourceUrl: '',
       note: '',
       packageQty: 0,
+      previewOpen: false,
+      previewData: null,
       loading: false,
       detailOpen: false,
       selectedDocument: null,
@@ -164,7 +204,7 @@ export default {
         this.loading = false
       })
     },
-    importFile () {
+    packListForm () {
       const form = new FormData()
       form.append('file', this.selectedFile)
       form.append('asn_code', this.asnCode)
@@ -172,10 +212,23 @@ export default {
       form.append('source_url', this.sourceUrl)
       form.append('note', this.note)
       form.append('package_qty', this.packageQty || 0)
-      postauthfile('asn/serial/packlists/import/', form).then(res => {
+      return form
+    },
+    previewFile () {
+      postauthfile('asn/serial/packlists/preview/', this.packListForm()).then(res => {
+        this.previewData = res.preview
+        this.previewOpen = true
+      }).catch(err => {
+        this.$q.notify({ message: err.detail || 'Unable to preview Pack List', color: 'negative' })
+      })
+    },
+    importFile () {
+      postauthfile('asn/serial/packlists/import/', this.packListForm()).then(res => {
         this.selectedFile = null
+        this.previewOpen = false
+        this.previewData = null
         this.loadDocuments()
-        this.$q.notify({ message: 'Pack List imported. Confirm it before receiving.', color: 'positive' })
+        this.$q.notify({ message: res.duplicate ? 'Existing Pack List reused.' : 'Pack List imported. Confirm it before receiving.', color: 'positive' })
       }).catch(err => {
         this.$q.notify({ message: err.detail || 'Unable to import Pack List', color: 'negative' })
       })

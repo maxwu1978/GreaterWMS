@@ -24,6 +24,7 @@ class PackListDocument(models.Model):
     version = models.PositiveIntegerField(default=1)
     source_type = models.CharField(max_length=32, choices=SOURCE_TYPES, default='UPLOAD')
     source_file = models.CharField(max_length=255, blank=True, default='')
+    source_sha256 = models.CharField(max_length=64, blank=True, default='')
     source_url = models.CharField(max_length=1000, blank=True, default='')
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=PENDING)
     has_serials = models.BooleanField(default=False)
@@ -41,6 +42,7 @@ class PackListDocument(models.Model):
         ordering = ['-version', '-id']
         indexes = [
             models.Index(fields=['openid', 'asn_code', 'status']),
+            models.Index(fields=['openid', 'asn_code', 'source_sha256']),
             models.Index(fields=['openid', 'source_type']),
         ]
 
