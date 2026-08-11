@@ -11,6 +11,7 @@
         :columns="columns"
         hide-bottom
         :pagination.sync="pagination"
+        dense
         no-data-label="No data"
         no-results-label="No data you want"
         :table-style="{ height: height }"
@@ -45,109 +46,93 @@
         <template v-slot:body="props">
           <q-tr :props="props">
             <q-td key="asn_code" :props="props">{{ props.row.asn_code }}</q-td>
-            <q-td key="asn_status" :props="props">{{ props.row.asn_status }}</q-td>
-            <q-td key="total_weight" :props="props">{{ props.row.total_weight.toFixed(4) }}</q-td>
-            <q-td key="total_volume" :props="props">{{ props.row.total_volume.toFixed(4) }}</q-td>
-            <q-td key="supplier" :props="props">{{ props.row.supplier }}</q-td>
-            <q-td key="creater" :props="props">{{ props.row.creater }}</q-td>
-            <q-td key="create_time" :props="props">{{ props.row.create_time }}</q-td>
-            <q-td key="update_time" :props="props">{{ props.row.update_time }}</q-td>
-            <q-td key="action" :props="props" style="width: 100px">
-              <q-btn
-                round
-                flat
-                push
-                color="info"
-                icon="visibility"
-                @click="viewData(props.row)"
+            <q-td key="asn_status" :props="props">
+              <q-chip
+                dense
+                square
+                :color="statusColor(props.row.asn_status_code)"
+                text-color="dark"
               >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('printthisasn') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="teal"
-                icon="qr_code_2"
-                @click="openSerialPanel(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">SN control</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="indigo"
-                icon="description"
-                @click="openPackList(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">Pack List</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="positive"
-                icon="img:statics/inbound/preloadstock.png"
-                @click="preloadData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('confirmdelivery') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="positive"
-                icon="img:statics/inbound/presortstock.png"
-                @click="presortData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('finishloading') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="purple"
-                icon="img:statics/inbound/sortstock.png"
-                @click="sortedData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('confirmsorted') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="purple"
-                icon="edit"
-                @click="editData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('edit') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="dark"
-                icon="delete"
-                @click="deleteData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('delete') }}</q-tooltip>
-              </q-btn>
+                {{ props.row.asn_status_label }}
+              </q-chip>
             </q-td>
-            <template v-if="props.row.transportation_fee.detail !== []">
-              <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">
-                <q-list>
-                  <div v-for="(transportation_fee, index) in props.row.transportation_fee.detail" :key="index">
-                    <q-item v-ripple>
-                      <q-item-section>
-                        <q-item-label>{{ transportation_fee.transportation_supplier }}</q-item-label>
-                        <q-item-label>{{ $t('estimate') }}: {{ transportation_fee.transportation_cost }}</q-item-label>
-                      </q-item-section>
-                    </q-item>
-                  </div>
+            <q-td key="sku_count" :props="props" class="text-center">{{ props.row.sku_count || 0 }}</q-td>
+            <q-td key="planned_qty" :props="props" class="text-center">{{ props.row.planned_qty || 0 }}</q-td>
+            <q-td key="actual_qty" :props="props" class="text-center">{{ props.row.actual_qty || 0 }}</q-td>
+            <q-td key="staging_bin" :props="props">
+              <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'">
+                {{ props.row.staging_bin || '—' }}
+              </span>
+            </q-td>
+            <q-td key="pack_list_status" :props="props">
+              <q-chip
+                dense
+                square
+                :color="packListColor(props.row.pack_list_status)"
+                text-color="dark"
+              >
+                {{ packListLabel(props.row.pack_list_status) }}
+                <q-icon v-if="props.row.pack_list_has_serials" name="qr_code_2" size="14px" class="q-ml-xs">
+                  <q-tooltip>{{ $t('asn_actions.serial_numbers') }}</q-tooltip>
+                </q-icon>
+              </q-chip>
+            </q-td>
+            <q-td key="exception_qty" :props="props" class="text-center">
+              <q-chip
+                v-if="Number(props.row.exception_qty || 0) > 0"
+                dense
+                square
+                color="negative"
+                text-color="white"
+              >
+                {{ props.row.exception_qty }}
+              </q-chip>
+              <span v-else class="text-grey-6">0</span>
+            </q-td>
+            <q-td key="next_action" :props="props">
+              <q-btn
+                dense
+                unelevated
+                no-caps
+                :color="nextAction(props.row).color"
+                :icon="nextAction(props.row).icon"
+                :label="nextAction(props.row).label"
+                @click="handleNextAction(props.row)"
+              />
+            </q-td>
+            <q-td key="action" :props="props" style="width: 56px">
+              <q-btn-dropdown
+                flat
+                dense
+                round
+                icon="more_vert"
+                color="grey-8"
+              >
+                <q-list dense>
+                  <q-item clickable v-close-popup @click="viewData(props.row)">
+                    <q-item-section avatar><q-icon name="visibility" /></q-item-section>
+                    <q-item-section>{{ $t('asn_actions.view') }}</q-item-section>
+                  </q-item>
+                  <q-item clickable v-close-popup @click="openPackList(props.row)">
+                    <q-item-section avatar><q-icon name="description" /></q-item-section>
+                    <q-item-section>{{ $t('asn_actions.pack_list') }}</q-item-section>
+                  </q-item>
+                  <q-item clickable v-close-popup @click="openSerialPanel(props.row)">
+                    <q-item-section avatar><q-icon name="qr_code_2" /></q-item-section>
+                    <q-item-section>{{ $t('asn_actions.serial_numbers') }}</q-item-section>
+                  </q-item>
+                  <q-separator />
+                  <q-item v-if="canEdit(props.row)" clickable v-close-popup @click="editData(props.row)">
+                    <q-item-section avatar><q-icon name="edit" /></q-item-section>
+                    <q-item-section>{{ $t('edit') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canDelete(props.row)" clickable v-close-popup @click="deleteData(props.row)">
+                    <q-item-section avatar><q-icon name="delete" color="negative" /></q-item-section>
+                    <q-item-section>{{ $t('delete') }}</q-item-section>
+                  </q-item>
                 </q-list>
-              </q-tooltip>
-            </template>
+              </q-btn-dropdown>
+            </q-td>
           </q-tr>
         </template>
       </q-table>
@@ -760,13 +745,14 @@ export default {
       supplier_detail: {},
       columns: [
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
-        { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status', align: 'center' },
-        { name: 'total_weight', label: this.$t('inbound.view_asn.total_weight'), field: 'total_weight', align: 'center' },
-        { name: 'total_volume', label: this.$t('inbound.view_asn.total_volume'), field: 'total_volume', align: 'center' },
-        { name: 'supplier', label: this.$t('baseinfo.view_supplier.supplier_name'), field: 'supplier', align: 'center' },
-        { name: 'creater', label: this.$t('creater'), field: 'creater', align: 'center' },
-        { name: 'create_time', label: this.$t('createtime'), field: 'create_time', align: 'center' },
-        { name: 'update_time', label: this.$t('updatetime'), field: 'update_time', align: 'center' },
+        { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center' },
+        { name: 'sku_count', label: this.$t('inbound.view_asn.sku_count'), field: 'sku_count', align: 'center' },
+        { name: 'planned_qty', label: this.$t('inbound.view_asn.planned_qty'), field: 'planned_qty', align: 'center' },
+        { name: 'actual_qty', label: this.$t('inbound.view_asn.actual_qty'), field: 'actual_qty', align: 'center' },
+        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
+        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center' },
+        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'left' },
         { name: 'action', label: this.$t('action'), align: 'right' }
       ],
       filter: '',
@@ -841,6 +827,73 @@ export default {
     openPackList (e) {
       this.$router.push({ name: 'packlist', query: { asn_code: e.asn_code } })
     },
+    statusLabel (status) {
+      const labels = {
+        1: this.$t('inbound.predeliverystock'),
+        2: this.$t('inbound.preloadstock'),
+        3: this.$t('inbound.presortstock'),
+        4: this.$t('inbound.sortstock'),
+        5: this.$t('inbound.asndone')
+      }
+      return labels[Number(status)] || 'N/A'
+    },
+    statusColor (status) {
+      const colors = {
+        1: 'blue-2',
+        2: 'orange-3',
+        3: 'amber-3',
+        4: 'purple-3',
+        5: 'green-3'
+      }
+      return colors[Number(status)] || 'grey-4'
+    },
+    formatRows (rows) {
+      return (rows || []).map(item => Object.assign({}, item, {
+        asn_status_code: Number(item.asn_status),
+        asn_status_label: this.statusLabel(item.asn_status)
+      }))
+    },
+    packListLabel (status) {
+      const labels = {
+        NOT_RECEIVED: this.$t('inbound.view_asn.pack_list_not_received'),
+        PENDING: this.$t('inbound.view_asn.pack_list_pending'),
+        CONFIRMED: this.$t('inbound.view_asn.pack_list_confirmed')
+      }
+      return labels[status] || labels.NOT_RECEIVED
+    },
+    packListColor (status) {
+      return {
+        NOT_RECEIVED: 'grey-4',
+        PENDING: 'orange-3',
+        CONFIRMED: 'green-3'
+      }[status] || 'grey-4'
+    },
+    nextAction (row) {
+      const actions = {
+        1: { label: this.$t('inbound.view_asn.confirm_arrival'), icon: 'local_shipping', color: 'primary', handler: 'preloadData' },
+        2: { label: this.$t('inbound.view_asn.finish_unloading'), icon: 'file_download', color: 'orange-8', handler: 'presortData' },
+        3: { label: this.$t('inbound.view_asn.record_receipt'), icon: 'fact_check', color: 'amber-9', handler: 'sortedData' },
+        4: { label: this.$t('inbound.view_asn.start_putaway'), icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
+        5: { label: this.$t('asn_actions.view'), icon: 'visibility', color: 'grey-7', handler: 'view' }
+      }
+      return actions[Number(row.asn_status_code)] || actions[5]
+    },
+    handleNextAction (row) {
+      const action = this.nextAction(row)
+      if (action.handler === 'putaway') {
+        this.$router.push({ name: 'sortstock', query: { asn_code: row.asn_code } })
+      } else if (action.handler === 'view') {
+        this.viewData(row)
+      } else {
+        this[action.handler](row)
+      }
+    },
+    canEdit (row) {
+      return Number(row.asn_status_code) === 1
+    },
+    canDelete (row) {
+      return Number(row.asn_status_code) === 1
+    },
     getList () {
       var _this = this
       if (LocalStorage.has('auth')) {
@@ -857,22 +910,7 @@ export default {
                 _this.max = Math.ceil(res.count / 30)
               }
             }
-            res.results.forEach(item => {
-              if (item.asn_status === 1) {
-                item.asn_status = _this.$t('inbound.predeliverystock')
-              } else if (item.asn_status === 2) {
-                item.asn_status = _this.$t('inbound.preloadstock')
-              } else if (item.asn_status === 3) {
-                item.asn_status = _this.$t('inbound.presortstock')
-              } else if (item.asn_status === 4) {
-                item.asn_status = _this.$t('inbound.sortstock')
-              } else if (item.asn_status === 5) {
-                item.asn_status = _this.$t('inbound.asndone')
-              } else {
-                item.asn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.formatRows(res.results)
             _this.supplier_list = res.supplier_list
             _this.supplier_list1 = res.supplier_list
             _this.pathname_previous = res.previous
@@ -916,22 +954,7 @@ export default {
                 _this.max = Math.ceil(res.count / 30)
               }
             }
-            res.results.forEach(item => {
-              if (item.asn_status === 1) {
-                item.asn_status = _this.$t('inbound.predeliverystock')
-              } else if (item.asn_status === 2) {
-                item.asn_status = _this.$t('inbound.preloadstock')
-              } else if (item.asn_status === 3) {
-                item.asn_status = _this.$t('inbound.presortstock')
-              } else if (item.asn_status === 4) {
-                item.asn_status = _this.$t('inbound.sortstock')
-              } else if (item.asn_status === 5) {
-                item.asn_status = _this.$t('inbound.asndone')
-              } else {
-                item.asn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.formatRows(res.results)
             _this.supplier_list = res.supplier_list
             _this.supplier_list1 = res.supplier_list
             _this.pathname_previous = res.previous
@@ -953,22 +976,7 @@ export default {
         getauth(_this.pathname_previous, {})
           .then(res => {
             _this.table_list = []
-            res.results.forEach(item => {
-              if (item.asn_status === 1) {
-                item.asn_status = _this.$t('inbound.predeliverystock')
-              } else if (item.asn_status === 2) {
-                item.asn_status = _this.$t('inbound.preloadstock')
-              } else if (item.asn_status === 3) {
-                item.asn_status = _this.$t('inbound.presortstock')
-              } else if (item.asn_status === 4) {
-                item.asn_status = _this.$t('inbound.sortstock')
-              } else if (item.asn_status === 5) {
-                item.asn_status = _this.$t('inbound.asndone')
-              } else {
-                item.asn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.formatRows(res.results)
             _this.supplier_list = res.supplier_list
             _this.supplier_list1 = res.supplier_list
             _this.pathname_previous = res.previous
@@ -990,22 +998,7 @@ export default {
         getauth(_this.pathname_next, {})
           .then(res => {
             _this.table_list = []
-            res.results.forEach(item => {
-              if (item.asn_status === 1) {
-                item.asn_status = _this.$t('inbound.predeliverystock')
-              } else if (item.asn_status === 2) {
-                item.asn_status = _this.$t('inbound.preloadstock')
-              } else if (item.asn_status === 3) {
-                item.asn_status = _this.$t('inbound.presortstock')
-              } else if (item.asn_status === 4) {
-                item.asn_status = _this.$t('inbound.sortstock')
-              } else if (item.asn_status === 5) {
-                item.asn_status = _this.$t('inbound.asndone')
-              } else {
-                item.asn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.formatRows(res.results)
             _this.supplier_list = res.supplier_list
             _this.supplier_list1 = res.supplier_list
             _this.pathname_previous = res.previous
@@ -1132,7 +1125,7 @@ export default {
       var _this = this
       _this.isEdit = true
       _this.goodsDataClear()
-      if (e.asn_status !== _this.$t('inbound.predeliverystock')) {
+      if (Number(e.asn_status_code) !== 1) {
         _this.$q.notify({
           message: e.asn_code + ' ASN Status Is Not ' + _this.$t('inbound.predeliverystock'),
           icon: 'close',
@@ -1229,7 +1222,7 @@ export default {
     },
     deleteData (e) {
       var _this = this
-      if (e.asn_status !== _this.$t('inbound.predeliverystock')) {
+      if (Number(e.asn_status_code) !== 1) {
         _this.$q.notify({
           message: e.asn_code + ' ASN Status Is Not ' + _this.$t('inbound.predeliverystock'),
           icon: 'close',
@@ -1270,7 +1263,7 @@ export default {
     },
     preloadData (e) {
       var _this = this
-      if (e.asn_status !== _this.$t('inbound.predeliverystock')) {
+      if (Number(e.asn_status_code) !== 1) {
         _this.$q.notify({
           message: e.asn_code + ' ASN Status Is Not ' + _this.$t('inbound.predeliverystock'),
           icon: 'close',
@@ -1337,7 +1330,7 @@ export default {
     },
     presortData (e) {
       var _this = this
-      if (e.asn_status !== _this.$t('inbound.preloadstock')) {
+      if (Number(e.asn_status_code) !== 2) {
         _this.$q.notify({
           message: e.asn_code + ' ASN Status Is Not ' + _this.$t('inbound.preloadstock'),
           icon: 'close',
@@ -1422,7 +1415,7 @@ export default {
     sortedData (e) {
       var _this = this
       _this.goodsDataClear()
-      if (e.asn_status !== _this.$t('inbound.presortstock')) {
+      if (Number(e.asn_status_code) !== 3) {
         _this.$q.notify({
           message: e.asn_code + ' ASN Status Is Not ' + _this.$t('inbound.presortstock'),
           icon: 'close',

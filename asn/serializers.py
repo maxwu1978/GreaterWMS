@@ -12,6 +12,86 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     staging_bin = serializers.SerializerMethodField()
     staging_bins = serializers.SerializerMethodField()
+    planned_qty = serializers.SerializerMethodField()
+    actual_qty = serializers.SerializerMethodField()
+    exception_qty = serializers.SerializerMethodField()
+    sku_count = serializers.SerializerMethodField()
+    pack_list_status = serializers.SerializerMethodField()
+    pack_list_has_serials = serializers.SerializerMethodField()
+
+    def _get_detail_aggregate(self, obj):
+        """Cache the small summary used by the ASN work queue."""
+        cache = self.context.setdefault('_asn_detail_aggregate_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key not in cache:
+            details = AsnDetailModel.objects.filter(
+                openid=obj.openid,
+                asn_code=obj.asn_code,
+                is_delete=False,
+            )
+            summary = {
+                'planned_qty': 0,
+                'actual_qty': 0,
+                'exception_qty': 0,
+                'sku_count': 0,
+            }
+            for detail in details.only(
+                'goods_qty',
+                'goods_actual_qty',
+                'goods_shortage_qty',
+                'goods_more_qty',
+                'goods_damage_qty',
+            ):
+                summary['planned_qty'] += detail.goods_qty or 0
+                summary['actual_qty'] += detail.goods_actual_qty or 0
+                summary['exception_qty'] += (
+                    (detail.goods_shortage_qty or 0)
+                    + (detail.goods_more_qty or 0)
+                    + (detail.goods_damage_qty or 0)
+                )
+                summary['sku_count'] += 1
+            cache[cache_key] = summary
+        return cache[cache_key]
+
+    def _get_pack_list(self, obj):
+        cache = self.context.setdefault('_asn_pack_list_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        from asnserial.models import PackListDocument
+
+        documents = PackListDocument.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+        )
+        document = documents.filter(
+            status=PackListDocument.CONFIRMED,
+        ).order_by('-version', '-id').first() or documents.filter(
+            status=PackListDocument.PENDING,
+        ).order_by('-version', '-id').first()
+        cache[cache_key] = document
+        return document
+
+    def get_planned_qty(self, obj):
+        return self._get_detail_aggregate(obj)['planned_qty']
+
+    def get_actual_qty(self, obj):
+        return self._get_detail_aggregate(obj)['actual_qty']
+
+    def get_exception_qty(self, obj):
+        return self._get_detail_aggregate(obj)['exception_qty']
+
+    def get_sku_count(self, obj):
+        return self._get_detail_aggregate(obj)['sku_count']
+
+    def get_pack_list_status(self, obj):
+        document = self._get_pack_list(obj)
+        return document.status if document else 'NOT_RECEIVED'
+
+    def get_pack_list_has_serials(self, obj):
+        document = self._get_pack_list(obj)
+        return bool(document and document.has_serials)
 
     def _get_staging_bins(self, obj):
         from staging.models import StagingAssignment

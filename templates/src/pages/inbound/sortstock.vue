@@ -198,6 +198,7 @@ export default {
         { name: 'action', label: this.$t('action'), align: 'right' }
       ],
       filter: '',
+      asnFilter: '',
       pagination: {
         page: 1,
         rowsPerPage: '30'
@@ -224,7 +225,8 @@ export default {
     getList () {
       var _this = this
       if (_this.$q.localStorage.has('auth')) {
-        getauth(_this.pathname + '&page=' + '' + _this.current, {
+        const asnFilter = _this.asnFilter ? '&asn_code__icontains=' + encodeURIComponent(_this.asnFilter) : ''
+        getauth(_this.pathname + asnFilter + '&page=' + '' + _this.current, {
         }).then(res => {
           _this.table_list = res.results
           _this.total = res.count
@@ -265,7 +267,8 @@ export default {
       if (_this.$q.localStorage.has('auth')) {
         _this.current = 1
         _this.paginationIpt = 1
-        getauth(_this.pathname + '&asn_code__icontains=' + _this.filter + '&page=' + '' + _this.current, {
+        const search = _this.filter || _this.asnFilter
+        getauth(_this.pathname + '&asn_code__icontains=' + encodeURIComponent(search) + '&page=' + '' + _this.current, {
         }).then(res => {
           _this.table_list = res.results
           _this.total = res.count
@@ -395,6 +398,7 @@ export default {
   },
   created () {
     var _this = this
+    _this.asnFilter = (_this.$route.query && _this.$route.query.asn_code) || ''
     if (_this.$q.localStorage.has('openid')) {
       _this.openid = _this.$q.localStorage.getItem('openid')
     } else {
