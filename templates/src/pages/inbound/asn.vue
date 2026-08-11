@@ -59,14 +59,8 @@
                 {{ props.row.asn_status_label }}
               </q-chip>
             </q-td>
-            <q-td key="precheck_status" :props="props">
-              <q-chip dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
-                {{ precheckLabel(props.row.precheck_status) }}
-              </q-chip>
-            </q-td>
-            <q-td key="sku_count" :props="props" class="text-center">{{ props.row.sku_count || 0 }}</q-td>
-            <q-td key="quantity" :props="props" class="text-center">
-              {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
+            <q-td key="sku_quantity" :props="props" class="text-center">
+              {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
             </q-td>
             <q-td key="staging_bin" :props="props">
               <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'">
@@ -87,8 +81,8 @@
               </q-chip>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center">
-              <q-chip v-if="!qcChecked(props.row)" dense square color="grey-3" text-color="grey-8">
-                {{ $t('inbound.view_asn.qc_not_checked') }}
+              <q-chip v-if="!qcChecked(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
+                {{ precheckLabel(props.row.precheck_status) }}
               </q-chip>
               <q-chip v-else-if="Number(props.row.exception_qty || 0) > 0" dense square color="negative" text-color="white">
                 {{ props.row.exception_qty }}
@@ -726,12 +720,10 @@ export default {
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
         { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left' },
         { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center' },
-        { name: 'precheck_status', label: this.$t('inbound.view_asn.precheck_status'), field: 'precheck_status', align: 'center' },
-        { name: 'sku_count', label: this.$t('inbound.view_asn.sku_count'), field: 'sku_count', align: 'center' },
-        { name: 'quantity', label: this.$t('inbound.view_asn.quantity'), align: 'center' },
-      { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
-      { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
-        { name: 'exception_qty', label: this.$t('inbound.view_asn.qc_result'), field: 'exception_qty', align: 'center' },
+        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center' },
+        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
+        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center' },
         { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'left' }
       ],
       filter: '',
