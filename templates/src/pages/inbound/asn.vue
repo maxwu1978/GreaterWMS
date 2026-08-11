@@ -61,9 +61,14 @@
                 {{ props.row.asn_status_label }}
               </q-chip>
             </q-td>
-            <q-td key="eta" :props="props" class="text-center">
-              <div>{{ etaLabel(props.row) }}</div>
-              <div class="text-caption text-grey-6">{{ arrivalLabel(props.row) }}</div>
+            <q-td key="eta" :props="props" class="text-center asn-arrival-cell">
+              <div :title="etaTitle(props.row)">{{ etaLabel(props.row) }}</div>
+              <div
+                :class="props.row.actual_arrival_at ? 'text-positive text-weight-medium' : 'text-grey-6'"
+                :title="arrivalTitle(props.row)"
+              >
+                {{ arrivalLabel(props.row) }}
+              </div>
             </q-td>
             <q-td key="sku_quantity" :props="props" class="text-center">
               {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
@@ -794,6 +799,15 @@
   text-overflow: ellipsis;
 }
 
+.asn-list-table .asn-arrival-cell {
+  white-space: nowrap;
+}
+
+.asn-list-table .asn-arrival-cell > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .asn-list-table .asn-action-cell {
   min-width: 76px;
   padding-left: 4px;
@@ -1053,10 +1067,24 @@ export default {
         : this.$t('inbound.view_asn.staging_unassigned')
     },
     etaLabel (row) {
-      return row.expected_arrival_at || this.$t('eta_not_provided')
+      return row.expected_arrival_at ? 'ETA ' + this.compactDateTime(row.expected_arrival_at) : 'ETA Not Provided'
+    },
+    etaTitle (row) {
+      return row.expected_arrival_at ? 'Expected arrival: ' + this.fullDateTime(row.expected_arrival_at) : 'ETA not provided'
     },
     arrivalLabel (row) {
-      return row.actual_arrival_at ? 'Arrived' : 'Pre Arrival'
+      return row.actual_arrival_at ? 'Arrived ' + this.compactDateTime(row.actual_arrival_at) : 'Pre Arrival'
+    },
+    arrivalTitle (row) {
+      return row.actual_arrival_at ? 'Actual arrival: ' + this.fullDateTime(row.actual_arrival_at) : 'Physical arrival not confirmed'
+    },
+    compactDateTime (value) {
+      const normalized = String(value || '').replace('T', ' ')
+      const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/)
+      return match ? match[2] + '/' + match[3] + ' ' + match[4] : normalized.slice(0, 16)
+    },
+    fullDateTime (value) {
+      return String(value || '').replace('T', ' ')
     },
     requiredStagingSlots (row) {
       const packageQty = Number(row.package_qty || 0)
