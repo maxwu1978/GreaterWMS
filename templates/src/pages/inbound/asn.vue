@@ -45,7 +45,10 @@
         </template>
         <template v-slot:body="props">
           <q-tr :props="props">
-            <q-td key="asn_code" :props="props">{{ props.row.asn_code }}</q-td>
+            <q-td key="asn_code" :props="props">
+              <q-btn flat dense no-caps color="primary" :label="props.row.asn_code" @click="viewData(props.row)" />
+            </q-td>
+            <q-td key="supplier" :props="props">{{ props.row.supplier || '—' }}</q-td>
             <q-td key="asn_status" :props="props">
               <q-chip
                 dense
@@ -56,12 +59,18 @@
                 {{ props.row.asn_status_label }}
               </q-chip>
             </q-td>
+            <q-td key="precheck_status" :props="props">
+              <q-chip dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
+                {{ precheckLabel(props.row.precheck_status) }}
+              </q-chip>
+            </q-td>
             <q-td key="sku_count" :props="props" class="text-center">{{ props.row.sku_count || 0 }}</q-td>
-            <q-td key="planned_qty" :props="props" class="text-center">{{ props.row.planned_qty || 0 }}</q-td>
-            <q-td key="actual_qty" :props="props" class="text-center">{{ props.row.actual_qty || 0 }}</q-td>
+            <q-td key="quantity" :props="props" class="text-center">
+              {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
+            </q-td>
             <q-td key="staging_bin" :props="props">
               <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'">
-                {{ props.row.staging_bin || '—' }}
+                {{ stagingLabel(props.row) }}
               </span>
             </q-td>
             <q-td key="pack_list_status" :props="props">
@@ -78,16 +87,15 @@
               </q-chip>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center">
-              <q-chip
-                v-if="Number(props.row.exception_qty || 0) > 0"
-                dense
-                square
-                color="negative"
-                text-color="white"
-              >
+              <q-chip v-if="!qcChecked(props.row)" dense square color="grey-3" text-color="grey-8">
+                {{ $t('inbound.view_asn.qc_not_checked') }}
+              </q-chip>
+              <q-chip v-else-if="Number(props.row.exception_qty || 0) > 0" dense square color="negative" text-color="white">
                 {{ props.row.exception_qty }}
               </q-chip>
-              <span v-else class="text-grey-6">0</span>
+              <q-chip v-else dense square color="positive" text-color="dark">
+                {{ $t('inbound.view_asn.qc_normal') }}
+              </q-chip>
             </q-td>
             <q-td key="next_action" :props="props">
               <q-btn
@@ -99,39 +107,6 @@
                 :label="nextAction(props.row).label"
                 @click="handleNextAction(props.row)"
               />
-            </q-td>
-            <q-td key="action" :props="props" style="width: 56px">
-              <q-btn-dropdown
-                flat
-                dense
-                round
-                icon="more_vert"
-                color="grey-8"
-              >
-                <q-list dense>
-                  <q-item clickable v-close-popup @click="viewData(props.row)">
-                    <q-item-section avatar><q-icon name="visibility" /></q-item-section>
-                    <q-item-section>{{ $t('asn_actions.view') }}</q-item-section>
-                  </q-item>
-                  <q-item clickable v-close-popup @click="openPackList(props.row)">
-                    <q-item-section avatar><q-icon name="description" /></q-item-section>
-                    <q-item-section>{{ $t('asn_actions.pack_list') }}</q-item-section>
-                  </q-item>
-                  <q-item clickable v-close-popup @click="openSerialPanel(props.row)">
-                    <q-item-section avatar><q-icon name="qr_code_2" /></q-item-section>
-                    <q-item-section>{{ $t('asn_actions.serial_numbers') }}</q-item-section>
-                  </q-item>
-                  <q-separator />
-                  <q-item v-if="canEdit(props.row)" clickable v-close-popup @click="editData(props.row)">
-                    <q-item-section avatar><q-icon name="edit" /></q-item-section>
-                    <q-item-section>{{ $t('edit') }}</q-item-section>
-                  </q-item>
-                  <q-item v-if="canDelete(props.row)" clickable v-close-popup @click="deleteData(props.row)">
-                    <q-item-section avatar><q-icon name="delete" color="negative" /></q-item-section>
-                    <q-item-section>{{ $t('delete') }}</q-item-section>
-                  </q-item>
-                </q-list>
-              </q-btn-dropdown>
             </q-td>
           </q-tr>
         </template>
@@ -583,16 +558,16 @@
       </q-card>
     </q-dialog>
     <q-dialog v-model="preloadForm">
-      <q-card class="shadow-24">
-        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
-          <div>{{ $t('confirmdelivery') }}</div>
+        <q-card class="shadow-24">
+          <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>{{ $t('inbound.view_asn.confirm_arrival_staging') }}</div>
           <q-space />
           <q-btn dense flat icon="close" v-close-popup>
             <q-tooltip content-class="bg-amber text-black shadow-4">{{ $t('index.close') }}</q-tooltip>
           </q-btn>
         </q-bar>
         <q-card-section style="max-height: 500px; width: 500px" class="scroll">
-          <div class="text-subtitle2 q-mb-sm">{{ $t('confirmdelivery') }}: choose staging location</div>
+          <div class="text-subtitle2 q-mb-sm">{{ $t('inbound.view_asn.confirm_arrival_staging') }}</div>
           <StagingSlotPicker
             flow="INBOUND"
             v-model="preloadStagingBin"
@@ -600,7 +575,7 @@
             :max-selections="preloadRequiredSlots"
           />
           <div class="text-caption text-grey-7 q-mt-sm">
-            Required standard staging locations: {{ preloadRequiredSlots }}
+            {{ $t('inbound.view_asn.required_staging_locations') }}: {{ preloadRequiredSlots }}
           </div>
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
@@ -630,7 +605,11 @@
         <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
           <div>{{ viewAsn }}</div>
           <q-space />
-          {{ $t('inbound.asn') }}
+          <q-btn v-if="viewRow && canEdit(viewRow)" flat dense icon="edit" :label="$t('edit')" @click="editFromView()" />
+          <q-btn v-if="viewRow && canDelete(viewRow)" flat dense icon="delete" :label="$t('delete')" @click="deleteFromView()" />
+          <q-btn flat dense icon="description" :label="$t('asn_actions.pack_list')" @click="openPackListFromView()" />
+          <q-btn flat dense icon="qr_code_2" :label="$t('asn_actions.serial_numbers')" @click="openSerialPanelFromView()" />
+          <q-btn dense flat icon="close" v-close-popup />
         </q-bar>
         <q-card-section>
           <div class="row">
@@ -745,15 +724,15 @@ export default {
       supplier_detail: {},
       columns: [
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
+        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left' },
         { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center' },
+        { name: 'precheck_status', label: this.$t('inbound.view_asn.precheck_status'), field: 'precheck_status', align: 'center' },
         { name: 'sku_count', label: this.$t('inbound.view_asn.sku_count'), field: 'sku_count', align: 'center' },
-        { name: 'planned_qty', label: this.$t('inbound.view_asn.planned_qty'), field: 'planned_qty', align: 'center' },
-        { name: 'actual_qty', label: this.$t('inbound.view_asn.actual_qty'), field: 'actual_qty', align: 'center' },
-        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
-        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
-        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center' },
-        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'left' },
-        { name: 'action', label: this.$t('action'), align: 'right' }
+        { name: 'quantity', label: this.$t('inbound.view_asn.quantity'), align: 'center' },
+      { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
+      { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.qc_result'), field: 'exception_qty', align: 'center' },
+        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'left' }
       ],
       filter: '',
       statusFilter: '',
@@ -804,6 +783,7 @@ export default {
       presortid: 0,
       viewForm: false,
       viewAsn: '',
+      viewRow: null,
       viewid: 0,
       printObj: {
         id: 'printMe',
@@ -868,6 +848,54 @@ export default {
         PENDING: 'orange-3',
         CONFIRMED: 'green-3'
       }[status] || 'grey-4'
+    },
+    precheckLabel (status) {
+      const labels = {
+        READY: this.$t('inbound.view_asn.precheck_ready'),
+        NO_PACK_LIST: this.$t('inbound.view_asn.precheck_no_pack_list'),
+        PACK_LIST_PENDING: this.$t('inbound.view_asn.precheck_pack_list_pending'),
+        PACK_LIST_MISMATCH: this.$t('inbound.view_asn.precheck_pack_list_mismatch'),
+        SN_INCOMPLETE: this.$t('inbound.view_asn.precheck_sn_incomplete'),
+        NOT_APPLICABLE: this.$t('inbound.view_asn.precheck_not_applicable')
+      }
+      return labels[status] || this.$t('inbound.view_asn.precheck_no_pack_list')
+    },
+    precheckColor (status) {
+      return {
+        READY: 'positive',
+        NO_PACK_LIST: 'orange-3',
+        PACK_LIST_PENDING: 'orange-3',
+        PACK_LIST_MISMATCH: 'negative',
+        SN_INCOMPLETE: 'negative',
+        NOT_APPLICABLE: 'grey-3'
+      }[status] || 'grey-3'
+    },
+    qcChecked (row) {
+      return Number(row.asn_status_code) >= 4
+    },
+    stagingLabel (row) {
+      if (row.staging_bin) return row.staging_bin
+      return Number(row.asn_status_code) >= 5
+        ? this.$t('inbound.view_asn.staging_released')
+        : this.$t('inbound.view_asn.staging_unassigned')
+    },
+    openPackListFromView () {
+      this.viewForm = false
+      this.openPackList({ asn_code: this.viewAsn })
+    },
+    openSerialPanelFromView () {
+      this.viewForm = false
+      this.openSerialPanel({ asn_code: this.viewAsn })
+    },
+    editFromView () {
+      const row = this.viewRow
+      this.viewForm = false
+      this.editData(row)
+    },
+    deleteFromView () {
+      const row = this.viewRow
+      this.viewForm = false
+      this.deleteData(row)
     },
     nextAction (row) {
       const actions = {
@@ -1485,6 +1513,7 @@ export default {
         _this.warehouse_detail = res.warehouse_detail
         _this.supplier_detail = res.supplier_detail
         _this.viewAsn = e.asn_code
+        _this.viewRow = e
         var QRCode = require('qrcode')
         QRCode.toDataURL(e.bar_code, [
           {

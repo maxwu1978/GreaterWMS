@@ -18,6 +18,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     sku_count = serializers.SerializerMethodField()
     pack_list_status = serializers.SerializerMethodField()
     pack_list_has_serials = serializers.SerializerMethodField()
+    precheck_status = serializers.SerializerMethodField()
 
     def _get_detail_aggregate(self, obj):
         """Cache the small summary used by the ASN work queue."""
@@ -92,6 +93,61 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     def get_pack_list_has_serials(self, obj):
         document = self._get_pack_list(obj)
         return bool(document and document.has_serials)
+
+    def _get_precheck(self, obj):
+        """Return the receiving readiness check without calling the QC result."""
+        cache = self.context.setdefault('_asn_precheck_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        not_applicable = {'code': 'NOT_APPLICABLE'}
+        if int(obj.asn_status or 0) >= 4:
+            cache[cache_key] = not_applicable
+            return not_applicable
+
+        details = list(AsnDetailModel.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+            is_delete=False,
+        ).values('goods_code', 'goods_qty'))
+        planned = {}
+        for detail in details:
+            planned[detail['goods_code']] = planned.get(detail['goods_code'], 0) + int(detail['goods_qty'] or 0)
+
+        document = self._get_pack_list(obj)
+        if not document:
+            cache[cache_key] = {'code': 'NO_PACK_LIST'}
+            return cache[cache_key]
+        if document.status != 'CONFIRMED':
+            cache[cache_key] = {'code': 'PACK_LIST_PENDING'}
+            return cache[cache_key]
+
+        pack_lines = document.lines.values('goods_code', 'goods_qty')
+        packed = {}
+        for line in pack_lines:
+            packed[line['goods_code']] = packed.get(line['goods_code'], 0) + int(line['goods_qty'] or 0)
+        if planned != packed:
+            cache[cache_key] = {'code': 'PACK_LIST_MISMATCH'}
+            return cache[cache_key]
+
+        if document.has_serials:
+            from asnserial.models import AsnSerialRecord
+            expected_serials = AsnSerialRecord.objects.filter(
+                openid=obj.openid,
+                asn_code=obj.asn_code,
+                pack_list=document,
+                is_expected=True,
+            ).count()
+            if expected_serials < sum(packed.values()):
+                cache[cache_key] = {'code': 'SN_INCOMPLETE'}
+                return cache[cache_key]
+
+        cache[cache_key] = {'code': 'READY'}
+        return cache[cache_key]
+
+    def get_precheck_status(self, obj):
+        return self._get_precheck(obj)['code']
 
     def _get_staging_bins(self, obj):
         from staging.models import StagingAssignment
