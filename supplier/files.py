@@ -10,7 +10,8 @@ def file_headers():
         'supplier_level',
         'creater',
         'create_time',
-        'update_time'
+        'update_time',
+        'supplier_short_name'
     ]
 
 def cn_data_header():
@@ -24,6 +25,7 @@ def cn_data_header():
         ('creater', u'创建人'),
         ('create_time', u'创建时间'),
         ('update_time', u'更新时间'),
+        ('supplier_short_name', u'供应商简称'),
     ])
 
 def en_data_header():
@@ -37,6 +39,7 @@ def en_data_header():
         ('creater', u'Creater'),
         ('create_time', u'Create Time'),
         ('update_time', u'Update Time'),
+        ('supplier_short_name', u'Supplier Short Name'),
     ])
 
 class FileRenderCN(CSVStreamingRenderer):

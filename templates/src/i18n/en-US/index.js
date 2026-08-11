@@ -153,6 +153,7 @@ export default {
     },
     view_supplier: {
       supplier_name: 'Supplier Name',
+      supplier_short_name: 'Supplier Short Name',
       supplier_city: 'Supplier City',
       supplier_address: 'Supplier Address',
       supplier_contact: 'Supplier Contact',

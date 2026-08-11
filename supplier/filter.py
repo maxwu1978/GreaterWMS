@@ -7,6 +7,7 @@ class Filter(FilterSet):
         fields = {
             "id": ['exact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],
             "supplier_name": ['exact', 'iexact', 'contains', 'icontains'],
+            "supplier_short_name": ['exact', 'iexact', 'contains', 'icontains'],
             "supplier_city": ['exact', 'iexact', 'contains', 'icontains'],
             "supplier_address": ['exact', 'iexact', 'contains', 'icontains'],
             "supplier_contact": ['exact', 'iexact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],

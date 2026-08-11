@@ -2,6 +2,7 @@ from django.db import models
 
 class ListModel(models.Model):
     supplier_name = models.CharField(max_length=255, verbose_name="Supplier Name")
+    supplier_short_name = models.CharField(max_length=64, blank=True, default='', verbose_name="Supplier Short Name")
     supplier_city = models.CharField(max_length=255, verbose_name="Supplier City")
     supplier_address = models.CharField(max_length=255, verbose_name="Supplier Address")
     supplier_contact = models.CharField(max_length=255, verbose_name="Supplier Contact")

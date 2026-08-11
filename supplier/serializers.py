@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from .models import ListModel
+from .shortname import generated_supplier_short_name
 from utils import datasolve
 
 class SupplierGetSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=True, required=False)
+    supplier_short_name = serializers.SerializerMethodField()
     supplier_city = serializers.CharField(read_only=True, required=False)
     supplier_address = serializers.CharField(read_only=True, required=False)
     supplier_contact = serializers.CharField(read_only=True, required=False)
@@ -13,6 +15,9 @@ class SupplierGetSerializer(serializers.ModelSerializer):
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
 
+    def get_supplier_short_name(self, obj):
+        return (obj.supplier_short_name or '').strip() or generated_supplier_short_name(obj.supplier_name)
+
     class Meta:
         model = ListModel
         exclude = ['openid', 'is_delete', ]
@@ -21,6 +26,7 @@ class SupplierGetSerializer(serializers.ModelSerializer):
 class SupplierPostSerializer(serializers.ModelSerializer):
     openid = serializers.CharField(read_only=False, required=False, validators=[datasolve.openid_validate])
     supplier_name = serializers.CharField(read_only=False,  required=True, validators=[datasolve.data_validate])
+    supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
     supplier_city = serializers.CharField(read_only=False,  required=True, validators=[datasolve.data_validate])
     supplier_address = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     supplier_contact = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
@@ -34,6 +40,7 @@ class SupplierPostSerializer(serializers.ModelSerializer):
 
 class SupplierUpdateSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
+    supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
     supplier_city = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     supplier_address = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     supplier_contact = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
@@ -47,6 +54,7 @@ class SupplierUpdateSerializer(serializers.ModelSerializer):
 
 class SupplierPartialUpdateSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
+    supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
     supplier_city = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
     supplier_address = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
     supplier_contact = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
@@ -60,6 +68,7 @@ class SupplierPartialUpdateSerializer(serializers.ModelSerializer):
 
 class FileRenderSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=False, required=False)
+    supplier_short_name = serializers.CharField(read_only=False, required=False)
     supplier_city = serializers.CharField(read_only=False, required=False)
     supplier_address = serializers.CharField(read_only=False, required=False)
     supplier_contact = serializers.CharField(read_only=False, required=False)

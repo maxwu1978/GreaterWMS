@@ -148,6 +148,7 @@ export default {
     },
     view_supplier: {
       supplier_name: '供应商名称',
+      supplier_short_name: '供应商简称',
       supplier_city: '所在城市',
       supplier_address: '地址',
       supplier_contact: '联系方式',

@@ -62,6 +62,21 @@
                </q-td>
              </template>
              <template v-if="props.row.id === editid">
+               <q-td key="supplier_short_name" :props="props">
+                 <q-input dense
+                          outlined
+                          square
+                          v-model="editFormData.supplier_short_name"
+                          :label="$t('baseinfo.view_supplier.supplier_short_name')"
+                 />
+               </q-td>
+             </template>
+             <template v-else-if="props.row.id !== editid">
+               <q-td key="supplier_short_name" :props="props">
+                 {{ props.row.supplier_short_name || '—' }}
+               </q-td>
+             </template>
+             <template v-if="props.row.id === editid">
                <q-td key="supplier_city" :props="props">
                  <q-input dense
                           outlined
@@ -231,6 +246,12 @@
            <q-input dense
                     outlined
                     square
+                    v-model="newFormData.supplier_short_name"
+                    :label="$t('baseinfo.view_supplier.supplier_short_name')"
+                    @keyup.enter="newDataSubmit()"/>
+           <q-input dense
+                    outlined
+                    square
                     v-model="newFormData.supplier_city"
                     :label="$t('baseinfo.view_supplier.supplier_city')"
                     :rules="[ val => val && val.length > 0 || error2]"
@@ -313,6 +334,7 @@ export default {
       table_list: [],
       columns: [
         { name: 'supplier_name', required: true, label: this.$t('baseinfo.view_supplier.supplier_name'), align: 'left', field: 'supplier_name' },
+        { name: 'supplier_short_name', label: this.$t('baseinfo.view_supplier.supplier_short_name'), field: 'supplier_short_name', align: 'center' },
         { name: 'supplier_city', label: this.$t('baseinfo.view_supplier.supplier_city'), field: 'supplier_city', align: 'center' },
         { name: 'supplier_address', label: this.$t('baseinfo.view_supplier.supplier_address'), field: 'supplier_address', align: 'center' },
         { name: 'supplier_contact', label: this.$t('baseinfo.view_supplier.supplier_contact'), field: 'supplier_contact', align: 'center' },
@@ -331,6 +353,7 @@ export default {
       newForm: false,
       newFormData: {
         supplier_name: '',
+        supplier_short_name: '',
         supplier_city: '',
         supplier_address: '',
         supplier_contact: '',
@@ -508,6 +531,7 @@ export default {
       _this.newForm = false
       _this.newFormData = {
         supplier_name: '',
+        supplier_short_name: '',
         supplier_city: '',
         supplier_address: '',
         supplier_contact: '',
@@ -522,6 +546,7 @@ export default {
       _this.editid = e.id
       _this.editFormData = {
         supplier_name: e.supplier_name,
+        supplier_short_name: e.supplier_short_name || '',
         supplier_city: e.supplier_city,
         supplier_address: e.supplier_address,
         supplier_contact: e.supplier_contact,
@@ -554,6 +579,7 @@ export default {
       _this.editid = 0
       _this.editFormData = {
         supplier_name: '',
+        supplier_short_name: '',
         supplier_city: '',
         supplier_address: '',
         supplier_contact: '',

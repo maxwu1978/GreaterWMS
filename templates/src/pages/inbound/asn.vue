@@ -48,7 +48,9 @@
             <q-td key="asn_code" :props="props">
               <q-btn flat dense no-caps color="primary" :label="props.row.asn_code" @click="viewData(props.row)" />
             </q-td>
-            <q-td key="supplier" :props="props">{{ props.row.supplier || '—' }}</q-td>
+            <q-td key="supplier" :props="props">
+              <span :title="props.row.supplier || ''">{{ props.row.supplier_short_name || props.row.supplier || '—' }}</span>
+            </q-td>
             <q-td key="asn_status" :props="props">
               <q-chip
                 dense

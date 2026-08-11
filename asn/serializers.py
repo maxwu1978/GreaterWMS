@@ -1,11 +1,13 @@
 from rest_framework import serializers
 from .models import AsnListModel, AsnDetailModel
 from utils import datasolve
+from supplier.shortname import generated_supplier_short_name
 
 class ASNListGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
     asn_status = serializers.IntegerField(read_only=True, required=False)
     supplier = serializers.CharField(read_only=True, required=False)
+    supplier_short_name = serializers.SerializerMethodField()
     bar_code = serializers.CharField(read_only=True, required=False)
     creater = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
@@ -19,6 +21,21 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     pack_list_status = serializers.SerializerMethodField()
     pack_list_has_serials = serializers.SerializerMethodField()
     precheck_status = serializers.SerializerMethodField()
+
+    def get_supplier_short_name(self, obj):
+        cache = self.context.setdefault('_asn_supplier_cache', {})
+        cache_key = (obj.openid, obj.supplier)
+        if cache_key not in cache:
+            from supplier.models import ListModel as SupplierModel
+            cache[cache_key] = SupplierModel.objects.filter(
+                openid=obj.openid,
+                supplier_name=obj.supplier,
+                is_delete=False,
+            ).only('supplier_short_name').first()
+        supplier_record = cache[cache_key]
+        if supplier_record and (supplier_record.supplier_short_name or '').strip():
+            return supplier_record.supplier_short_name.strip()
+        return generated_supplier_short_name(obj.supplier)
 
     def _get_detail_aggregate(self, obj):
         """Cache the small summary used by the ASN work queue."""

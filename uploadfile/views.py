@@ -335,6 +335,9 @@ class SupplierfileViewSet(views.APIView):
                                 data_list[i][5] = 0
                         else:
                             data_list[i][5] = 0
+                        supplier_short_name = ''
+                        if len(data_list[i]) > 9 and str(data_list[i][9]).lower() != 'nan':
+                            supplier_short_name = str(data_list[i][9]).strip()
                         supplier.objects.create(openid=self.request.auth.openid,
                                                 supplier_name=str(data_list[i][0]).strip(),
                                                 supplier_city=str(data_list[i][1]).strip(),
@@ -342,6 +345,7 @@ class SupplierfileViewSet(views.APIView):
                                                 supplier_contact=data_list[i][3],
                                                 supplier_manager=str(data_list[i][4]).strip(),
                                                 supplier_level=data_list[i][5],
+                                                supplier_short_name=supplier_short_name,
                                                 creater=str(staff_name)
                                                 )
             else:
@@ -851,6 +855,9 @@ class SupplierfileAddViewSet(views.APIView):
                                 data_list[i][5] = 0
                         else:
                             data_list[i][5] = 0
+                        supplier_short_name = ''
+                        if len(data_list[i]) > 9 and str(data_list[i][9]).lower() != 'nan':
+                            supplier_short_name = str(data_list[i][9]).strip()
                         if supplier.objects.filter(openid=self.request.auth.openid,
                                                    supplier_name=str(data_list[i][0]).strip(),
                                                    supplier_city=str(data_list[i][1]).strip(),
@@ -869,6 +876,7 @@ class SupplierfileAddViewSet(views.APIView):
                                                     supplier_contact=data_list[i][3],
                                                     supplier_manager=str(data_list[i][4]).strip(),
                                                     supplier_level=data_list[i][5],
+                                                    supplier_short_name=supplier_short_name,
                                                     creater=str(staff_name)
                                                     )
             else:
