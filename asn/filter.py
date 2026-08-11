@@ -8,6 +8,7 @@ class AsnListFilter(FilterSet):
             "id": ['exact', 'iexact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],
             "asn_code": ['exact', 'iexact', 'contains', 'icontains'],
             "asn_status": ['exact', 'iexact',  'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],
+            "expected_arrival_at": ['exact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'range'],
             "total_weight": ['exact', 'iexact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],
             "total_volume": ['exact', 'iexact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],
             "total_cost": ['exact', 'iexact', 'gt', 'gte', 'lt', 'lte', 'isnull', 'in', 'range'],

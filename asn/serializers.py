@@ -6,6 +6,7 @@ from supplier.shortname import generated_supplier_short_name
 class ASNListGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
     asn_status = serializers.IntegerField(read_only=True, required=False)
+    expected_arrival_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
     supplier = serializers.CharField(read_only=True, required=False)
     supplier_short_name = serializers.SerializerMethodField()
     bar_code = serializers.CharField(read_only=True, required=False)
@@ -189,6 +190,7 @@ class ASNListPostSerializer(serializers.ModelSerializer):
     openid = serializers.CharField(read_only=False, required=False, validators=[datasolve.openid_validate])
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
     supplier = serializers.CharField(read_only=False, required=False)
+    expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
     bar_code = serializers.CharField(read_only=False, required=True)
     creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     class Meta:
@@ -198,6 +200,7 @@ class ASNListPostSerializer(serializers.ModelSerializer):
 
 class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
+    expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
 
     class Meta:
         model = AsnListModel
@@ -206,6 +209,7 @@ class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
 
 class ASNListUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
+    expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
 
     class Meta:
         model = AsnListModel

@@ -1,7 +1,5 @@
-from datetime import timedelta
-
 from rest_framework import viewsets
-from asn.models import AsnDetailModel
+from asn.models import AsnDetailModel, AsnListModel
 from dn.models import DnDetailModel
 from asn import serializers as asnserializers
 from dn import serializers as dnserializers
@@ -236,10 +234,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         })
 
     @staticmethod
-    def _lane(timestamp, *, blocked, planned):
+    def _lane(eta, *, blocked, planned):
         if blocked:
             return 'blocked'
-        if timestamp and timezone.now() - timestamp > timedelta(hours=24):
+        if eta and timezone.now() > eta:
             return 'delayed'
         return 'next' if planned else 'now'
 
@@ -255,6 +253,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             4: ('Putaway', 'Storage', 'sortstock', False),
         }
         grouped = {}
+        eta_by_asn = dict(AsnListModel.objects.filter(
+            openid=openid,
+            is_delete=False,
+        ).values_list('asn_code', 'expected_arrival_at'))
         rows = AsnDetailModel.objects.filter(
             openid=openid,
             asn_status__in=status_map.keys(),
@@ -272,6 +274,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'progress_quantity': 0,
                 'blocked': False,
                 'timestamp': self._timestamp(row),
+                'eta': eta_by_asn.get(row.asn_code),
             })
             if row.asn_status < current['status']:
                 current['status'] = row.asn_status
@@ -319,6 +322,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'progress_quantity': 0,
                 'blocked': False,
                 'timestamp': self._timestamp(row),
+                'eta': None,
             })
             if row.dn_status < current['status']:
                 current['status'] = row.dn_status
@@ -340,7 +344,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
 
     def _format_item(self, item, now):
         timestamp = item['timestamp']
-        lane = self._lane(timestamp, blocked=item['blocked'], planned=item['planned'])
+        eta = item.get('eta')
+        lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
         quantity = item['quantity']
         progress = min(item['progress_quantity'], quantity)
         return {
@@ -353,7 +358,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'quantity': max(quantity - progress, 0),
             'progress_quantity': progress,
             'total_quantity': quantity,
-            'time': timestamp.strftime('%m-%d %H:%M') if timestamp else '',
+            'eta': timezone.localtime(eta).strftime('%m-%d %H:%M') if eta else '',
             'action_route': item['action_route'],
             'sort_time': timestamp or now,
         }

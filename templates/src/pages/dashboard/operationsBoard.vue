@@ -60,6 +60,11 @@
           {{ props.row.quantity }} / {{ props.row.total_quantity }}
         </q-td>
       </template>
+      <template v-slot:body-cell-eta="props">
+        <q-td :props="props">
+          {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
+        </q-td>
+      </template>
       <template v-slot:body-cell-operation="props">
         <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
       </template>
@@ -119,7 +124,7 @@ export default {
     },
     columns () {
       return [
-        { name: 'time', label: this.label('operations_board.time', 'Time'), field: 'time', align: 'left' },
+        { name: 'eta', label: this.label('operations_board.eta', 'ETA'), field: 'eta', align: 'left' },
         { name: 'category', label: this.label('operations_board.type', 'Type'), field: 'category', align: 'left' },
         { name: 'operation', label: this.label('operations_board.operation', 'Operation'), field: 'operation', align: 'left' },
         { name: 'reference', label: this.label('operations_board.reference', 'Reference'), field: 'reference', align: 'left' },

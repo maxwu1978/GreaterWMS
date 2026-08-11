@@ -3,6 +3,7 @@ from django.db import models
 class AsnListModel(models.Model):
     asn_code = models.CharField(max_length=255, verbose_name="ASN Code")
     asn_status = models.BigIntegerField(default=1, verbose_name="ASN Status")
+    expected_arrival_at = models.DateTimeField(blank=True, null=True, verbose_name="Expected Arrival Time")
     total_weight = models.FloatField(default=0, verbose_name="Total Weight")
     total_volume = models.FloatField(default=0, verbose_name="Total Volume")
     total_cost = models.FloatField(default=0, verbose_name="Total Cost")
@@ -47,4 +48,3 @@ class AsnDetailModel(models.Model):
         verbose_name = 'ASN Detail'
         verbose_name_plural = "ASN Detail"
         ordering = ['-id']
-
