@@ -7,6 +7,8 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
     asn_status = serializers.IntegerField(read_only=True, required=False)
     expected_arrival_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
+    actual_arrival_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
+    eta_received_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
     supplier = serializers.CharField(read_only=True, required=False)
     supplier_short_name = serializers.SerializerMethodField()
     bar_code = serializers.CharField(read_only=True, required=False)
@@ -22,6 +24,11 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     pack_list_status = serializers.SerializerMethodField()
     pack_list_has_serials = serializers.SerializerMethodField()
     precheck_status = serializers.SerializerMethodField()
+    package_qty = serializers.IntegerField(read_only=True)
+    package_qty_source = serializers.SerializerMethodField()
+    staging_reserved_qty = serializers.SerializerMethodField()
+    staging_occupied_qty = serializers.SerializerMethodField()
+    arrival_status = serializers.SerializerMethodField()
 
     def get_supplier_short_name(self, obj):
         cache = self.context.setdefault('_asn_supplier_cache', {})
@@ -94,6 +101,38 @@ class ASNListGetSerializer(serializers.ModelSerializer):
 
     def get_planned_qty(self, obj):
         return self._get_detail_aggregate(obj)['planned_qty']
+
+    def get_package_qty_source(self, obj):
+        from asn.services import inbound_package_quantity
+        return inbound_package_quantity(obj)[1]
+
+    def _get_staging_summary(self, obj):
+        cache = self.context.setdefault('_asn_staging_summary_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key not in cache:
+            from staging.models import StagingAssignment
+            assignments = StagingAssignment.objects.filter(
+                openid=obj.openid,
+                flow=StagingAssignment.INBOUND,
+                reference_code=obj.asn_code,
+                status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
+            )
+            cache[cache_key] = {
+                'reserved': assignments.filter(status=StagingAssignment.RESERVED).count(),
+                'occupied': assignments.filter(status=StagingAssignment.ACTIVE).count(),
+            }
+        return cache[cache_key]
+
+    def get_staging_reserved_qty(self, obj):
+        return self._get_staging_summary(obj)['reserved']
+
+    def get_staging_occupied_qty(self, obj):
+        return self._get_staging_summary(obj)['occupied']
+
+    def get_arrival_status(self, obj):
+        if obj.actual_arrival_at:
+            return 'ARRIVED'
+        return 'PRE_ARRIVAL'
 
     def get_actual_qty(self, obj):
         return self._get_detail_aggregate(obj)['actual_qty']
@@ -191,6 +230,8 @@ class ASNListPostSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
     supplier = serializers.CharField(read_only=False, required=False)
     expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
+    package_qty = serializers.IntegerField(read_only=False, required=False, min_value=0)
+    container_tracking = serializers.CharField(read_only=False, required=False, allow_blank=True)
     bar_code = serializers.CharField(read_only=False, required=True)
     creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     class Meta:
@@ -201,6 +242,8 @@ class ASNListPostSerializer(serializers.ModelSerializer):
 class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
     expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
+    package_qty = serializers.IntegerField(read_only=False, required=False, min_value=0)
+    container_tracking = serializers.CharField(read_only=False, required=False, allow_blank=True)
 
     class Meta:
         model = AsnListModel
@@ -210,6 +253,8 @@ class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
 class ASNListUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
     expected_arrival_at = serializers.DateTimeField(read_only=False, required=False, allow_null=True)
+    package_qty = serializers.IntegerField(read_only=False, required=False, min_value=0)
+    container_tracking = serializers.CharField(read_only=False, required=False, allow_blank=True)
 
     class Meta:
         model = AsnListModel

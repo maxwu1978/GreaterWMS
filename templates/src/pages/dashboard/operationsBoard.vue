@@ -87,6 +87,9 @@
           <span :title="label('operations_board.location_hint', 'Target area for this step, not current inventory location')">
             {{ locationLabel(props.value) }}
           </span>
+          <div v-if="props.row.category === 'inbound'" class="text-caption text-grey-6">
+            R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
+          </div>
         </q-td>
       </template>
       <template v-slot:body-cell-action="props">

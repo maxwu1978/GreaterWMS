@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.db.models import Sum
 import re
 from django.utils import timezone
+from staging.models import StagingAssignment
 
 class ReceiptsViewSet(viewsets.ModelViewSet):
     """
@@ -255,10 +256,23 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             4: ('Putaway', 'Storage', 'sortstock', False),
         }
         grouped = {}
-        eta_by_asn = dict(AsnListModel.objects.filter(
+        asn_context = {
+            row['asn_code']: row for row in AsnListModel.objects.filter(
             openid=openid,
             is_delete=False,
-        ).values_list('asn_code', 'expected_arrival_at'))
+        ).values('asn_code', 'expected_arrival_at', 'actual_arrival_at', 'package_qty')
+        }
+        staging_context = {}
+        for assignment in StagingAssignment.objects.filter(
+            openid=openid,
+            flow=StagingAssignment.INBOUND,
+            status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
+        ).only('reference_code', 'status'):
+            summary = staging_context.setdefault(assignment.reference_code, {'reserved': 0, 'occupied': 0})
+            if assignment.status == StagingAssignment.RESERVED:
+                summary['reserved'] += 1
+            else:
+                summary['occupied'] += 1
         rows = list(AsnDetailModel.objects.filter(
             openid=openid,
             asn_status__in=status_map.keys(),
@@ -272,12 +286,14 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         ).values_list('supplier_name', 'supplier_short_name'))
         for row in rows:
             customer_name = row.supplier or ''
+            intake = asn_context.get(row.asn_code, {})
+            staging = staging_context.get(row.asn_code, {'reserved': 0, 'occupied': 0})
             current = grouped.setdefault(row.asn_code, {
                 'category': 'inbound',
                 'reference': row.asn_code,
                 'customer': supplier_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
                 'customer_full_name': customer_name,
-                'operation': 'Unload',
+                'operation': 'Reserve Stage',
                 'location': 'Stage',
                 'action_route': 'asn',
                 'status': 99,
@@ -285,7 +301,11 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'progress_quantity': 0,
                 'blocked': False,
                 'timestamp': self._timestamp(row),
-                'eta': eta_by_asn.get(row.asn_code),
+                'eta': intake.get('expected_arrival_at'),
+                'actual_arrival_at': intake.get('actual_arrival_at'),
+                'staging_reserved_qty': staging['reserved'],
+                'staging_occupied_qty': staging['occupied'],
+                'package_qty': intake.get('package_qty') or 0,
             })
             if row.asn_status < current['status']:
                 current['status'] = row.asn_status
@@ -296,6 +316,11 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'action_route': route,
                 'planned': planned,
             })
+            if current['status'] == 1:
+                if current['actual_arrival_at']:
+                    current.update({'operation': 'Unload', 'planned': False})
+                elif current['staging_reserved_qty']:
+                    current['operation'] = 'Await Arrival'
             current['quantity'] += int(row.goods_qty or 0)
             current['progress_quantity'] += int(row.goods_actual_qty or row.sorted_qty or 0)
             current['blocked'] = current['blocked'] or any([
@@ -359,7 +384,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
     def _format_item(self, item, now):
         timestamp = item['timestamp']
         eta = item.get('eta')
-        lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
+        if item.get('actual_arrival_at') and item.get('operation') == 'Unload':
+            lane = 'blocked' if item['blocked'] else 'now'
+        else:
+            lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
         quantity = item['quantity']
         progress = min(item['progress_quantity'], quantity)
         return {
@@ -375,6 +403,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'progress_quantity': progress,
             'total_quantity': quantity,
             'eta': timezone.localtime(eta).strftime('%m-%d %H:%M') if eta else '',
+            'arrival_status': 'ARRIVED' if item.get('actual_arrival_at') else 'PRE_ARRIVAL',
+            'staging_reserved_qty': item.get('staging_reserved_qty', 0),
+            'staging_occupied_qty': item.get('staging_occupied_qty', 0),
             'action_route': item['action_route'],
             'sort_time': timestamp or now,
         }

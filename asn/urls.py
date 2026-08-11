@@ -4,6 +4,10 @@ from . import views
 urlpatterns = [
 path(r'list/', views.AsnListViewSet.as_view({"get": "list", "post": "create"}), name="asnlist"),
 re_path(r'^cancel/(?P<pk>\d+)/$', views.AsnCancelView.as_view(), name="asn-cancel"),
+re_path(r'^eta/(?P<pk>\d+)/$', views.AsnEtaUpdateView.as_view(), name="asn-eta-update"),
+re_path(r'^arrival/(?P<pk>\d+)/$', views.AsnArrivalConfirmView.as_view(), name="asn-arrival-confirm"),
+re_path(r'^reserve-staging/(?P<pk>\d+)/$', views.AsnStagingReserveView.as_view(), name="asn-reserve-staging"),
+path(r'events/', views.AsnEventListView.as_view(), name="asn-events"),
 path(r'cleanup-cancelled-serials/', views.AsnCleanupCancelledSerialsView.as_view(), name="asn-cleanup-cancelled-serials"),
 re_path(r'^list/(?P<pk>\d+)/$', views.AsnListViewSet.as_view({
     'get': 'retrieve',

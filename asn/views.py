@@ -1,5 +1,6 @@
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets
-from .models import AsnListModel, AsnDetailModel
+from .models import AsnEventModel, AsnListModel, AsnDetailModel
 from . import serializers
 from .page import MyPageNumberPaginationASNList
 from utils.page import MyPageNumberPagination
@@ -40,6 +41,36 @@ from staging.services import (
     release_staging_slot,
     reserve_staging_slots,
 )
+from .services import inbound_package_quantity
+
+
+def _operator_name(request):
+    operator_id = request.META.get('HTTP_OPERATOR', '')
+    operator = staff.objects.filter(
+        openid=request.auth.openid,
+        id=operator_id,
+        is_delete=False,
+    ).first() if operator_id else None
+    return operator.staff_name if operator else str(operator_id or '')
+
+
+def _request_datetime(value, label):
+    if value in (None, ''):
+        return None
+    try:
+        parsed = drf_serializers.DateTimeField().to_internal_value(value)
+    except Exception as exc:
+        raise APIException({'detail': '%s is invalid: %s' % (label, exc)})
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def _asn_response(request, asn):
+    return serializers.ASNListGetSerializer(
+        asn,
+        context={'request': request},
+    ).data
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -101,6 +132,19 @@ class AsnListViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         data = self.request.data
         data['openid'] = self.request.auth.openid
+        container_tracking = str(data.get('container_tracking') or '').strip()
+        if container_tracking:
+            existing = AsnListModel.objects.filter(
+                openid=self.request.auth.openid,
+                container_tracking__iexact=container_tracking,
+                is_delete=False,
+            ).first()
+            if existing:
+                return Response({
+                    'detail': 'An active ASN already exists for this container / tracking reference',
+                    'asn_id': existing.id,
+                    'asn_code': existing.asn_code,
+                }, status=409)
         custom_asn = self.request.GET.get('custom_asn', '')
         if custom_asn:
             data['asn_code'] = custom_asn
@@ -130,6 +174,7 @@ class AsnListViewSet(viewsets.ModelViewSet):
             raise APIException({"detail": "Cannot delete data which not yours"})
         else:
             if qs.asn_status == 1:
+                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
                 qs.is_delete = True
                 asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                               asn_status=1, is_delete=False)
@@ -146,6 +191,147 @@ class AsnListViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data, status=200, headers=headers)
             else:
                 raise APIException({"detail": "This ASN Status Is Not '1'"})
+
+
+class AsnEtaUpdateView(APIView):
+    """Update a customer ETA without changing inventory or receiving status."""
+
+    @transaction.atomic
+    def post(self, request, pk):
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=request.auth.openid,
+            id=pk,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({'detail': 'ASN does not exist'})
+        if int(asn.asn_status or 0) >= 5:
+            raise APIException({'detail': 'Completed ASN ETA cannot be changed'})
+        new_eta = _request_datetime(request.data.get('expected_arrival_at'), 'ETA')
+        old_eta = asn.expected_arrival_at
+        asn.expected_arrival_at = new_eta
+        asn.eta_received_at = timezone.now()
+        asn.eta_received_by = _operator_name(request)
+        asn.eta_source = str(request.data.get('source') or 'CUSTOMER').strip()[:64]
+        asn.save(update_fields=[
+            'expected_arrival_at',
+            'eta_received_at',
+            'eta_received_by',
+            'eta_source',
+            'update_time',
+        ])
+        AsnEventModel.objects.create(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+            event_type=AsnEventModel.ETA_UPDATED,
+            old_expected_arrival_at=old_eta,
+            new_expected_arrival_at=new_eta,
+            operator=_operator_name(request),
+            source=asn.eta_source,
+            note=str(request.data.get('note') or ''),
+        )
+        return Response({'detail': 'ETA updated', 'asn': _asn_response(request, asn)})
+
+
+class AsnArrivalConfirmView(APIView):
+    """Record physical arrival separately from the customer ETA."""
+
+    @transaction.atomic
+    def post(self, request, pk):
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=request.auth.openid,
+            id=pk,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({'detail': 'ASN does not exist'})
+        if int(asn.asn_status or 0) != 1:
+            raise APIException({'detail': 'Only Pre Arrival ASN can be marked arrived'})
+        actual_arrival = _request_datetime(request.data.get('actual_arrival_at'), 'Actual arrival time') or timezone.now()
+        asn.actual_arrival_at = actual_arrival
+        asn.arrival_confirmed_by = _operator_name(request)
+        asn.save(update_fields=['actual_arrival_at', 'arrival_confirmed_by', 'update_time'])
+        AsnEventModel.objects.create(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+            event_type=AsnEventModel.ARRIVAL_CONFIRMED,
+            actual_arrival_at=actual_arrival,
+            operator=_operator_name(request),
+            source=str(request.data.get('source') or 'WAREHOUSE').strip()[:64],
+            note=str(request.data.get('note') or ''),
+        )
+        return Response({'detail': 'Arrival confirmed', 'asn': _asn_response(request, asn)})
+
+
+class AsnStagingReserveView(APIView):
+    """Reserve staging capacity before arrival without occupying it."""
+
+    @transaction.atomic
+    def post(self, request, pk):
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=request.auth.openid,
+            id=pk,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({'detail': 'ASN does not exist'})
+        if int(asn.asn_status or 0) != 1:
+            raise APIException({'detail': 'Staging can only be reserved before unloading'})
+        quantity, quantity_source = inbound_package_quantity(asn)
+        staging_bins = request.data.get('staging_bins') or []
+        if not staging_bins and request.data.get('staging_bin'):
+            staging_bins = [request.data.get('staging_bin')]
+        try:
+            reserve_staging_slots(
+                request.auth.openid,
+                StagingAssignment.INBOUND,
+                asn.asn_code,
+                staging_bins,
+                quantity,
+                '',
+                _operator_name(request),
+            )
+        except StagingError as exc:
+            raise APIException({'detail': str(exc)})
+        AsnEventModel.objects.create(
+            openid=request.auth.openid,
+            asn_code=asn.asn_code,
+            event_type=AsnEventModel.STAGING_RESERVED,
+            operator=_operator_name(request),
+            source='WAREHOUSE',
+            note='Reserved %s load units from %s' % (quantity, quantity_source),
+        )
+        return Response({
+            'detail': 'Staging capacity reserved',
+            'package_qty': quantity,
+            'package_qty_source': quantity_source,
+            'asn': _asn_response(request, asn),
+        })
+
+
+class AsnEventListView(APIView):
+    def get(self, request):
+        asn_code = str(request.query_params.get('asn_code') or '').strip()
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        events = AsnEventModel.objects.filter(openid=request.auth.openid, asn_code=asn_code)
+        return Response({
+            'count': events.count(),
+            'results': [
+                {
+                    'id': event.id,
+                    'event_type': event.event_type,
+                    'old_expected_arrival_at': event.old_expected_arrival_at,
+                    'new_expected_arrival_at': event.new_expected_arrival_at,
+                    'actual_arrival_at': event.actual_arrival_at,
+                    'operator': event.operator,
+                    'source': event.source,
+                    'note': event.note,
+                    'event_time': event.event_time,
+                }
+                for event in events
+            ],
+        })
 
 
 class AsnCancelView(APIView):
@@ -183,7 +369,7 @@ class AsnCancelView(APIView):
             stock.goods_qty = max(0, stock.goods_qty - quantity)
             stock.save()
 
-        if asn.asn_status == 2:
+        if asn.asn_status in (1, 2):
             release_staging_slot(request.auth.openid, StagingAssignment.INBOUND, asn.asn_code)
 
         # Serial records have no soft-delete field in the current schema. They
@@ -643,9 +829,11 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
             if qs.asn_status == 1:
                 if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=1, is_delete=False).exists():
+                    if not qs.actual_arrival_at:
+                        raise APIException({"detail": "Mark the ASN as arrived before starting unloading"})
                     asn_detail_list = AsnDetailModel.objects.select_for_update().filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                     asn_status=1, is_delete=False)
-                    quantity = asn_detail_list.aggregate(sum=Sum('goods_qty'))['sum'] or 0
+                    quantity, _ = inbound_package_quantity(qs)
                     staging_bins = request.data.get('staging_bins')
                     if not staging_bins:
                         staging_bin = request.data.get('staging_bin')

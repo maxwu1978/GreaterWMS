@@ -31,7 +31,10 @@
         <div class="col-12 col-md-3">
           <q-input v-model="sourceUrl" outlined dense label="Source link (optional)" />
         </div>
-        <div class="col-12 col-md-9">
+        <div class="col-12 col-md-2">
+          <q-input v-model.number="packageQty" outlined dense type="number" min="0" label="Packages / load units" />
+        </div>
+        <div class="col-12 col-md-7">
           <q-input v-model="note" outlined dense label="Note" />
         </div>
         <div class="col-12 col-md-3 text-right">
@@ -83,6 +86,7 @@
             <div class="col-6 col-md-3">Lines: {{ selectedDocument.line_count }}</div>
             <div class="col-6 col-md-3">Qty: {{ selectedDocument.total_qty }}</div>
             <div class="col-6 col-md-3">SN: {{ selectedDocument.expected_serial_count }}</div>
+            <div class="col-6 col-md-3">Load units: {{ selectedDocument.package_qty || 'Not provided' }}</div>
           </div>
           <q-list bordered separator>
             <q-item v-for="(line, index) in selectedDocument.lines" :key="index">
@@ -114,6 +118,7 @@ export default {
       sourceType: 'UPLOAD',
       sourceUrl: '',
       note: '',
+      packageQty: 0,
       loading: false,
       detailOpen: false,
       selectedDocument: null,
@@ -130,6 +135,7 @@ export default {
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
         { name: 'line_count', label: 'Lines', field: 'line_count', align: 'center' },
         { name: 'total_qty', label: 'Qty', field: 'total_qty', align: 'center' },
+        { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
         { name: 'action', label: 'Action', align: 'right' }
       ]
@@ -165,6 +171,7 @@ export default {
       form.append('source_type', this.sourceType)
       form.append('source_url', this.sourceUrl)
       form.append('note', this.note)
+      form.append('package_qty', this.packageQty || 0)
       postauthfile('asn/serial/packlists/import/', form).then(res => {
         this.selectedFile = null
         this.loadDocuments()

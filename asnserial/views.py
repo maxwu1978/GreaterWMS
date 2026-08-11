@@ -101,6 +101,7 @@ def _pack_list_json(document):
         'source_url': document.source_url,
         'status': document.status,
         'has_serials': document.has_serials,
+        'package_qty': document.package_qty,
         'note': document.note,
         'created_by': document.created_by,
         'confirmed_by': document.confirmed_by,
@@ -489,7 +490,7 @@ def _pack_list_rows_from_workbook(upload):
     return rows
 
 
-def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_url='', note=''):
+def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_url='', note='', package_qty=0):
     asn = AsnListModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False).first()
     if not asn:
         raise APIException({'detail': 'ASN Code does not exists'})
@@ -535,10 +536,14 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', sou
         source_file=str(source_file or '')[:255],
         source_url=str(source_url or '')[:1000],
         has_serials=has_serials,
+        package_qty=max(0, int(package_qty or 0)),
         note=str(note or ''),
         raw_payload={'row_count': len(normalized_rows), 'has_serials': has_serials},
         created_by=_operator_name(request, openid),
     )
+    if document.package_qty > 0 and int(asn.package_qty or 0) != document.package_qty:
+        asn.package_qty = document.package_qty
+        asn.save(update_fields=['package_qty', 'update_time'])
     for row in normalized_rows:
         PackListLine.objects.create(
             pack_list=document,
@@ -620,6 +625,7 @@ class PackListCreateView(APIView):
                 source_type=str(data.get('source_type') or 'MANUAL').upper(),
                 source_url=data.get('source_url'),
                 note=data.get('note'),
+                package_qty=data.get('package_qty'),
             )
         return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, asn_code)})
 
@@ -646,6 +652,7 @@ class PackListImportView(APIView):
                 source_file=upload.name,
                 source_url=request.data.get('source_url'),
                 note=request.data.get('note'),
+                package_qty=request.data.get('package_qty'),
             )
         return Response({
             'detail': 'success',

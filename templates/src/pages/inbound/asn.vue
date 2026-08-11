@@ -61,6 +61,10 @@
                 {{ props.row.asn_status_label }}
               </q-chip>
             </q-td>
+            <q-td key="eta" :props="props" class="text-center">
+              <div>{{ etaLabel(props.row) }}</div>
+              <div class="text-caption text-grey-6">{{ arrivalLabel(props.row) }}</div>
+            </q-td>
             <q-td key="sku_quantity" :props="props" class="text-center">
               {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
             </q-td>
@@ -68,6 +72,9 @@
               <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'">
                 {{ stagingLabel(props.row) }}
               </span>
+              <div class="text-caption text-grey-6">
+                R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
+              </div>
             </q-td>
             <q-td key="pack_list_status" :props="props">
               <q-chip
@@ -94,7 +101,15 @@
               </q-chip>
             </q-td>
             <q-td key="next_action" :props="props">
+              <div v-if="Number(props.row.asn_status_code) === 1" class="row no-wrap q-gutter-xs">
+                <q-btn dense flat no-caps color="primary" label="ETA" @click="updateEta(props.row)" />
+                <q-btn v-if="!props.row.actual_arrival_at" dense flat no-caps color="positive" label="Arrived" @click="markArrived(props.row)" />
+                <q-btn v-if="Number(props.row.staging_reserved_qty || 0) < requiredStagingSlots(props.row)" dense flat no-caps color="orange-8" label="Reserve" @click="reserveStaging(props.row)" />
+                <q-btn v-if="props.row.actual_arrival_at" dense unelevated no-caps color="primary" label="Unload" @click="preloadData(props.row)" />
+                <q-btn v-else dense flat no-caps disable label="Awaiting arrival" />
+              </div>
               <q-btn
+                v-else
                 dense
                 unelevated
                 no-caps
@@ -556,27 +571,46 @@
     <q-dialog v-model="preloadForm">
         <q-card class="shadow-24">
           <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
-          <div>{{ $t('inbound.view_asn.confirm_arrival_staging') }}</div>
+          <div>{{ preloadMode === 'reserve' ? 'Reserve Staging Capacity' : 'Start Unloading' }}</div>
           <q-space />
           <q-btn dense flat icon="close" v-close-popup>
             <q-tooltip content-class="bg-amber text-black shadow-4">{{ $t('index.close') }}</q-tooltip>
           </q-btn>
         </q-bar>
         <q-card-section style="max-height: 500px; width: 500px" class="scroll">
-          <div class="text-subtitle2 q-mb-sm">{{ $t('inbound.view_asn.confirm_arrival_staging') }}</div>
+          <div class="text-subtitle2 q-mb-sm">{{ preloadMode === 'reserve' ? 'Reserve staging locations before arrival' : 'Select the reserved locations for this physical unload' }}</div>
           <StagingSlotPicker
             flow="INBOUND"
             v-model="preloadStagingBin"
             :multiple="true"
             :max-selections="preloadRequiredSlots"
+            :allow-reserved="preloadMode !== 'reserve'"
           />
           <div class="text-caption text-grey-7 q-mt-sm">
-            {{ $t('inbound.view_asn.required_staging_locations') }}: {{ preloadRequiredSlots }}
+            Load units / staging locations: {{ preloadRequiredSlots }}
           </div>
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="preloadDataCancel()">{{ $t('cancel') }}</q-btn>
-          <q-btn color="primary" @click="preloadDataSubmit()">{{ $t('submit') }}</q-btn>
+          <q-btn color="primary" @click="preloadDataSubmit()">{{ preloadMode === 'reserve' ? 'Reserve' : 'Start Unloading' }}</q-btn>
+        </div>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="etaForm">
+      <q-card class="shadow-24">
+        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>Update ETA</div>
+          <q-space />
+          <q-btn dense flat icon="close" v-close-popup />
+        </q-bar>
+        <q-card-section style="width: 400px">
+          <q-input dense outlined square type="datetime-local" v-model="etaDraft" label="Expected arrival" />
+          <q-input dense outlined square v-model="etaSource" label="Source" class="q-mt-sm" />
+          <div class="text-caption text-grey-7 q-mt-sm">ETA does not mark the shipment as arrived or change inventory.</div>
+        </q-card-section>
+        <div class="text-right q-pa-md">
+          <q-btn flat label="Cancel" v-close-popup class="q-mr-sm" />
+          <q-btn color="primary" label="Save ETA" @click="etaSubmit" />
         </div>
       </q-card>
     </q-dialog>
@@ -722,6 +756,7 @@ export default {
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
         { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left' },
         { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center' },
+        { name: 'eta', label: 'ETA / Arrival', align: 'center' },
         { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center' },
         { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
         { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
@@ -773,6 +808,11 @@ export default {
       preloadid: 0,
       preloadStagingBin: [],
       preloadRequiredSlots: 0,
+      preloadMode: 'unload',
+      etaForm: false,
+      etaRow: null,
+      etaDraft: '',
+      etaSource: 'CUSTOMER',
       presortForm: false,
       presortid: 0,
       viewForm: false,
@@ -873,6 +913,17 @@ export default {
         ? this.$t('inbound.view_asn.staging_released')
         : this.$t('inbound.view_asn.staging_unassigned')
     },
+    etaLabel (row) {
+      return row.expected_arrival_at || this.$t('eta_not_provided')
+    },
+    arrivalLabel (row) {
+      return row.actual_arrival_at ? 'Arrived' : 'Pre Arrival'
+    },
+    requiredStagingSlots (row) {
+      const packageQty = Number(row.package_qty || 0)
+      if (packageQty > 0) return packageQty
+      return Number(row.planned_qty || 0)
+    },
     openPackListFromView () {
       this.viewForm = false
       this.openPackList({ asn_code: this.viewAsn })
@@ -893,7 +944,7 @@ export default {
     },
     nextAction (row) {
       const actions = {
-        1: { label: this.$t('inbound.view_asn.confirm_arrival'), icon: 'local_shipping', color: 'primary', handler: 'preloadData' },
+        1: { label: row.actual_arrival_at ? 'Start Unloading' : 'Mark Arrived', icon: row.actual_arrival_at ? 'local_shipping' : 'schedule', color: 'primary', handler: row.actual_arrival_at ? 'preloadData' : 'markArrived' },
         2: { label: this.$t('inbound.view_asn.finish_unloading'), icon: 'file_download', color: 'orange-8', handler: 'presortData' },
         3: { label: this.$t('inbound.view_asn.record_receipt'), icon: 'fact_check', color: 'amber-9', handler: 'sortedData' },
         4: { label: this.$t('inbound.view_asn.start_putaway'), icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
@@ -1294,7 +1345,7 @@ export default {
       _this.deleteForm = false
       _this.deleteid = 0
     },
-    preloadData (e) {
+    preloadData (e, mode = 'unload') {
       var _this = this
       if (Number(e.asn_status_code) !== 1) {
         _this.$q.notify({
@@ -1304,13 +1355,16 @@ export default {
         })
       } else {
         _this.preloadForm = true
+        _this.preloadMode = mode
         _this.preloadid = e.id
-        _this.preloadStagingBin = []
-        _this.preloadRequiredSlots = 0
+        _this.preloadStagingBin = mode === 'unload' ? (e.staging_bins || []) : []
+        _this.preloadRequiredSlots = _this.requiredStagingSlots(e)
         getauth(_this.pathname + 'detail/?asn_code=' + e.asn_code).then(res => {
-          _this.preloadRequiredSlots = (res.results || []).reduce((total, item) => {
-            return total + Number(item.goods_qty || 0)
-          }, 0)
+          if (!_this.preloadRequiredSlots) {
+            _this.preloadRequiredSlots = (res.results || []).reduce((total, item) => {
+              return total + Number(item.goods_qty || 0)
+            }, 0)
+          }
         }).catch(err => {
           _this.preloadForm = false
           _this.$q.notify({
@@ -1323,6 +1377,7 @@ export default {
     },
     preloadDataSubmit () {
       var _this = this
+      const actionMode = _this.preloadMode
       if (!_this.preloadRequiredSlots || _this.preloadStagingBin.length !== _this.preloadRequiredSlots) {
         _this.$q.notify({
           message: 'Please select exactly ' + _this.preloadRequiredSlots + ' staging locations',
@@ -1331,16 +1386,17 @@ export default {
         })
         return
       }
-      postauth(_this.pathname + 'preload/' + _this.preloadid + '/', {
-        staging_bins: _this.preloadStagingBin
-      })
+      const endpoint = _this.preloadMode === 'reserve'
+        ? _this.pathname + 'reserve-staging/' + _this.preloadid + '/'
+        : _this.pathname + 'preload/' + _this.preloadid + '/'
+      postauth(endpoint, { staging_bins: _this.preloadStagingBin })
         .then(res => {
           _this.table_list = []
           _this.preloadDataCancel()
           _this.getList()
           if (!res.detail) {
             _this.$q.notify({
-              message: 'Success Confirm ASN Delivery',
+              message: actionMode === 'reserve' ? 'Staging capacity reserved' : 'Unloading started',
               icon: 'check',
               color: 'green'
             })
@@ -1360,6 +1416,47 @@ export default {
       _this.preloadid = 0
       _this.preloadStagingBin = []
       _this.preloadRequiredSlots = 0
+      _this.preloadMode = 'unload'
+    },
+    reserveStaging (row) {
+      this.preloadData(row, 'reserve')
+    },
+    updateEta (row) {
+      this.etaRow = row
+      this.etaDraft = row.expected_arrival_at ? String(row.expected_arrival_at).replace(' ', 'T').slice(0, 16) : ''
+      this.etaSource = row.eta_source || 'CUSTOMER'
+      this.etaForm = true
+    },
+    etaSubmit () {
+      if (!this.etaRow) return
+      postauth(this.pathname + 'eta/' + this.etaRow.id + '/', {
+        expected_arrival_at: this.etaDraft || null,
+        source: this.etaSource || 'CUSTOMER'
+      }).then(() => {
+        this.etaForm = false
+        this.etaRow = null
+        this.getList()
+        this.$q.notify({ message: 'ETA updated', icon: 'check', color: 'green' })
+      }).catch(err => {
+        this.$q.notify({ message: err.detail, icon: 'close', color: 'negative' })
+      })
+    },
+    markArrived (row) {
+      this.$q.dialog({
+        title: 'Mark Arrived',
+        message: row.asn_code + ' has physically arrived. Continue?',
+        cancel: true,
+        persistent: true
+      }).onOk(() => {
+        postauth(this.pathname + 'arrival/' + row.id + '/', {})
+          .then(() => {
+            this.getList()
+            this.$q.notify({ message: 'Arrival confirmed', icon: 'check', color: 'green' })
+          })
+          .catch(err => {
+            this.$q.notify({ message: err.detail, icon: 'close', color: 'negative' })
+          })
+      })
     },
     presortData (e) {
       var _this = this

@@ -1,7 +1,7 @@
 <template>
   <div class="staging-slot-picker">
     <div class="text-caption text-grey-7 q-mb-sm">
-      Select one available staging slot. Reserved and occupied slots are unavailable.
+      Select staging slots. Reserved slots can be selected when starting an unload.
     </div>
     <div v-if="loading" class="text-grey q-pa-sm">Loading staging occupancy...</div>
     <div v-for="zone in zones" :key="zone.name" class="q-mb-md">
@@ -18,11 +18,11 @@
             no-caps
             :outline="!isSelected(slot.bin_name)"
             :color="slot.occupied ? 'grey-6' : (slot.reserved ? 'amber-7' : (isSelected(slot.bin_name) ? 'primary' : 'positive'))"
-            :disable="slot.occupied || slot.reserved || (!isSelected(slot.bin_name) && multiple && maxSelections > 0 && selected.length >= maxSelections)"
+            :disable="slot.occupied || (slot.reserved && !allowReserved) || (!isSelected(slot.bin_name) && multiple && maxSelections > 0 && selected.length >= maxSelections)"
             :label="String(slot.slot).padStart(2, '0')"
             @click="selectSlot(slot)"
           >
-            <q-tooltip v-if="slot.occupied || slot.reserved">
+            <q-tooltip v-if="slot.occupied || (slot.reserved && !allowReserved)">
               {{ slot.occupied ? 'Occupied' : 'Reserved' }}: {{ slot.assignment.reference_code }}
             </q-tooltip>
           </q-btn>
@@ -44,7 +44,8 @@ export default {
     flow: { type: String, required: true },
     value: { type: [String, Array], default: '' },
     multiple: { type: Boolean, default: false },
-    maxSelections: { type: Number, default: 1 }
+    maxSelections: { type: Number, default: 1 },
+    allowReserved: { type: Boolean, default: false }
   },
   data () {
     return {

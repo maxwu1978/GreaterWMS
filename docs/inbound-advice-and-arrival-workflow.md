@@ -53,7 +53,8 @@ Physical arrival is a separate operator action:
 - Confirm the vehicle, container, and ASN at the dock.
 - Record the actual arrival time.
 - Confirm or adjust the reserved Stage-left/Stage-right positions.
-- Change the ASN from `Pre Arrival` to `Unloading`.
+- Record the actual arrival first. The ASN remains `Pre Arrival` until the operator starts the unloading step.
+- When unloading starts, change the ASN to `Unloading` and keep the reserved positions reserved until goods are physically placed there.
 - Change the relevant staging assignments from `Reserved` to `Occupied` only when goods are physically placed there.
 
 If the vehicle arrives without a prior ETA, the operator may still start this step. The ETA remains unknown unless the customer provides one; actual arrival time is recorded separately.
@@ -77,11 +78,12 @@ If the vehicle arrives without a prior ETA, the operator may still start this st
 
 The current system already supports Pack List documents, optional ETA, the `Pre Arrival` state, and `Reserved / Occupied / Released` staging assignment states. The current dashboard correctly shows `Not Provided` when ETA is absent.
 
-The following changes are still required for full support of this workflow:
+The workflow is implemented in the current system:
 
-- Add a dedicated ETA update action that records who supplied the ETA and when it was received.
-- Add a separate `Mark Arrived` action and an actual arrival timestamp; ETA must not be used as actual arrival.
-- Show the difference between capacity reserved and staging physically occupied.
-- Allocate staging by package/load-unit quantity rather than raw SKU quantity.
-- Prevent duplicate ASN creation when a later arrival-time email refers to an existing inbound order.
-- Preserve ETA change history for operational traceability.
+- `Update ETA` records the new ETA, source, operator, and receipt time without changing inventory or ASN status.
+- `Reserve` holds Stage-left/Stage-right capacity as `Reserved`; it does not occupy the locations.
+- `Mark Arrived` records the actual arrival timestamp separately from ETA.
+- `Start Unloading` is blocked until physical arrival is confirmed and uses package/load-unit quantity for staging allocation.
+- ASN lists and the operations dashboard show `Reserved` versus `Occupied` staging counts.
+- Container/tracking references prevent a second active ASN from being created for the same load.
+- ETA, arrival, and staging reservation events are available through the ASN event history endpoint.

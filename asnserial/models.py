@@ -27,6 +27,7 @@ class PackListDocument(models.Model):
     source_url = models.CharField(max_length=1000, blank=True, default='')
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=PENDING)
     has_serials = models.BooleanField(default=False)
+    package_qty = models.PositiveIntegerField(default=0)
     note = models.TextField(blank=True, default='')
     raw_payload = models.JSONField(default=dict, blank=True)
     created_by = models.CharField(max_length=255, blank=True, default='')
