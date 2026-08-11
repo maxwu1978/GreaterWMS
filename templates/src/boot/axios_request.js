@@ -86,7 +86,7 @@ axiosInstanceAuth.interceptors.response.use(
     }
     if (response.data.results) {
       var sslcheck = baseurl.split(':')
-      if (response.data.next !== null) {
+      if (Object.prototype.hasOwnProperty.call(response.data, 'next') && response.data.next !== null && response.data.next !== undefined) {
         if (sslcheck.length === 2) {
           var nextlinkcheck = (response.data.next).toString().split(sslcheck[1])
           response.data.next = nextlinkcheck[1]
@@ -94,10 +94,10 @@ axiosInstanceAuth.interceptors.response.use(
           var nextlinkcheck1 = (response.data.next).toString().split(sslcheck[1] + ':' + sslcheck[2])
           response.data.next = nextlinkcheck1[1]
         }
-      } else {
+      } else if (Object.prototype.hasOwnProperty.call(response.data, 'next')) {
         response.data.next = null
       }
-      if (response.data.previous !== null) {
+      if (Object.prototype.hasOwnProperty.call(response.data, 'previous') && response.data.previous !== null && response.data.previous !== undefined) {
         if (sslcheck.length === 2) {
           var previouslinkcheck = (response.data.previous).toString().split(sslcheck[1])
           response.data.previous = previouslinkcheck[1]
@@ -105,7 +105,7 @@ axiosInstanceAuth.interceptors.response.use(
           var previouslinkcheck1 = (response.data.previous).toString().split(sslcheck[1] + ':' + sslcheck[2])
           response.data.previous = previouslinkcheck1[1]
         }
-      } else {
+      } else if (Object.prototype.hasOwnProperty.call(response.data, 'previous')) {
         response.data.previous = null
       }
       Loading.hide()
@@ -223,7 +223,7 @@ axiosInstanceAuthScan.interceptors.response.use(
   function (response) {
     if (response.data.results) {
       var sslcheck = baseurl.split(':')
-      if (response.data.next !== null) {
+      if (Object.prototype.hasOwnProperty.call(response.data, 'next') && response.data.next !== null && response.data.next !== undefined) {
         if (sslcheck.length === 2) {
           var nextlinkcheck = (response.data.next).toString().split(sslcheck[1])
           response.data.next = nextlinkcheck[1]
@@ -231,10 +231,10 @@ axiosInstanceAuthScan.interceptors.response.use(
           var nextlinkcheck1 = (response.data.next).toString().split(sslcheck[1] + ':' + sslcheck[2])
           response.data.next = nextlinkcheck1[1]
         }
-      } else {
+      } else if (Object.prototype.hasOwnProperty.call(response.data, 'next')) {
         response.data.next = null
       }
-      if (response.data.previous !== null) {
+      if (Object.prototype.hasOwnProperty.call(response.data, 'previous') && response.data.previous !== null && response.data.previous !== undefined) {
         if (sslcheck.length === 2) {
           var previouslinkcheck = (response.data.previous).toString().split(sslcheck[1])
           response.data.previous = previouslinkcheck[1]
@@ -242,7 +242,7 @@ axiosInstanceAuthScan.interceptors.response.use(
           var previouslinkcheck1 = (response.data.previous).toString().split(sslcheck[1] + ':' + sslcheck[2])
           response.data.previous = previouslinkcheck1[1]
         }
-      } else {
+      } else if (Object.prototype.hasOwnProperty.call(response.data, 'previous')) {
         response.data.previous = null
       }
       Loading.hide()
