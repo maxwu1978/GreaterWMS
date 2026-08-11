@@ -3,6 +3,8 @@ from asn.models import AsnDetailModel, AsnListModel
 from dn.models import DnDetailModel
 from asn import serializers as asnserializers
 from dn import serializers as dnserializers
+from supplier.models import ListModel as SupplierModel
+from supplier.shortname import generated_supplier_short_name
 from utils.page import MyPageNumberPagination
 from utils.datasolve import sumOfList
 from utils.fbmsg import FBMsg
@@ -257,15 +259,24 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             openid=openid,
             is_delete=False,
         ).values_list('asn_code', 'expected_arrival_at'))
-        rows = AsnDetailModel.objects.filter(
+        rows = list(AsnDetailModel.objects.filter(
             openid=openid,
             asn_status__in=status_map.keys(),
             is_delete=False,
-        ).order_by('-update_time', '-id')
+        ).order_by('-update_time', '-id'))
+        supplier_names = {row.supplier for row in rows if row.supplier}
+        supplier_short_names = dict(SupplierModel.objects.filter(
+            openid=openid,
+            supplier_name__in=supplier_names,
+            is_delete=False,
+        ).values_list('supplier_name', 'supplier_short_name'))
         for row in rows:
+            customer_name = row.supplier or ''
             current = grouped.setdefault(row.asn_code, {
                 'category': 'inbound',
                 'reference': row.asn_code,
+                'customer': supplier_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
+                'customer_full_name': customer_name,
                 'operation': 'Unload',
                 'location': 'Stage',
                 'action_route': 'asn',
@@ -305,15 +316,18 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             5: ('Ship', 'Dock', 'shippedstock', False),
         }
         grouped = {}
-        rows = DnDetailModel.objects.filter(
+        rows = list(DnDetailModel.objects.filter(
             openid=openid,
             dn_status__in=status_map.keys(),
             is_delete=False,
-        ).order_by('-update_time', '-id')
+        ).order_by('-update_time', '-id'))
         for row in rows:
+            customer_name = row.customer or ''
             current = grouped.setdefault(row.dn_code, {
                 'category': 'outbound',
                 'reference': row.dn_code,
+                'customer': generated_supplier_short_name(customer_name),
+                'customer_full_name': customer_name,
                 'operation': 'Release',
                 'location': 'Shipping',
                 'action_route': 'neworder',
@@ -354,6 +368,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'operation': item['operation'],
             'lane': lane,
             'reference': item['reference'],
+            'customer': item.get('customer', ''),
+            'customer_full_name': item.get('customer_full_name', ''),
             'location': item['location'],
             'quantity': max(quantity - progress, 0),
             'progress_quantity': progress,

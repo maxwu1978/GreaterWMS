@@ -65,6 +65,13 @@
           {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
         </q-td>
       </template>
+      <template v-slot:body-cell-customer="props">
+        <q-td :props="props">
+          <span :title="props.row.customer_full_name || props.row.customer">
+            {{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}
+          </span>
+        </q-td>
+      </template>
       <template v-slot:body-cell-operation="props">
         <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
       </template>
@@ -76,7 +83,11 @@
         </q-td>
       </template>
       <template v-slot:body-cell-location="props">
-        <q-td :props="props">{{ locationLabel(props.value) }}</q-td>
+        <q-td :props="props">
+          <span :title="label('operations_board.location_hint', 'Target area for this step, not current inventory location')">
+            {{ locationLabel(props.value) }}
+          </span>
+        </q-td>
       </template>
       <template v-slot:body-cell-action="props">
         <q-td :props="props">
@@ -113,7 +124,7 @@ export default {
       return [
         { key: 'all', label: this.label('operations_board.all', 'All') },
         { key: 'now', label: this.label('operations_board.now', 'Now') },
-        { key: 'next', label: this.label('operations_board.next', 'Next') },
+        { key: 'next', label: this.label('operations_board.next', 'Pending') },
         { key: 'delayed', label: this.label('operations_board.delayed', 'Delayed') },
         { key: 'blocked', label: this.label('operations_board.blocked', 'Blocked') }
       ]
@@ -125,12 +136,13 @@ export default {
     columns () {
       return [
         { name: 'eta', label: this.label('operations_board.eta', 'ETA'), field: 'eta', align: 'left' },
+        { name: 'customer', label: this.label('operations_board.customer', 'Owner / Customer'), field: 'customer', align: 'left' },
         { name: 'category', label: this.label('operations_board.type', 'Type'), field: 'category', align: 'left' },
-        { name: 'operation', label: this.label('operations_board.operation', 'Operation'), field: 'operation', align: 'left' },
+        { name: 'operation', label: this.label('operations_board.operation', 'Next Step'), field: 'operation', align: 'left' },
         { name: 'reference', label: this.label('operations_board.reference', 'Reference'), field: 'reference', align: 'left' },
-        { name: 'location', label: this.label('operations_board.location', 'Location'), field: 'location', align: 'left' },
+        { name: 'location', label: this.label('operations_board.location', 'Target Area'), field: 'location', align: 'left' },
         { name: 'quantity', label: this.label('operations_board.quantity', 'Remaining / Total'), field: 'quantity', align: 'right' },
-        { name: 'lane', label: this.label('operations_board.status', 'Status'), field: 'lane', align: 'left' },
+        { name: 'lane', label: this.label('operations_board.status', 'Work Status'), field: 'lane', align: 'left' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
