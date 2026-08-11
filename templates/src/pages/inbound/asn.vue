@@ -618,22 +618,41 @@
       </q-card>
     </q-dialog>
     <q-dialog v-model="etaForm">
-      <q-card class="shadow-24 eta-dialog-card">
+      <q-card class="shadow-24 asn-time-dialog-card">
         <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
           <div>Update ETA</div>
           <q-space />
           <q-btn dense flat icon="close" v-close-popup />
         </q-bar>
-        <q-card-section class="eta-dialog-section">
-          <div class="eta-dialog-field-label">Expected arrival</div>
-          <q-input dense outlined square type="datetime-local" v-model="etaDraft" aria-label="Expected arrival" class="eta-dialog-field" />
-          <div class="eta-dialog-field-label eta-dialog-field-label--spaced">Source</div>
-          <q-input dense outlined square v-model="etaSource" aria-label="Source" class="eta-dialog-field" />
+        <q-card-section class="asn-time-dialog-section">
+          <div class="asn-time-dialog-field-label">Expected arrival</div>
+          <q-input dense outlined square type="datetime-local" v-model="etaDraft" aria-label="Expected arrival" class="asn-time-dialog-field" />
+          <div class="asn-time-dialog-field-label asn-time-dialog-field-label--spaced">Source</div>
+          <q-input dense outlined square v-model="etaSource" aria-label="Source" class="asn-time-dialog-field" />
           <div class="text-caption text-grey-7 q-mt-sm">ETA does not mark the shipment as arrived or change inventory.</div>
         </q-card-section>
-        <div class="eta-dialog-actions">
+        <div class="asn-time-dialog-actions">
           <q-btn flat label="Cancel" v-close-popup />
           <q-btn color="primary" label="Save ETA" @click="etaSubmit" />
+        </div>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="arrivalForm">
+      <q-card class="shadow-24 asn-time-dialog-card">
+        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>Confirm Arrival</div>
+          <q-space />
+          <q-btn dense flat icon="close" @click="arrivalDataCancel()" />
+        </q-bar>
+        <q-card-section class="asn-time-dialog-section">
+          <div class="text-subtitle2 q-mb-sm">{{ arrivalRow ? arrivalRow.asn_code : '' }}</div>
+          <div class="asn-time-dialog-field-label">Actual arrival time</div>
+          <q-input dense outlined square type="datetime-local" v-model="arrivalDraft" aria-label="Actual arrival time" class="asn-time-dialog-field" />
+          <div class="text-caption text-grey-7 q-mt-sm">Confirm arrival before starting unloading.</div>
+        </q-card-section>
+        <div class="asn-time-dialog-actions">
+          <q-btn flat label="Cancel" @click="arrivalDataCancel()" />
+          <q-btn color="primary" label="Confirm Arrival" @click="arrivalSubmit()" />
         </div>
       </q-card>
     </q-dialog>
@@ -794,32 +813,32 @@
   white-space: nowrap;
 }
 
-.eta-dialog-card {
+.asn-time-dialog-card {
   width: min(420px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
 }
 
-.eta-dialog-section {
+.asn-time-dialog-section {
   width: 100%;
   box-sizing: border-box;
 }
 
-.eta-dialog-field {
+.asn-time-dialog-field {
   width: 100%;
 }
 
-.eta-dialog-field-label {
+.asn-time-dialog-field-label {
   color: #616161;
   font-size: 12px;
   line-height: 16px;
   margin-bottom: 4px;
 }
 
-.eta-dialog-field-label--spaced {
+.asn-time-dialog-field-label--spaced {
   margin-top: 12px;
 }
 
-.eta-dialog-actions {
+.asn-time-dialog-actions {
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -829,11 +848,11 @@
 }
 
 @media (max-width: 480px) {
-  .eta-dialog-actions {
+  .asn-time-dialog-actions {
     justify-content: stretch;
   }
 
-  .eta-dialog-actions .q-btn {
+  .asn-time-dialog-actions .q-btn {
     flex: 1 1 120px;
   }
 }
@@ -930,6 +949,9 @@ export default {
       etaRow: null,
       etaDraft: '',
       etaSource: 'CUSTOMER',
+      arrivalForm: false,
+      arrivalRow: null,
+      arrivalDraft: '',
       presortForm: false,
       presortid: 0,
       viewForm: false,
@@ -1562,21 +1584,36 @@ export default {
       })
     },
     markArrived (row) {
-      this.$q.dialog({
-        title: 'Mark Arrived',
-        message: row.asn_code + ' has physically arrived. Continue?',
-        cancel: true,
-        persistent: true
-      }).onOk(() => {
-        postauth(this.pathname + 'arrival/' + row.id + '/', {})
-          .then(() => {
-            this.getList()
-            this.$q.notify({ message: 'Arrival confirmed', icon: 'check', color: 'green' })
-          })
-          .catch(err => {
-            this.$q.notify({ message: err.detail, icon: 'close', color: 'negative' })
-          })
+      this.arrivalRow = row
+      this.arrivalDraft = this.localDateTimeNow()
+      this.arrivalForm = true
+    },
+    localDateTimeNow () {
+      const now = new Date()
+      const pad = value => String(value).padStart(2, '0')
+      return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) +
+        'T' + pad(now.getHours()) + ':' + pad(now.getMinutes())
+    },
+    arrivalSubmit () {
+      if (!this.arrivalRow || !this.arrivalDraft) {
+        this.$q.notify({ message: 'Actual arrival time is required', icon: 'close', color: 'negative' })
+        return
+      }
+      postauth(this.pathname + 'arrival/' + this.arrivalRow.id + '/', {
+        actual_arrival_at: this.arrivalDraft,
+        source: 'WAREHOUSE'
+      }).then(() => {
+        this.getList()
+        this.arrivalDataCancel()
+        this.$q.notify({ message: 'Arrival confirmed', icon: 'check', color: 'green' })
+      }).catch(err => {
+        this.$q.notify({ message: err.detail, icon: 'close', color: 'negative' })
       })
+    },
+    arrivalDataCancel () {
+      this.arrivalForm = false
+      this.arrivalRow = null
+      this.arrivalDraft = ''
     },
     presortData (e) {
       var _this = this
