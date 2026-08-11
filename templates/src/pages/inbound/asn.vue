@@ -618,19 +618,21 @@
       </q-card>
     </q-dialog>
     <q-dialog v-model="etaForm">
-      <q-card class="shadow-24">
+      <q-card class="shadow-24 eta-dialog-card">
         <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
           <div>Update ETA</div>
           <q-space />
           <q-btn dense flat icon="close" v-close-popup />
         </q-bar>
-        <q-card-section style="width: 400px">
-          <q-input dense outlined square type="datetime-local" v-model="etaDraft" label="Expected arrival" />
-          <q-input dense outlined square v-model="etaSource" label="Source" class="q-mt-sm" />
+        <q-card-section class="eta-dialog-section">
+          <div class="eta-dialog-field-label">Expected arrival</div>
+          <q-input dense outlined square type="datetime-local" v-model="etaDraft" aria-label="Expected arrival" class="eta-dialog-field" />
+          <div class="eta-dialog-field-label eta-dialog-field-label--spaced">Source</div>
+          <q-input dense outlined square v-model="etaSource" aria-label="Source" class="eta-dialog-field" />
           <div class="text-caption text-grey-7 q-mt-sm">ETA does not mark the shipment as arrived or change inventory.</div>
         </q-card-section>
-        <div class="text-right q-pa-md">
-          <q-btn flat label="Cancel" v-close-popup class="q-mr-sm" />
+        <div class="eta-dialog-actions">
+          <q-btn flat label="Cancel" v-close-popup />
           <q-btn color="primary" label="Save ETA" @click="etaSubmit" />
         </div>
       </q-card>
@@ -790,6 +792,50 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.eta-dialog-card {
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.eta-dialog-section {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.eta-dialog-field {
+  width: 100%;
+}
+
+.eta-dialog-field-label {
+  color: #616161;
+  font-size: 12px;
+  line-height: 16px;
+  margin-bottom: 4px;
+}
+
+.eta-dialog-field-label--spaced {
+  margin-top: 12px;
+}
+
+.eta-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 16px 16px;
+}
+
+@media (max-width: 480px) {
+  .eta-dialog-actions {
+    justify-content: stretch;
+  }
+
+  .eta-dialog-actions .q-btn {
+    flex: 1 1 120px;
+  }
 }
 </style>
 
