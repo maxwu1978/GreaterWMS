@@ -370,13 +370,13 @@ export default {
   inbound: {
     asn: 'ASN',
     packlist: 'Pack List',
-    predeliverystock: 'Pre Delivery',
-    preloadstock: 'Pre Load',
-    presortstock: 'Sorting',
-    sortstock: 'Sorted',
+    predeliverystock: 'Pre Arrival',
+    preloadstock: 'Unloading',
+    presortstock: 'Receiving',
+    sortstock: 'Putaway',
     shortage: 'Shortage',
     more: 'More QTY',
-    asnfinish: 'Receiving List',
+    asnfinish: 'Completed',
     asndone: 'Finish Receiving',
     view_sortstock: {
       error1: 'Please Enter The Quantity Must Be Greater Than 0'

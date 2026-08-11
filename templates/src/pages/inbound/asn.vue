@@ -36,18 +36,6 @@
               <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('refreshtip') }}</q-tooltip>
             </q-btn>
           </q-btn-group>
-          <q-select
-            v-model="statusFilter"
-            :options="statusOptions"
-            emit-value
-            map-options
-            outlined
-            dense
-            options-dense
-            style="width: 170px; margin-left: 12px"
-            :label="$t('inbound.view_asn.asn_status')"
-            @input="statusChanged"
-          />
           <q-space />
           <q-input outlined rounded dense debounce="300" color="primary" v-model="filter" :placeholder="$t('search')" @input="getSearchList()" @keyup.enter="getSearchList()">
             <template v-slot:append>
@@ -769,14 +757,6 @@ export default {
       ],
       filter: '',
       statusFilter: '',
-      statusOptions: [
-        { label: this.$t('inbound.view_asn.all_status'), value: '' },
-        { label: this.$t('inbound.predeliverystock'), value: 1 },
-        { label: this.$t('inbound.preloadstock'), value: 2 },
-        { label: this.$t('inbound.presortstock'), value: 3 },
-        { label: this.$t('inbound.sortstock'), value: 4 },
-        { label: this.$t('inbound.asndone'), value: 5 }
-      ],
       pagination: {
         page: 1,
         rowsPerPage: '30'
@@ -902,7 +882,7 @@ export default {
     handleNextAction (row) {
       const action = this.nextAction(row)
       if (action.handler === 'putaway') {
-        this.$router.push({ name: 'sortstock', query: { asn_code: row.asn_code } })
+        this.$router.push({ name: 'putaway', query: { asn_code: row.asn_code } })
       } else if (action.handler === 'view') {
         this.viewData(row)
       } else {
@@ -924,11 +904,6 @@ export default {
         params.unshift('asn_code__icontains=' + encodeURIComponent(asnCode))
       }
       return this.pathname + 'list/?' + params.join('&')
-    },
-    statusChanged () {
-      this.current = 1
-      this.paginationIpt = 1
-      this.getList()
     },
     getList () {
       var _this = this
@@ -1527,6 +1502,15 @@ export default {
           })
         _this.viewForm = true
       })
+    }
+  },
+  watch: {
+    '$route.query.asn_status' (value) {
+      const status = Number(value)
+      this.statusFilter = [1, 2, 3, 4, 5].indexOf(status) !== -1 ? status : ''
+      this.current = 1
+      this.paginationIpt = 1
+      this.getList()
     }
   },
   created () {

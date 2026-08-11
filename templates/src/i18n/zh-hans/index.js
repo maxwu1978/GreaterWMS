@@ -369,11 +369,11 @@ export default {
     packlist: '装箱单',
     predeliverystock: '待到货',
     preloadstock: '待卸货',
-    presortstock: '待分拣',
-    sortstock: '已分拣',
+    presortstock: '待收货',
+    sortstock: '待上架',
     shortage: '来货短少',
     more: '多到货',
-    asnfinish: '收货明细',
+    asnfinish: '已完成',
     asndone: '收货完成',
     view_sortstock: {
       error1: '请输入数量，数量必须大于0'

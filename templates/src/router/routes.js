@@ -45,16 +45,21 @@ const routes = [{
       {
         path: 'preloadstock',
         name: 'preloadstock',
-        component: () => import('pages/inbound/preloadstock.vue')
+        redirect: to => ({ name: 'asn', query: { asn_status: '2' } })
       },
       {
         path: 'presortstock',
         name: 'presortstock',
-        component: () => import('pages/inbound/presortstock.vue')
+        redirect: to => ({ name: 'asn', query: { asn_status: '3' } })
       },
       {
         path: 'sortstock',
         name: 'sortstock',
+        redirect: to => ({ name: 'asn', query: { asn_status: '4' } })
+      },
+      {
+        path: 'putaway',
+        name: 'putaway',
         component: () => import('pages/inbound/sortstock.vue')
       },
       {
@@ -70,7 +75,7 @@ const routes = [{
       {
         path: 'asnfinish',
         name: 'asnfinish',
-        component: () => import('pages/inbound/asnfinish.vue')
+        redirect: to => ({ name: 'asn', query: { asn_status: '5' } })
       },
       {
         path: 'packlist',
