@@ -165,8 +165,8 @@ def _summary(openid, asn_code):
     has_expected_serials = records.filter(is_expected=True).exists()
     if current_pack_list and current_pack_list.has_serials:
         verification_mode = 'PACK_LIST'
-    elif pending_pack_list and pending_pack_list.has_serials:
-        verification_mode = 'PACK_LIST_PENDING'
+    elif pending_pack_list:
+        verification_mode = 'PACK_LIST_PENDING' if pending_pack_list.has_serials else 'PACK_LIST_QTY'
     elif has_expected_serials:
         verification_mode = 'MANUAL_SN'
     elif current_pack_list:
