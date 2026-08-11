@@ -36,6 +36,18 @@
               <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('refreshtip') }}</q-tooltip>
             </q-btn>
           </q-btn-group>
+          <q-select
+            v-model="statusFilter"
+            :options="statusOptions"
+            emit-value
+            map-options
+            outlined
+            dense
+            options-dense
+            style="width: 170px; margin-left: 12px"
+            :label="$t('inbound.view_asn.asn_status')"
+            @input="statusChanged"
+          />
           <q-space />
           <q-input outlined rounded dense debounce="300" color="primary" v-model="filter" :placeholder="$t('search')" @input="getSearchList()" @keyup.enter="getSearchList()">
             <template v-slot:append>
@@ -756,6 +768,15 @@ export default {
         { name: 'action', label: this.$t('action'), align: 'right' }
       ],
       filter: '',
+      statusFilter: '',
+      statusOptions: [
+        { label: this.$t('inbound.view_asn.all_status'), value: '' },
+        { label: this.$t('inbound.predeliverystock'), value: 1 },
+        { label: this.$t('inbound.preloadstock'), value: 2 },
+        { label: this.$t('inbound.presortstock'), value: 3 },
+        { label: this.$t('inbound.sortstock'), value: 4 },
+        { label: this.$t('inbound.asndone'), value: 5 }
+      ],
       pagination: {
         page: 1,
         rowsPerPage: '30'
@@ -894,10 +915,25 @@ export default {
     canDelete (row) {
       return Number(row.asn_status_code) === 1
     },
+    listUrl (page, asnCode) {
+      const params = ['page=' + page]
+      if (this.statusFilter !== '' && this.statusFilter !== null && this.statusFilter !== undefined) {
+        params.unshift('asn_status=' + encodeURIComponent(this.statusFilter))
+      }
+      if (asnCode) {
+        params.unshift('asn_code__icontains=' + encodeURIComponent(asnCode))
+      }
+      return this.pathname + 'list/?' + params.join('&')
+    },
+    statusChanged () {
+      this.current = 1
+      this.paginationIpt = 1
+      this.getList()
+    },
     getList () {
       var _this = this
       if (LocalStorage.has('auth')) {
-        getauth(_this.pathname + 'list/' + '?page=' + '' + _this.current, {})
+        getauth(_this.listUrl(_this.current), {})
           .then(res => {
             _this.table_list = []
             _this.total = res.count
@@ -941,7 +977,7 @@ export default {
     getSearchList () {
       var _this = this
       if (LocalStorage.has('auth')) {
-        getauth(_this.pathname + 'list/?asn_code__icontains=' + _this.filter + '&page=' + '' + _this.current, {})
+        getauth(_this.listUrl(_this.current, _this.filter), {})
           .then(res => {
             _this.table_list = []
             _this.total = res.count
@@ -1495,6 +1531,10 @@ export default {
   },
   created () {
     var _this = this
+    var routeStatus = Number(_this.$route.query && _this.$route.query.asn_status)
+    if ([1, 2, 3, 4, 5].indexOf(routeStatus) !== -1) {
+      _this.statusFilter = routeStatus
+    }
     if (LocalStorage.has('openid')) {
       _this.openid = LocalStorage.getItem('openid')
     } else {

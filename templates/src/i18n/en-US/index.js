@@ -384,6 +384,7 @@ export default {
     view_asn: {
       asn_code: 'ASN Code',
       asn_status: 'ASN Status',
+      all_status: 'All Statuses',
       sku_count: 'SKUs',
       planned_qty: 'Planned Qty',
       actual_qty: 'Received Qty',

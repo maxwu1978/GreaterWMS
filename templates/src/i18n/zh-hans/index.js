@@ -381,6 +381,7 @@ export default {
     view_asn: {
       asn_code: '到货通知书单号',
       asn_status: '到货通知书状态',
+      all_status: '全部状态',
       sku_count: 'SKU数',
       planned_qty: '计划数量',
       actual_qty: '实收数量',

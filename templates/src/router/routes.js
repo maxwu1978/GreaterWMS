@@ -40,7 +40,7 @@ const routes = [{
       {
         path: 'predeliverystock',
         name: 'predeliverystock',
-        component: () => import('pages/inbound/predeliverystock.vue')
+        redirect: to => ({ name: 'asn', query: { asn_status: '1' } })
       },
       {
         path: 'preloadstock',
