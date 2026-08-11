@@ -632,15 +632,18 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
-        qs = self.get_object()
+        qs = self.get_queryset().select_for_update().filter(pk=pk).first()
+        if qs is None:
+            raise APIException({"detail": "ASN does not exist"})
         if qs.openid != self.request.auth.openid:
             raise APIException({"detail": "Cannot delete data which not yours"})
         else:
             if qs.asn_status == 1:
                 if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=1, is_delete=False).exists():
-                    asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
+                    asn_detail_list = AsnDetailModel.objects.select_for_update().filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                     asn_status=1, is_delete=False)
                     quantity = asn_detail_list.aggregate(sum=Sum('goods_qty'))['sum'] or 0
                     staging_bins = request.data.get('staging_bins')
@@ -663,8 +666,10 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
                         raise APIException({"detail": str(exc)})
                     qs.asn_status = 2
                     for i in range(len(asn_detail_list)):
-                        goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
+                        goods_qty_change = stocklist.objects.select_for_update().filter(openid=self.request.auth.openid,
                                                                     goods_code=str(asn_detail_list[i].goods_code)).first()
+                        if goods_qty_change is None:
+                            raise APIException({"detail": "Stock record does not exist for %s" % asn_detail_list[i].goods_code})
                         goods_qty_change.asn_stock = goods_qty_change.asn_stock - asn_detail_list[i].goods_qty
                         if goods_qty_change.asn_stock < 0:
                             goods_qty_change.asn_stock = 0
