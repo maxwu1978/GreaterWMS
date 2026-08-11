@@ -2,7 +2,7 @@
   <div>
     <transition appear enter-active-class="animated fadeIn">
       <q-table
-        class="my-sticky-header-column-table shadow-24"
+        class="asn-list-table my-sticky-header-column-table shadow-24"
         :data="table_list"
         row-key="id"
         :separator="separator"
@@ -14,7 +14,7 @@
         dense
         no-data-label="No data"
         no-results-label="No data you want"
-        :table-style="{ height: height }"
+        :table-style="{ height: height, tableLayout: 'fixed', width: '100%' }"
         flat
         bordered
       >
@@ -45,10 +45,10 @@
         </template>
         <template v-slot:body="props">
           <q-tr :props="props">
-            <q-td key="asn_code" :props="props">
+            <q-td key="asn_code" :props="props" class="asn-code-cell">
               <q-btn flat dense no-caps color="primary" :label="props.row.asn_code" @click="viewData(props.row)" />
             </q-td>
-            <q-td key="supplier" :props="props">
+            <q-td key="supplier" :props="props" class="asn-owner-cell">
               <span :title="props.row.supplier || ''">{{ props.row.supplier_short_name || props.row.supplier || '—' }}</span>
             </q-td>
             <q-td key="asn_status" :props="props">
@@ -68,15 +68,15 @@
             <q-td key="sku_quantity" :props="props" class="text-center">
               {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
             </q-td>
-            <q-td key="staging_bin" :props="props">
-              <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'">
+            <q-td key="staging_bin" :props="props" class="asn-staging-cell">
+              <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'" :title="stagingLabel(props.row)">
                 {{ stagingLabel(props.row) }}
               </span>
               <div class="text-caption text-grey-6">
                 R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
               </div>
             </q-td>
-            <q-td key="pack_list_status" :props="props">
+            <q-td key="pack_list_status" :props="props" class="asn-pack-list-cell">
               <q-chip
                 dense
                 square
@@ -100,24 +100,45 @@
                 {{ $t('inbound.view_asn.qc_normal') }}
               </q-chip>
             </q-td>
-            <q-td key="next_action" :props="props">
-              <div v-if="Number(props.row.asn_status_code) === 1" class="row no-wrap q-gutter-xs">
-                <q-btn dense flat no-caps color="primary" label="ETA" @click="updateEta(props.row)" />
-                <q-btn v-if="!props.row.actual_arrival_at" dense flat no-caps color="positive" label="Arrived" @click="markArrived(props.row)" />
-                <q-btn v-if="Number(props.row.staging_reserved_qty || 0) < requiredStagingSlots(props.row)" dense flat no-caps color="orange-8" label="Reserve" @click="reserveStaging(props.row)" />
-                <q-btn v-if="props.row.actual_arrival_at" dense unelevated no-caps color="primary" label="Unload" @click="preloadData(props.row)" />
-                <q-btn v-else dense flat no-caps disable label="Awaiting arrival" />
+            <q-td key="next_action" :props="props" class="asn-action-cell">
+              <div class="row no-wrap justify-center items-center">
+                <q-btn
+                  dense
+                  round
+                  flat
+                  :color="nextAction(props.row).color"
+                  :icon="nextAction(props.row).icon"
+                  @click="handleNextAction(props.row)"
+                >
+                  <q-tooltip>{{ nextAction(props.row).label }}</q-tooltip>
+                </q-btn>
+                <q-btn
+                  v-if="hasAdditionalActions(props.row)"
+                  dense
+                  round
+                  flat
+                  color="grey-7"
+                  icon="more_vert"
+                  aria-label="More actions"
+                >
+                  <q-menu anchor="bottom right" self="top right">
+                    <q-list dense style="min-width: 150px">
+                      <q-item clickable v-close-popup @click="updateEta(props.row)">
+                        <q-item-section avatar><q-icon name="event" color="primary" /></q-item-section>
+                        <q-item-section>ETA</q-item-section>
+                      </q-item>
+                      <q-item v-if="!props.row.actual_arrival_at" clickable v-close-popup @click="markArrived(props.row)">
+                        <q-item-section avatar><q-icon name="local_shipping" color="positive" /></q-item-section>
+                        <q-item-section>Mark Arrived</q-item-section>
+                      </q-item>
+                      <q-item v-if="Number(props.row.staging_reserved_qty || 0) < requiredStagingSlots(props.row)" clickable v-close-popup @click="reserveStaging(props.row)">
+                        <q-item-section avatar><q-icon name="warehouse" color="orange-8" /></q-item-section>
+                        <q-item-section>Reserve staging</q-item-section>
+                      </q-item>
+                    </q-list>
+                  </q-menu>
+                </q-btn>
               </div>
-              <q-btn
-                v-else
-                dense
-                unelevated
-                no-caps
-                :color="nextAction(props.row).color"
-                :icon="nextAction(props.row).icon"
-                :label="nextAction(props.row).label"
-                @click="handleNextAction(props.row)"
-              />
             </q-td>
           </q-tr>
         </template>
@@ -722,6 +743,56 @@
 </template>
 <router-view />
 
+<style>
+.asn-list-table .q-table__middle {
+  overflow-x: hidden;
+}
+
+.asn-list-table .q-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.asn-list-table .q-table th,
+.asn-list-table .q-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asn-list-table .asn-code-cell,
+.asn-list-table .asn-owner-cell,
+.asn-list-table .asn-staging-cell,
+.asn-list-table .asn-pack-list-cell {
+  white-space: nowrap;
+}
+
+.asn-list-table .asn-owner-cell > span,
+.asn-list-table .asn-staging-cell > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asn-list-table .asn-action-cell {
+  min-width: 76px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.asn-list-table .asn-action-cell .q-btn {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.asn-list-table .asn-pack-list-cell .q-chip,
+.asn-list-table .asn-action-cell .q-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
+
 <script>
 import { getauth, postauth, putauth, deleteauth, ViewPrintAuth } from 'boot/axios_request'
 import { SessionStorage, LocalStorage } from 'quasar'
@@ -753,15 +824,15 @@ export default {
       supplier_list1: [],
       supplier_detail: {},
       columns: [
-        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code' },
-        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left' },
-        { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center' },
-        { name: 'eta', label: 'ETA / Arrival', align: 'center' },
-        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center' },
-        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left' },
-        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center' },
-        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center' },
-        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'left' }
+        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 11%;', headerStyle: 'width: 11%;' },
+        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 15%;', headerStyle: 'width: 15%;' },
+        { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 11%;', headerStyle: 'width: 11%;' },
+        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
+        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 12%;', headerStyle: 'width: 12%;' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 13%;', headerStyle: 'width: 13%;' },
+        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' }
       ],
       filter: '',
       statusFilter: '',
@@ -951,6 +1022,9 @@ export default {
         5: { label: this.$t('asn_actions.view'), icon: 'visibility', color: 'grey-7', handler: 'view' }
       }
       return actions[Number(row.asn_status_code)] || actions[5]
+    },
+    hasAdditionalActions (row) {
+      return Number(row.asn_status_code) === 1
     },
     handleNextAction (row) {
       const action = this.nextAction(row)
