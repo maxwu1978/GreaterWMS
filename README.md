@@ -102,6 +102,26 @@ docker-compose up -d
 docker-compose restart
 ~~~
 
+### GreaterWMS CLI (read and controlled write)
+
+The repository includes `tools/greaterwms.mjs` for access to the current menu
+pages and Pack List workflow. It uses the same `token` header as the web client,
+calls the application API, and never writes directly to the database.
+
+~~~shell
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku list --query '{"goods_code__icontains":"702"}' --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs warehouse list --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs asn list --query '{"asn_status":1}' --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs staging-slots list --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN202608123 --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku create --data '{"goods_code":"702-S"}' --dry-run --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku delete --id 123 --dry-run --json
+~~~
+
+Master-data create/update and enabled single-record deletes require explicit
+`--dry-run`/`--confirm` handling. Pack List import and confirmation retain their
+existing two-step flow. Pack List deletion and bulk cleanup are not supported.
+
 <h4>
   <a href="https://www.56yhz.com/win_10.html">Windows X64</a>
 </h4>

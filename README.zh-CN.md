@@ -100,6 +100,26 @@ docker-compose up -d
 docker-compose restart
 ~~~
 
+### GreaterWMS CLI（读操作与受控写操作）
+
+仓库中包含 `tools/greaterwms.mjs`，用于访问当前菜单页面对应的数据和
+Pack List 流程。CLI 使用网页端相同的 `token` 请求头，通过应用 API 操作，
+不直接操作数据库。
+
+~~~shell
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku list --query '{"goods_code__icontains":"702"}' --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs warehouse list --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs asn list --query '{"asn_status":1}' --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs staging-slots list --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN202608123 --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku create --data '{"goods_code":"702-S"}' --dry-run --json
+GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku delete --id 123 --dry-run --json
+~~~
+
+SKU、仓库、库位、员工等基础资料的创建、修改和已启用的逐条删除必须经过
+`--dry-run`/`--confirm`。Pack List 导入和确认仍保留原有的两步流程。
+Pack List 删除和批量清理不支持。
+
 <h4>
   <a href="https://www.56yhz.com/zh/win_10.html">Windows X64</a>
 </h4>
