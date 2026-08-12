@@ -24,13 +24,24 @@
           <div class="col-6 col-sm-3"><q-chip color="grey-3">Expected SN: {{ selectedLine.expected_serial_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="green-2">Accepted: {{ selectedLine.accepted_serial_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Exceptions: {{ selectedLine.exception_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="blue-1">Resolved: {{ selectedLine.resolved_exception_count || 0 }}</q-chip></div>
+          <div v-if="quantityExceptionQty" class="col-12 col-sm-6">
+            <q-chip color="orange-2">{{ quantityExceptionLabel }}</q-chip>
+            <q-btn
+              dense
+              flat
+              color="primary"
+              :label="selectedDetail.exception_resolved ? 'Reopen quantity exception' : 'Resolve quantity exception'"
+              @click="openQuantityResolution"
+            />
+          </div>
         </div>
 
         <q-banner v-if="summary" :class="summary.ready_for_putaway ? 'bg-green-1' : 'bg-orange-1'">
           <span v-if="summary.verification_mode === 'ASN_ONLY'">No Pack List is attached. Scans will be recorded as unverified physical receipt.</span>
           <span v-else-if="summary.verification_mode === 'PACK_LIST_QTY'">Pack List quantities are attached, but it has no SN. Physical scans are recorded without SN matching.</span>
           <span v-else-if="summary.verification_mode === 'PACK_LIST_PENDING'">Pack List SN is pending confirmation. Confirm the document before using it as the receiving baseline.</span>
-          <span v-else>{{ summary.ready_for_putaway ? 'SN check passed. Putaway is allowed.' : 'SN check is incomplete. Resolve missing or exception SN before putaway.' }}</span>
+          <span v-else>{{ summary.ready_for_putaway ? 'SN check passed. Putaway is allowed.' : 'SN check is incomplete. Resolve missing or exception SN before putaway.' }}<span v-if="summary.total_resolved_exceptions"> Resolved exceptions: {{ summary.total_resolved_exceptions }}.</span></span>
         </q-banner>
 
         <q-separator />
@@ -84,7 +95,52 @@
           :columns="recordColumns"
           :pagination.sync="pagination"
           no-data-label="No SN records"
-        />
+        >
+          <template v-slot:body-cell-resolution="props">
+            <q-btn
+              v-if="canResolve(props.row)"
+              dense
+              flat
+              color="primary"
+              :label="props.row.exception_resolved ? 'Reopen' : 'Resolve'"
+              @click="openSerialResolution(props.row)"
+            />
+            <span v-else class="text-grey-6">-</span>
+          </template>
+        </q-table>
+
+        <q-dialog v-model="resolutionForm">
+          <q-card style="width: 460px; max-width: 92vw">
+            <q-bar class="bg-light-blue-10 text-white">
+              <div>{{ resolutionTitle }}</div>
+              <q-space />
+              <q-btn dense flat icon="close" v-close-popup />
+            </q-bar>
+            <q-card-section class="q-gutter-sm">
+              <q-select
+                v-model="resolutionAction"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="resolutionActionOptions"
+                label="Resolution"
+              />
+              <q-input
+                v-model="resolutionNote"
+                outlined
+                type="textarea"
+                autogrow
+                label="Audit note"
+                hint="Required when accepting an exception"
+              />
+            </q-card-section>
+            <q-card-actions align="right">
+              <q-btn flat label="Cancel" v-close-popup />
+              <q-btn color="primary" label="Save" @click="submitResolution" />
+            </q-card-actions>
+          </q-card>
+        </q-dialog>
       </q-card-section>
     </q-card>
   </q-dialog>
@@ -113,6 +169,11 @@ export default {
       inboundPo: '',
       shipoutRef: '',
       pagination: { page: 1, rowsPerPage: 10 },
+      resolutionForm: false,
+      resolutionType: '',
+      resolutionTarget: null,
+      resolutionAction: '',
+      resolutionNote: '',
       recordColumns: [
         { name: 'serial_number', label: 'SN', field: 'serial_number', align: 'left' },
         { name: 'goods_code', label: 'SKU', field: 'goods_code', align: 'left' },
@@ -120,7 +181,8 @@ export default {
         { name: 'scan_count', label: 'Scans', field: 'scan_count', align: 'center' },
         { name: 'inbound_po', label: 'PO', field: 'inbound_po', align: 'left' },
         { name: 'shipout_ref', label: 'IB', field: 'shipout_ref', align: 'left' },
-        { name: 'source_location', label: 'Source Location', field: 'source_location', align: 'left' }
+        { name: 'source_location', label: 'Source Location', field: 'source_location', align: 'left' },
+        { name: 'resolution', label: 'Resolution', field: 'exception_resolved', align: 'center' }
       ]
     }
   },
@@ -131,6 +193,41 @@ export default {
     selectedLine () {
       if (!this.summary || !this.selectedGoodsCode) return {}
       return this.summary.lines.find(item => item.goods_code === this.selectedGoodsCode) || {}
+    },
+    selectedDetail () {
+      return this.details.find(item => item.goods_code === this.selectedGoodsCode) || {}
+    },
+    quantityExceptionQty () {
+      const detail = this.selectedDetail
+      return Number(detail.goods_shortage_qty || 0) + Number(detail.goods_more_qty || 0) + Number(detail.goods_damage_qty || 0)
+    },
+    quantityExceptionLabel () {
+      const detail = this.selectedDetail
+      const parts = []
+      if (detail.goods_shortage_qty) parts.push('Shortage ' + detail.goods_shortage_qty)
+      if (detail.goods_more_qty) parts.push('Overage ' + detail.goods_more_qty)
+      if (detail.goods_damage_qty) parts.push('Damage ' + detail.goods_damage_qty)
+      return 'Quantity: ' + parts.join(' / ') + (detail.exception_resolved ? ' (resolved)' : '')
+    },
+    resolutionTitle () {
+      return this.resolutionType === 'quantity' ? 'Quantity exception' : 'Serial exception'
+    },
+    resolutionActionOptions () {
+      if (this.resolutionType === 'quantity') {
+        return [
+          { label: 'Accept exception', value: 'ACCEPT_EXCEPTION' },
+          { label: 'Reopen', value: 'REOPEN' }
+        ]
+      }
+      return this.resolutionTarget && this.resolutionTarget.is_received
+        ? [
+          { label: 'Accept exception', value: 'ACCEPT_EXCEPTION' },
+          { label: 'Reopen', value: 'REOPEN' }
+        ]
+        : [
+          { label: 'Waive missing SN', value: 'WAIVE_MISSING' },
+          { label: 'Reopen', value: 'REOPEN' }
+        ]
     }
   },
   watch: {
@@ -159,6 +256,47 @@ export default {
         this.records = res.results || []
       }).catch(err => {
         this.$q.notify({ message: err.detail || 'Unable to load SN data', color: 'negative' })
+      })
+    },
+    canResolve (record) {
+      return Boolean(record.exception_resolved || record.status === 'UNEXPECTED' || record.status === 'DUPLICATE' || record.status === 'WRONG_SKU' || record.status === 'DAMAGED' || record.status === 'REJECTED' || (record.is_expected && !record.is_received))
+    },
+    openSerialResolution (record) {
+      this.resolutionType = 'serial'
+      this.resolutionTarget = record
+      this.resolutionAction = record.exception_resolved ? 'REOPEN' : (record.is_received ? 'ACCEPT_EXCEPTION' : 'WAIVE_MISSING')
+      this.resolutionNote = record.exception_resolution_note || ''
+      this.resolutionForm = true
+    },
+    openQuantityResolution () {
+      this.resolutionType = 'quantity'
+      this.resolutionTarget = this.selectedDetail
+      this.resolutionAction = this.selectedDetail.exception_resolved ? 'REOPEN' : 'ACCEPT_EXCEPTION'
+      this.resolutionNote = this.selectedDetail.exception_resolution_note || ''
+      this.resolutionForm = true
+    },
+    submitResolution () {
+      if (!this.resolutionTarget) return
+      const isQuantity = this.resolutionType === 'quantity'
+      const payload = isQuantity
+        ? {
+          asn_code: this.asnCode,
+          goods_code: this.resolutionTarget.goods_code,
+          action: this.resolutionAction,
+          note: this.resolutionNote
+        }
+        : {
+          id: this.resolutionTarget.id,
+          action: this.resolutionAction,
+          note: this.resolutionNote
+        }
+      const endpoint = isQuantity ? 'asn/serial/exceptions/resolve-quantity/' : 'asn/serial/exceptions/resolve/'
+      postauth(endpoint, payload).then(() => {
+        this.resolutionForm = false
+        this.refreshSerialData()
+        this.$q.notify({ message: 'Exception status updated', color: 'positive' })
+      }).catch(err => {
+        this.$q.notify({ message: err.detail || 'Unable to update exception', color: 'negative' })
       })
     },
     saveExpectedText () {
@@ -197,7 +335,7 @@ export default {
       })
     },
     importFile (mode) {
-      if (!this.selectedFile || !this.inboundPo && !this.shipoutRef) {
+      if (!this.selectedFile || (!this.inboundPo && !this.shipoutRef)) {
         this.$q.notify({ message: 'Select an Excel file and provide PO or IB filter', color: 'negative' })
         return
       }

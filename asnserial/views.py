@@ -148,6 +148,11 @@ def _record_json(record):
         'scan_count': record.scan_count,
         'damaged': record.damaged,
         'note': record.note,
+        'exception_resolved': record.exception_resolved,
+        'exception_resolution_action': record.exception_resolution_action,
+        'exception_resolution_note': record.exception_resolution_note,
+        'exception_resolved_by': record.exception_resolved_by,
+        'exception_resolved_at': record.exception_resolved_at.isoformat() if record.exception_resolved_at else None,
         'expected_by': record.expected_by,
         'received_by': record.received_by,
         'expected_at': record.expected_at.isoformat() if record.expected_at else None,
@@ -181,24 +186,46 @@ def _summary(openid, asn_code):
         expected_count = line_records.filter(is_expected=True).count()
         received_count = line_records.filter(is_received=True).count()
         accepted_count = line_records.filter(status=AsnSerialRecord.ACCEPTED).count()
-        exception_count = line_records.filter(status__in=exception_statuses).count()
-        missing_count = line_records.filter(is_expected=True, is_received=False).count()
+        resolved_count = line_records.filter(exception_resolved=True).count()
+        exception_count = line_records.filter(status__in=exception_statuses, exception_resolved=False).count()
+        missing_count = line_records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
+        accepted_for_putaway = accepted_count + resolved_count
+        quantity_exception_qty = 0 if detail.exception_resolved else (
+            int(detail.goods_shortage_qty or 0)
+            + int(detail.goods_more_qty or 0)
+            + int(detail.goods_damage_qty or 0)
+        )
         lines.append({
             'goods_code': detail.goods_code,
             'planned_qty': detail.goods_qty,
             'expected_serial_count': expected_count,
             'received_serial_count': received_count,
             'accepted_serial_count': accepted_count,
+            'resolved_exception_count': resolved_count,
             'missing_serial_count': missing_count,
             'exception_count': exception_count,
+            'quantity_exception_qty': quantity_exception_qty,
+            'quantity_exception_resolved': bool(detail.exception_resolved),
             'ready_for_putaway': (
-                not line_records.exists()
-                or (not strict_serial_check and exception_count == 0)
-                or (strict_serial_check and missing_count == 0 and exception_count == 0 and accepted_count >= detail.goods_actual_qty)
+                quantity_exception_qty == 0 and (
+                    not line_records.exists()
+                    or (not strict_serial_check and exception_count == 0)
+                    or (strict_serial_check and missing_count == 0 and exception_count == 0 and accepted_for_putaway >= detail.goods_actual_qty)
+                )
             ),
         })
-    exception_total = records.filter(status__in=exception_statuses).count()
-    missing_total = records.filter(is_expected=True, is_received=False).count()
+    exception_total = records.filter(status__in=exception_statuses, exception_resolved=False).count()
+    missing_total = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
+    resolved_total = records.filter(exception_resolved=True).count()
+    accepted_total = records.filter(status=AsnSerialRecord.ACCEPTED).count()
+    quantity_exception_total = sum(
+        0 if detail.exception_resolved else (
+            int(detail.goods_shortage_qty or 0)
+            + int(detail.goods_more_qty or 0)
+            + int(detail.goods_damage_qty or 0)
+        )
+        for detail in details
+    )
     return {
         'asn_code': asn_code,
         'pack_list_present': pack_lists.exists(),
@@ -220,13 +247,18 @@ def _summary(openid, asn_code):
         'lines': lines,
         'total_expected_serials': records.filter(is_expected=True).count(),
         'total_received_serials': records.filter(is_received=True).count(),
-        'total_accepted_serials': records.filter(status=AsnSerialRecord.ACCEPTED).count(),
+        'total_accepted_serials': accepted_total,
+        'total_resolved_exceptions': resolved_total,
+        'total_accepted_for_putaway': accepted_total + resolved_total,
         'total_exception_serials': exception_total,
         'total_missing_serials': missing_total,
+        'total_quantity_exceptions': quantity_exception_total,
         'ready_for_putaway': (
-            records.count() == 0
-            or (not strict_serial_check and exception_total == 0)
-            or (strict_serial_check and exception_total == 0 and missing_total == 0)
+            quantity_exception_total == 0 and (
+                records.count() == 0
+                or (not strict_serial_check and exception_total == 0)
+                or (strict_serial_check and exception_total == 0 and missing_total == 0 and accepted_total + resolved_total >= records.filter(is_expected=True).count())
+            )
         ),
     }
 
@@ -260,6 +292,11 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         record.expected_at = record.expected_at or now
         if record.is_received and record.scanned_goods_code == goods_code and record.status not in EXCEPTION_STATUSES:
             record.status = AsnSerialRecord.ACCEPTED
+            record.exception_resolved = False
+            record.exception_resolution_action = ''
+            record.exception_resolution_note = ''
+            record.exception_resolved_by = ''
+            record.exception_resolved_at = None
         record.save()
         return record, False
     expected_count = AsnSerialRecord.objects.filter(
@@ -334,6 +371,12 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
             record.status = AsnSerialRecord.ACCEPTED
         else:
             record.status = _scan_status_without_pack_list(openid, asn_code)
+        if record.status in EXCEPTION_STATUSES:
+            record.exception_resolved = False
+            record.exception_resolution_action = ''
+            record.exception_resolution_note = ''
+            record.exception_resolved_by = ''
+            record.exception_resolved_at = None
         record.save()
         return record, False
     record = AsnSerialRecord.objects.create(
@@ -375,6 +418,189 @@ class SerialRecordsView(APIView):
             records = records.filter(status=status)
         limit = min(max(int(request.query_params.get('limit', 500)), 1), 5000)
         return Response({'count': records.count(), 'results': [_record_json(r) for r in records[:limit]]})
+
+
+SERIAL_EXCEPTION_ACTIONS = {'ACCEPT_EXCEPTION', 'WAIVE_MISSING', 'REOPEN'}
+
+
+def _resolution_note(data):
+    return str(data.get('note') or data.get('resolution_note') or '').strip()
+
+
+class SerialExceptionsView(APIView):
+    """List current SN and quantity exceptions for QC follow-up."""
+
+    def get(self, request):
+        openid = _openid(request)
+        asn_code = _clean(request.query_params.get('asn_code'))
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        records = AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code)
+        exception_statuses = EXCEPTION_STATUSES
+        results = []
+        for record in records.filter(status__in=exception_statuses) | records.filter(is_expected=True, is_received=False):
+            if record.exception_resolved:
+                continue
+            kind = {
+                AsnSerialRecord.UNEXPECTED: 'UNEXPECTED_SN',
+                AsnSerialRecord.DUPLICATE: 'DUPLICATE_SN',
+                AsnSerialRecord.WRONG_SKU: 'WRONG_SKU',
+                AsnSerialRecord.DAMAGED: 'DAMAGED_SN',
+                AsnSerialRecord.REJECTED: 'REJECTED_SN',
+            }.get(record.status, 'MISSING_SN')
+            results.append({
+                'type': 'SERIAL',
+                'id': record.id,
+                'asn_code': record.asn_code,
+                'goods_code': record.goods_code,
+                'serial_number': record.serial_number,
+                'kind': kind,
+                'status': record.status,
+                'quantity': 1,
+                'exception_resolved': record.exception_resolved,
+                'note': record.note,
+            })
+
+        details = AsnDetailModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False)
+        for detail in details:
+            quantity = int(detail.goods_shortage_qty or 0) + int(detail.goods_more_qty or 0) + int(detail.goods_damage_qty or 0)
+            if quantity <= 0 or detail.exception_resolved:
+                continue
+            if detail.goods_shortage_qty:
+                kind = 'SHORTAGE'
+                quantity = int(detail.goods_shortage_qty)
+            elif detail.goods_more_qty:
+                kind = 'OVERAGE'
+                quantity = int(detail.goods_more_qty)
+            else:
+                kind = 'DAMAGED_QTY'
+                quantity = int(detail.goods_damage_qty)
+            results.append({
+                'type': 'QUANTITY',
+                'id': detail.id,
+                'asn_code': detail.asn_code,
+                'goods_code': detail.goods_code,
+                'serial_number': '',
+                'kind': kind,
+                'status': 'OPEN',
+                'quantity': quantity,
+                'exception_resolved': detail.exception_resolved,
+                'note': detail.exception_resolution_note,
+            })
+        return Response({'count': len(results), 'results': results})
+
+
+class SerialExceptionResolveView(APIView):
+    """Resolve or reopen one serial exception with an audit note."""
+
+    def post(self, request):
+        openid = _openid(request)
+        data = request.data
+        try:
+            record_id = int(data.get('id'))
+        except (TypeError, ValueError):
+            raise APIException({'detail': 'Serial record id is required'})
+        action = str(data.get('action') or '').strip().upper()
+        if action not in SERIAL_EXCEPTION_ACTIONS:
+            raise APIException({'detail': 'Action must be ACCEPT_EXCEPTION, WAIVE_MISSING, or REOPEN'})
+        record = AsnSerialRecord.objects.filter(id=record_id, openid=openid).first()
+        if not record:
+            raise APIException({'detail': 'Serial record does not exist'})
+        is_missing = record.is_expected and not record.is_received
+        is_exception = record.status in EXCEPTION_STATUSES
+        if action != 'REOPEN' and not is_missing and not is_exception:
+            raise APIException({'detail': 'This serial record has no open exception'})
+        if action == 'WAIVE_MISSING' and not is_missing:
+            raise APIException({'detail': 'WAIVE_MISSING is only valid for an expected SN that was not received'})
+        if action != 'REOPEN' and not _resolution_note(data):
+            raise APIException({'detail': 'A resolution note is required'})
+        if action == 'REOPEN':
+            if not record.exception_resolved:
+                raise APIException({'detail': 'This serial exception is already open'})
+            record.exception_resolved = False
+            record.exception_resolution_action = ''
+            record.exception_resolution_note = ''
+            record.exception_resolved_by = ''
+            record.exception_resolved_at = None
+        else:
+            record.exception_resolved = True
+            record.exception_resolution_action = action
+            record.exception_resolution_note = _resolution_note(data)
+            record.exception_resolved_by = _operator_name(request, openid)
+            record.exception_resolved_at = timezone.now()
+        record.save(update_fields=[
+            'exception_resolved',
+            'exception_resolution_action',
+            'exception_resolution_note',
+            'exception_resolved_by',
+            'exception_resolved_at',
+            'update_time',
+        ])
+        return Response({
+            'detail': 'Serial exception updated',
+            'record': _record_json(record),
+            'summary': _summary(openid, record.asn_code),
+        })
+
+
+class QuantityExceptionResolveView(APIView):
+    """Resolve or reopen the quantity variance recorded during QC."""
+
+    def post(self, request):
+        openid = _openid(request)
+        data = request.data
+        asn_code = _clean(data.get('asn_code'))
+        goods_code = _clean(data.get('goods_code'))
+        action = str(data.get('action') or '').strip().upper()
+        if not asn_code or not goods_code:
+            raise APIException({'detail': 'ASN Code and Goods Code are required'})
+        if action not in {'ACCEPT_EXCEPTION', 'REOPEN'}:
+            raise APIException({'detail': 'Action must be ACCEPT_EXCEPTION or REOPEN'})
+        detail = AsnDetailModel.objects.filter(
+            openid=openid,
+            asn_code=asn_code,
+            goods_code=goods_code,
+            is_delete=False,
+        ).first()
+        if not detail:
+            raise APIException({'detail': 'ASN detail does not exist'})
+        quantity = int(detail.goods_shortage_qty or 0) + int(detail.goods_more_qty or 0) + int(detail.goods_damage_qty or 0)
+        if action == 'ACCEPT_EXCEPTION' and quantity <= 0:
+            raise APIException({'detail': 'This ASN detail has no quantity exception'})
+        if action == 'ACCEPT_EXCEPTION' and not _resolution_note(data):
+            raise APIException({'detail': 'A resolution note is required'})
+        if action == 'REOPEN':
+            if not detail.exception_resolved:
+                raise APIException({'detail': 'This quantity exception is already open'})
+            detail.exception_resolved = False
+            detail.exception_resolution_action = ''
+            detail.exception_resolution_note = ''
+            detail.exception_resolved_by = ''
+            detail.exception_resolved_at = None
+        else:
+            detail.exception_resolved = True
+            detail.exception_resolution_action = action
+            detail.exception_resolution_note = _resolution_note(data)
+            detail.exception_resolved_by = _operator_name(request, openid)
+            detail.exception_resolved_at = timezone.now()
+        detail.save(update_fields=[
+            'exception_resolved',
+            'exception_resolution_action',
+            'exception_resolution_note',
+            'exception_resolved_by',
+            'exception_resolved_at',
+            'update_time',
+        ])
+        return Response({
+            'detail': 'Quantity exception updated',
+            'asn_detail_id': detail.id,
+            'asn_code': detail.asn_code,
+            'goods_code': detail.goods_code,
+            'exception_resolved': detail.exception_resolved,
+            'exception_resolution_action': detail.exception_resolution_action,
+            'exception_resolution_note': detail.exception_resolution_note,
+            'summary': _summary(openid, detail.asn_code),
+        })
 
 
 class SerialSummaryView(APIView):

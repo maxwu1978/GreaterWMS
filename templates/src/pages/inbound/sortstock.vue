@@ -109,6 +109,25 @@
            </q-btn>
          </q-bar>
          <q-card-section style="max-height: 325px; width: 400px" class="scroll">
+           <q-select
+             v-model="movedata.putaway_driver"
+             dense
+             outlined
+             square
+             use-input
+             hide-selected
+             fill-input
+             label="Putaway driver"
+             :options="driver_options"
+             @filter="filterFnDriver"
+             style="margin-bottom: 10px"
+           >
+             <template v-slot:no-option>
+               <q-item>
+                 <q-item-section class="text-grey">No drivers found</q-item-section>
+               </q-item>
+             </template>
+           </q-select>
            <q-input dense
                     outlined
                     square
@@ -162,7 +181,7 @@
 
 <script>
 import { getauth, postauth } from 'boot/axios_request'
-import { SessionStorage } from 'quasar'
+import { LocalStorage, SessionStorage } from 'quasar'
 import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
 
 export default {
@@ -204,6 +223,7 @@ export default {
         rowsPerPage: '30'
       },
       options: [],
+      driver_options: LocalStorage.getItem('putaway_driver_name_list') || [],
       moveForm: false,
       movedata: {},
       error1: this.$t('inbound.view_sortstock.error1'),
@@ -250,17 +270,17 @@ export default {
         })
       }
     },
-    changePageEnter(e) {
+    changePageEnter (e) {
       if (Number(this.paginationIpt) < 1) {
-        this.current = 1;
-        this.paginationIpt = 1;
+        this.current = 1
+        this.paginationIpt = 1
       } else if (Number(this.paginationIpt) > this.max) {
-        this.current = this.max;
-        this.paginationIpt = this.max;
+        this.current = this.max
+        this.paginationIpt = this.max
       } else {
-        this.current = Number(this.paginationIpt);
+        this.current = Number(this.paginationIpt)
       }
-      this.getList();
+      this.getList()
     },
     getSearchList () {
       var _this = this
@@ -336,11 +356,22 @@ export default {
     MoveToBin (e) {
       var _this = this
       _this.moveForm = true
-      _this.movedata = e
+      _this.movedata = { ...e, putaway_driver: '' }
+      _this.loadPutawayDriverOptions()
+      getauth('asn/list/?asn_code=' + encodeURIComponent(e.asn_code)).then(res => {
+        const row = (res.results || [])[0]
+        if (row && row.putaway_driver) _this.movedata.putaway_driver = row.putaway_driver
+      }).catch(() => {})
     },
     MoveToBinSubmit () {
       var _this = this
-      if (_this.movedata.bin_name === '') {
+      if (!_this.movedata.putaway_driver) {
+        _this.$q.notify({
+          message: 'Please assign a putaway driver',
+          icon: 'close',
+          color: 'negative'
+        })
+      } else if (!_this.movedata.bin_name) {
         _this.$q.notify({
           message: 'Please Enter the Bin Name',
           icon: 'close',
@@ -393,6 +424,23 @@ export default {
             color: 'negative'
           })
         })
+      })
+    },
+    loadPutawayDriverOptions (needle = '') {
+      getauth('driver/?driver_name__icontains=' + encodeURIComponent(needle)).then(res => {
+        const rows = Array.isArray(res) ? res : (res.results || [])
+        const options = rows.map(item => item.driver_name).filter(Boolean)
+        this.driver_options = options
+        LocalStorage.set('putaway_driver_name_list', options)
+      }).catch(() => {})
+    },
+    filterFnDriver (val, update, abort) {
+      if (val.length < 1) {
+        abort()
+        return
+      }
+      update(() => {
+        this.loadPutawayDriverOptions(val)
       })
     }
   },

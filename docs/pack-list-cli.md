@@ -86,3 +86,52 @@ node tools/greaterwms.mjs serial import \
 The result reports matched, created, updated, skipped, and exception rows.
 This import records receipt; it does not confirm a pending customer Pack
 List.
+
+### Exception review and putaway
+
+List open serial and quantity exceptions before putaway:
+
+\`\`\`bash
+node tools/greaterwms.mjs serial exceptions \
+  --asn-code ASN202608123 \
+  --json
+\`\`\`
+
+Resolve one serial exception only after the QC decision is recorded. A note
+is required for an approval:
+
+\`\`\`bash
+node tools/greaterwms.mjs serial resolve \
+  --id 456 \
+  --data '{"action":"ACCEPT_EXCEPTION","note":"QC approved after photo review"}' \
+  --dry-run \
+  --json
+node tools/greaterwms.mjs serial resolve \
+  --id 456 \
+  --data '{"action":"ACCEPT_EXCEPTION","note":"QC approved after photo review"}' \
+  --confirm \
+  --json
+\`\`\`
+
+Use WAIVE_MISSING only when an expected SN was not received but the
+quantity variance has been approved. Quantity shortage, overage, and damage
+exceptions use the same explicit approval flow:
+
+\`\`\`bash
+node tools/greaterwms.mjs serial resolve-quantity \
+  --data '{"asn_code":"ASN202608123","goods_code":"702-S","action":"ACCEPT_EXCEPTION","note":"Customer approved shortage"}' \
+  --confirm \
+  --json
+\`\`\`
+
+Putaway requires a valid Driver master-data record. The first successful
+putaway assigns the driver to the ASN; later putaway moves for the same ASN
+must use the same driver:
+
+\`\`\`bash
+node tools/greaterwms.mjs asn putaway \
+  --id 789 \
+  --data '{"asn_code":"ASN202608123","goods_code":"702-S","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"}' \
+  --dry-run \
+  --json
+\`\`\`

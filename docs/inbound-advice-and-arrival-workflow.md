@@ -73,6 +73,10 @@ If the vehicle arrives without a prior ETA, the operator may still start this st
 - Move the ASN to `Putaway`.
 - Release the staging assignments only after the goods leave the staging area.
 - Complete the ASN after all accepted goods have been put away or exceptions have been resolved.
+- Resolve SN and quantity exceptions with an audit note before putaway. The
+  putaway action is blocked while an exception remains open.
+- Select a valid putaway driver at the time of the first putaway. The selected
+  driver is stored on the ASN and must be used for subsequent putaway moves.
 
 ## Current System Fit
 

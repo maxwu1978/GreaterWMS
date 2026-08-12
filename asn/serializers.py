@@ -30,6 +30,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     staging_occupied_qty = serializers.SerializerMethodField()
     arrival_status = serializers.SerializerMethodField()
     serial_acceptance = serializers.SerializerMethodField()
+    putaway_driver = serializers.CharField(read_only=True, required=False)
 
     def get_supplier_short_name(self, obj):
         cache = self.context.setdefault('_asn_supplier_cache', {})
@@ -68,14 +69,16 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 'goods_shortage_qty',
                 'goods_more_qty',
                 'goods_damage_qty',
+                'exception_resolved',
             ):
                 summary['planned_qty'] += detail.goods_qty or 0
                 summary['actual_qty'] += detail.goods_actual_qty or 0
-                summary['exception_qty'] += (
-                    (detail.goods_shortage_qty or 0)
-                    + (detail.goods_more_qty or 0)
-                    + (detail.goods_damage_qty or 0)
-                )
+                if not detail.exception_resolved:
+                    summary['exception_qty'] += (
+                        (detail.goods_shortage_qty or 0)
+                        + (detail.goods_more_qty or 0)
+                        + (detail.goods_damage_qty or 0)
+                    )
                 summary['sku_count'] += 1
             cache[cache_key] = summary
         return cache[cache_key]
@@ -151,6 +154,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         expected = records.filter(is_expected=True).count()
         received = records.filter(is_received=True).count()
         accepted = records.filter(status=AsnSerialRecord.ACCEPTED).count()
+        resolved = records.filter(exception_resolved=True).count()
         exception_statuses = {
             AsnSerialRecord.DUPLICATE,
             AsnSerialRecord.WRONG_SKU,
@@ -159,13 +163,15 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         }
         if expected:
             exception_statuses.add(AsnSerialRecord.UNEXPECTED)
-        exceptions = records.filter(status__in=exception_statuses).count()
+        exceptions = records.filter(status__in=exception_statuses, exception_resolved=False).count()
+        missing = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
+        accepted_for_putaway = accepted + resolved
 
         if not records.exists():
             status = 'NOT_IMPORTED'
         elif exceptions:
             status = 'EXCEPTIONS'
-        elif expected and accepted >= expected and received >= expected:
+        elif expected and accepted_for_putaway >= expected and not missing:
             status = 'ACCEPTED'
         elif received:
             status = 'PARTIAL'
@@ -177,6 +183,8 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'expected': expected,
             'received': received,
             'accepted': accepted,
+            'accepted_for_putaway': accepted_for_putaway,
+            'resolved': resolved,
             'exceptions': exceptions,
         }
         return cache[cache_key]
@@ -287,7 +295,7 @@ class ASNListPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', 'putaway_driver', ]
 
 class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
@@ -298,7 +306,7 @@ class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', 'putaway_driver', ]
 
 class ASNListUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
@@ -309,7 +317,7 @@ class ASNListUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', 'putaway_driver', ]
 
 class ASNDetailGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
@@ -322,6 +330,11 @@ class ASNDetailGetSerializer(serializers.ModelSerializer):
     goods_shortage_qty = serializers.IntegerField(read_only=True, required=False)
     goods_more_qty = serializers.IntegerField(read_only=True, required=False)
     goods_damage_qty = serializers.IntegerField(read_only=True, required=False)
+    exception_resolved = serializers.BooleanField(read_only=True, required=False)
+    exception_resolution_action = serializers.CharField(read_only=True, required=False)
+    exception_resolution_note = serializers.CharField(read_only=True, required=False)
+    exception_resolved_by = serializers.CharField(read_only=True, required=False)
+    exception_resolved_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
     creater = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
@@ -358,7 +371,11 @@ class ASNDetailPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnDetailModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'exception_resolved', 'exception_resolution_action',
+            'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+        ]
 
 class ASNSortedPostSerializer(serializers.ModelSerializer):
     openid = serializers.CharField(read_only=False, required=False, validators=[datasolve.openid_validate])
@@ -371,7 +388,11 @@ class ASNSortedPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnDetailModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'exception_resolved', 'exception_resolution_action',
+            'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+        ]
 
 class ASNDetailUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
@@ -383,7 +404,11 @@ class ASNDetailUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnDetailModel
         exclude = ['openid', 'is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'exception_resolved', 'exception_resolution_action',
+            'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+        ]
 
 class ASNDetailPartialUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
@@ -395,11 +420,16 @@ class ASNDetailPartialUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnDetailModel
         exclude = ['openid', 'is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'exception_resolved', 'exception_resolution_action',
+            'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+        ]
 
 class MoveToBinSerializer(serializers.ModelSerializer):
     bin_name = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     qty = serializers.IntegerField(read_only=False, required=True, validators=[datasolve.qty_0_data_validate])
+    driver = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     class Meta:
         model = AsnDetailModel
         ref_name = 'AsnMoveToBin'

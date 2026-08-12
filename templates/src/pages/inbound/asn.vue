@@ -97,7 +97,10 @@
                 R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
               </div>
               <div class="asn-staging-line text-caption text-grey-6" :title="'Unloading driver: ' + (props.row.unload_driver || 'Not assigned')">
-                DRV {{ props.row.unload_driver || '-' }}
+                UNL {{ props.row.unload_driver || '-' }}
+              </div>
+              <div class="asn-staging-line text-caption text-grey-6" :title="'Putaway driver: ' + (props.row.putaway_driver || 'Not assigned')">
+                PUT {{ props.row.putaway_driver || '-' }}
               </div>
             </q-td>
             <q-td key="pack_list_status" :props="props" class="asn-pack-list-cell">
@@ -1148,7 +1151,7 @@ export default {
       }[summary.status] || 'grey-7'
     },
     serialAcceptanceExceptions (row) {
-      return Number(row.serial_acceptance && row.serial_acceptance.exceptions || 0)
+      return Number((row.serial_acceptance && row.serial_acceptance.exceptions) || 0)
     },
     serialAcceptanceTitle (summary) {
       return 'Serial acceptance: ' + (summary.accepted || 0) + '/' + (summary.expected || 0) +
@@ -1298,17 +1301,17 @@ export default {
           })
       }
     },
-    changePageEnter(e) {
+    changePageEnter (e) {
       if (Number(this.paginationIpt) < 1) {
-        this.current = 1;
-        this.paginationIpt = 1;
+        this.current = 1
+        this.paginationIpt = 1
       } else if (Number(this.paginationIpt) > this.max) {
-        this.current = this.max;
-        this.paginationIpt = this.max;
+        this.current = this.max
+        this.paginationIpt = this.max
       } else {
-        this.current = Number(this.paginationIpt);
+        this.current = Number(this.paginationIpt)
       }
-      this.getList();
+      this.getList()
     },
     getSearchList () {
       var _this = this
@@ -1872,8 +1875,8 @@ export default {
       var _this = this
       update(() => {
         const needle = val.toLocaleLowerCase()
-        const data_filter = _this.supplier_list1
-        _this.supplier_list = data_filter.filter(v => v.toLocaleLowerCase().indexOf(needle) > -1)
+        const dataFilter = _this.supplier_list1
+        _this.supplier_list = dataFilter.filter(v => v.toLocaleLowerCase().indexOf(needle) > -1)
       })
     },
     sortedData (e) {

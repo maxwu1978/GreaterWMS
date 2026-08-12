@@ -5,6 +5,9 @@ from . import views
 
 urlpatterns = [
     path('records/', views.SerialRecordsView.as_view(), name='asn-serial-records'),
+    path('exceptions/', views.SerialExceptionsView.as_view(), name='asn-serial-exceptions'),
+    path('exceptions/resolve/', views.SerialExceptionResolveView.as_view(), name='asn-serial-exception-resolve'),
+    path('exceptions/resolve-quantity/', views.QuantityExceptionResolveView.as_view(), name='asn-quantity-exception-resolve'),
     path('summary/', views.SerialSummaryView.as_view(), name='asn-serial-summary'),
     path('expected/', views.ExpectedSerialView.as_view(), name='asn-serial-expected'),
     path('scan/', views.ScanSerialView.as_view(), name='asn-serial-scan'),

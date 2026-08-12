@@ -1011,6 +1011,11 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
                                                            asn_status=3, supplier=str(data['supplier']),
                                                            goods_code=str(
                                                                data['goodsData'][j].get('goods_code'))).first()
+                asn_detail.exception_resolved = False
+                asn_detail.exception_resolution_action = ''
+                asn_detail.exception_resolution_note = ''
+                asn_detail.exception_resolved_by = ''
+                asn_detail.exception_resolved_at = None
                 goods_detail = goods.objects.filter(openid=self.request.auth.openid,
                                                     goods_code=str(data['goodsData'][j].get('goods_code')),
                                                     is_delete=False).first()
@@ -1080,6 +1085,11 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
                                                            asn_code=str(data['asn_code']),
                                                            goods_code=str(
                                                                data['goodsData'][j].get('goods_code'))).first()
+                asn_detail.exception_resolved = False
+                asn_detail.exception_resolution_action = ''
+                asn_detail.exception_resolution_note = ''
+                asn_detail.exception_resolved_by = ''
+                asn_detail.exception_resolved_at = None
                 goods_detail = goods.objects.filter(openid=self.request.auth.openid,
                                                     goods_code=str(data['goodsData'][j].get('goods_code')),
                                                     is_delete=False).first()
@@ -1169,6 +1179,7 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
@@ -1178,6 +1189,16 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                 raise APIException({"detail": "This ASN Status Is Not 4"})
             else:
                 data = self.request.data
+                putaway_driver = str(data.get('putaway_driver') or data.get('driver') or '').strip()
+                if not putaway_driver:
+                    raise APIException({"detail": "Please assign a putaway driver"})
+                driver_record = driverlist.objects.filter(
+                    openid=self.request.auth.openid,
+                    driver_name=putaway_driver,
+                    is_delete=False,
+                ).first()
+                if driver_record is None:
+                    raise APIException({"detail": "Putaway driver does not exist"})
                 if 'bin_name' not in data:
                     raise APIException({"detail": "Please Enter the Bin Name"})
                 else:
@@ -1188,8 +1209,17 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                         raise APIException({"detail": "Bin does not exist"})
                     if bin_detail.location_role == 'STAGING':
                         raise APIException({"detail": "Staging locations cannot be used for final putaway"})
-                    asn_detail = AsnListModel.objects.filter(openid=self.request.auth.openid,
-                                                             asn_code=str(data['asn_code'])).first()
+                    asn_detail = AsnListModel.objects.select_for_update().filter(
+                        openid=self.request.auth.openid,
+                        asn_code=str(data['asn_code']),
+                        is_delete=False,
+                    ).first()
+                    if asn_detail is None:
+                        raise APIException({"detail": "ASN does not exist"})
+                    if asn_detail.putaway_driver and asn_detail.putaway_driver != putaway_driver:
+                        raise APIException({
+                            "detail": "This ASN is already assigned to putaway driver %s" % asn_detail.putaway_driver
+                        })
                     goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
                                                                 goods_code=str(data['goods_code'])).first()
                     if int(data['qty']) <= 0:
@@ -1205,6 +1235,7 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             missing_serials = serial_records.filter(
                                 is_expected=True,
                                 is_received=False,
+                                exception_resolved=False,
                             ).count()
                             exception_statuses = [
                                 AsnSerialRecord.DUPLICATE,
@@ -1214,14 +1245,27 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             ]
                             if strict_serial_check:
                                 exception_statuses.append(AsnSerialRecord.UNEXPECTED)
-                            exception_serials = serial_records.filter(status__in=exception_statuses).count()
-                            accepted_serials = serial_records.filter(
-                                status=AsnSerialRecord.ACCEPTED,
+                            exception_serials = serial_records.filter(
+                                status__in=exception_statuses,
+                                exception_resolved=False,
                             ).count()
-                            if exception_serials or (strict_serial_check and (missing_serials or accepted_serials < int(data['qty']))):
+                            accepted_serials = serial_records.filter(status=AsnSerialRecord.ACCEPTED).count()
+                            resolved_serials = serial_records.filter(exception_resolved=True).count()
+                            if exception_serials or (strict_serial_check and (missing_serials or accepted_serials + resolved_serials < int(data['qty']))):
                                 raise APIException({
                                     "detail": "SN verification is incomplete; resolve missing or exception serials before putaway"
                                 })
+                        if (
+                            not qs.exception_resolved
+                            and (
+                                int(qs.goods_shortage_qty or 0)
+                                or int(qs.goods_more_qty or 0)
+                                or int(qs.goods_damage_qty or 0)
+                            )
+                        ):
+                            raise APIException({
+                                "detail": "Receiving quantity exception is unresolved; resolve it before putaway"
+                            })
                         staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                                           id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
                         move_qty = qs.goods_actual_qty - qs.sorted_qty - int(data['qty'])
@@ -1360,7 +1404,18 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                                 release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, asn_detail.asn_code)
                         elif move_qty < 0:
                             raise APIException({"detail": "Move Qty must < Actual Arrive Qty"})
-                        return Response({"detail": "success"}, status=200)
+                        if not asn_detail.putaway_driver:
+                            asn_detail.putaway_driver = putaway_driver
+                            asn_detail.save(update_fields=['putaway_driver', 'update_time'])
+                            AsnEventModel.objects.create(
+                                openid=self.request.auth.openid,
+                                asn_code=asn_detail.asn_code,
+                                event_type=AsnEventModel.PUTAWAY_STARTED,
+                                operator=_operator_name(self.request),
+                                source='WAREHOUSE',
+                                note='Putaway driver assigned: %s' % putaway_driver,
+                            )
+                        return Response({"detail": "success", "putaway_driver": asn_detail.putaway_driver}, status=200)
 
     def update(self, request, *args, **kwargs):
         data = self.request.data

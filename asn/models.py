@@ -9,6 +9,7 @@ class AsnListModel(models.Model):
     actual_arrival_at = models.DateTimeField(blank=True, null=True, verbose_name="Actual Arrival Time")
     arrival_confirmed_by = models.CharField(max_length=255, blank=True, default='', verbose_name="Arrival Confirmed By")
     unload_driver = models.CharField(max_length=255, blank=True, default='', verbose_name="Unloading Driver")
+    putaway_driver = models.CharField(max_length=255, blank=True, default='', verbose_name="Putaway Driver")
     eta_received_at = models.DateTimeField(blank=True, null=True, verbose_name="ETA Received Time")
     eta_received_by = models.CharField(max_length=255, blank=True, default='', verbose_name="ETA Received By")
     eta_source = models.CharField(max_length=64, blank=True, default='', verbose_name="ETA Source")
@@ -36,12 +37,14 @@ class AsnEventModel(models.Model):
     ARRIVAL_CONFIRMED = 'ARRIVAL_CONFIRMED'
     STAGING_RESERVED = 'STAGING_RESERVED'
     UNLOADING_STARTED = 'UNLOADING_STARTED'
+    PUTAWAY_STARTED = 'PUTAWAY_STARTED'
 
     EVENT_TYPES = (
         (ETA_UPDATED, 'ETA Updated'),
         (ARRIVAL_CONFIRMED, 'Arrival Confirmed'),
         (STAGING_RESERVED, 'Staging Reserved'),
         (UNLOADING_STARTED, 'Unloading Started'),
+        (PUTAWAY_STARTED, 'Putaway Started'),
     )
 
     openid = models.CharField(max_length=255)
@@ -75,6 +78,11 @@ class AsnDetailModel(models.Model):
     goods_shortage_qty = models.BigIntegerField(default=0, verbose_name="Goods Shortage QTY")
     goods_more_qty = models.BigIntegerField(default=0, verbose_name="Goods More QTY")
     goods_damage_qty = models.BigIntegerField(default=0, verbose_name="Goods damage QTY")
+    exception_resolved = models.BooleanField(default=False, verbose_name="Receiving Exception Resolved")
+    exception_resolution_action = models.CharField(max_length=64, blank=True, default='', verbose_name="Exception Resolution Action")
+    exception_resolution_note = models.TextField(blank=True, default='', verbose_name="Exception Resolution Note")
+    exception_resolved_by = models.CharField(max_length=255, blank=True, default='', verbose_name="Exception Resolved By")
+    exception_resolved_at = models.DateTimeField(blank=True, null=True, verbose_name="Exception Resolved Time")
     goods_weight = models.FloatField(default=0, verbose_name="Goods Weight")
     goods_volume = models.FloatField(default=0, verbose_name="Goods Volume")
     goods_cost = models.FloatField(default=0, verbose_name="Goods Cost")
