@@ -62,12 +62,17 @@
               </q-chip>
             </q-td>
             <q-td key="eta" :props="props" class="text-center asn-arrival-cell">
-              <div :title="etaTitle(props.row)">{{ etaLabel(props.row) }}</div>
+              <div class="asn-arrival-line" :title="etaTitle(props.row)">
+                <span class="asn-arrival-key">ETA</span>
+                <span>{{ etaValue(props.row) }}</span>
+              </div>
               <div
+                class="asn-arrival-line"
                 :class="props.row.actual_arrival_at ? 'text-positive text-weight-medium' : 'text-grey-6'"
                 :title="arrivalTitle(props.row)"
               >
-                {{ arrivalLabel(props.row) }}
+                <span class="asn-arrival-key">ARR</span>
+                <span>{{ arrivalValue(props.row) }}</span>
               </div>
             </q-td>
             <q-td key="sku_quantity" :props="props" class="text-center">
@@ -803,9 +808,26 @@
   white-space: nowrap;
 }
 
-.asn-list-table .asn-arrival-cell > div {
+.asn-list-table .asn-arrival-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.asn-list-table .asn-arrival-line > span:last-child {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.asn-list-table .asn-arrival-key {
+  flex: 0 0 auto;
+  color: #616161;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .asn-list-table .asn-action-cell {
@@ -1066,14 +1088,14 @@ export default {
         ? this.$t('inbound.view_asn.staging_released')
         : this.$t('inbound.view_asn.staging_unassigned')
     },
-    etaLabel (row) {
-      return row.expected_arrival_at ? 'ETA ' + this.compactDateTime(row.expected_arrival_at) : 'ETA Not Provided'
+    etaValue (row) {
+      return row.expected_arrival_at ? this.compactDateTime(row.expected_arrival_at) : '-'
     },
     etaTitle (row) {
       return row.expected_arrival_at ? 'Expected arrival: ' + this.fullDateTime(row.expected_arrival_at) : 'ETA not provided'
     },
-    arrivalLabel (row) {
-      return row.actual_arrival_at ? 'Arrived ' + this.compactDateTime(row.actual_arrival_at) : 'Pre Arrival'
+    arrivalValue (row) {
+      return row.actual_arrival_at ? this.compactDateTime(row.actual_arrival_at) : '-'
     },
     arrivalTitle (row) {
       return row.actual_arrival_at ? 'Actual arrival: ' + this.fullDateTime(row.actual_arrival_at) : 'Physical arrival not confirmed'
