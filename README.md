@@ -106,17 +106,27 @@ docker-compose restart
 
 The repository includes `tools/greaterwms.mjs` for access to the current menu
 pages and Pack List workflow. It uses the same `token` header as the web client,
-calls the application API, and never writes directly to the database.
+calls the application API, and never writes directly to the database. Production
+and test targets are explicit; production defaults to the customer domain.
 
 ~~~shell
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku list --query '{"goods_code__icontains":"702"}' --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs warehouse list --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs asn list --query '{"asn_status":1}' --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs staging-slots list --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN202608123 --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku create --data '{"goods_code":"702-S"}' --dry-run --json
-GREATERWMS_TOKEN=... node tools/greaterwms.mjs sku delete --id 123 --dry-run --json
+node tools/greaterwms.mjs login --env production --name ADMIN
+node tools/greaterwms.mjs auth status --json
+node tools/greaterwms.mjs sku list --env production --query '{"goods_code__icontains":"702"}' --json
+node tools/greaterwms.mjs warehouse list --env production --json
+node tools/greaterwms.mjs asn list --env production --query '{"asn_status":1}' --json
+node tools/greaterwms.mjs staging-slots list --env production --json
+node tools/greaterwms.mjs packlist list --env production --asn-code ASN202608123 --json
+node tools/greaterwms.mjs sku create --env production --data '{"goods_code":"702-S"}' --dry-run --json
+node tools/greaterwms.mjs sku delete --env production --id 123 --dry-run --json
 ~~~
+
+The login command prompts for the password without echo and stores only the
+openid token, operator id, URL, and login name in
+`~/.config/greaterwms/session.json` with local-only permissions. The password is
+never saved. Use `--env test` for the Render test service or `--url URL` for a
+different approved deployment. `GREATERWMS_TOKEN` remains available as an
+explicit session-token override for automation.
 
 Master-data create/update and enabled single-record deletes require explicit
 `--dry-run`/`--confirm` handling. Pack List import and confirmation retain their

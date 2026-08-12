@@ -1,9 +1,24 @@
 #!/usr/bin/env node
 
-import { readFileSync, statSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 
-const DEFAULT_URL = 'https://greaterwms-v2-test3-sn.onrender.com'
+const ENVIRONMENT_URLS = Object.freeze({
+  production: 'https://maxsmartwms.online',
+  test: 'https://greaterwms-v2-test3-sn.onrender.com'
+})
+const DEFAULT_ENVIRONMENT = 'production'
+const DEFAULT_URL = ENVIRONMENT_URLS[DEFAULT_ENVIRONMENT]
+let selectedUrl = null
 
 // Read aliases for the current GreaterWMS menu pages.
 const READ_RESOURCES = Object.freeze({
@@ -104,20 +119,168 @@ function parseArgs (values) {
   return { options, positional }
 }
 
+function sessionFile () {
+  if (process.env.GREATERWMS_SESSION_FILE) return resolve(process.env.GREATERWMS_SESSION_FILE)
+  const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+  return join(configHome, 'greaterwms', 'session.json')
+}
+
+function loadSession () {
+  try {
+    const data = JSON.parse(readFileSync(sessionFile(), 'utf8'))
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveSession (data) {
+  const file = sessionFile()
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 })
+  chmodSync(file, 0o600)
+}
+
+function normalizeUrl (value) {
+  const url = String(value || '').trim().replace(/\/$/, '')
+  if (!/^https?:\/\//i.test(url)) throw new Error('GreaterWMS URL must start with http:// or https://')
+  return url
+}
+
+function environmentUrl (value) {
+  const environment = String(value || '').trim().toLowerCase()
+  if (!ENVIRONMENT_URLS[environment]) {
+    throw new Error(`Unknown GreaterWMS environment '${value}'. Use production or test.`)
+  }
+  return ENVIRONMENT_URLS[environment]
+}
+
+function configureTarget (options) {
+  if (options.url) {
+    selectedUrl = normalizeUrl(options.url)
+    return
+  }
+  if (options.env) {
+    selectedUrl = environmentUrl(options.env)
+    return
+  }
+  selectedUrl = null
+}
+
 function baseUrl () {
-  return (process.env.GREATERWMS_URL || DEFAULT_URL).replace(/\/$/, '')
+  if (selectedUrl) return selectedUrl
+  if (process.env.GREATERWMS_URL) return normalizeUrl(process.env.GREATERWMS_URL)
+  const session = loadSession()
+  if (session.url) return normalizeUrl(session.url)
+  return environmentUrl(process.env.GREATERWMS_ENV || DEFAULT_ENVIRONMENT)
 }
 
 function authHeaders () {
-  const token = process.env.GREATERWMS_TOKEN
+  const session = loadSession()
+  const token = process.env.GREATERWMS_TOKEN || session.token
   if (!token) {
-    throw new Error('GREATERWMS_TOKEN is required')
+    throw new Error('GreaterWMS login required. Run: node tools/greaterwms.mjs login --env production')
+  }
+  if (!process.env.GREATERWMS_TOKEN && session.url && normalizeUrl(session.url) !== baseUrl()) {
+    throw new Error(`Local session targets ${session.url}; current target is ${baseUrl()}. Run login --env for the selected environment.`)
   }
   return {
     token,
-    operator: process.env.GREATERWMS_OPERATOR || '',
+    operator: process.env.GREATERWMS_OPERATOR || session.operator || '',
     language: process.env.GREATERWMS_LANGUAGE || 'en-US'
   }
+}
+
+function readLine (prompt) {
+  return new Promise((resolvePromise, reject) => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      reject(new Error(`${prompt.trim()} must be provided with an interactive terminal or environment variable`))
+      return
+    }
+    process.stdout.write(prompt)
+    const chunks = []
+    const onData = (chunk) => {
+      const value = String(chunk)
+      if (value === '\u0003') {
+        cleanup()
+        reject(new Error('Input cancelled'))
+        return
+      }
+      if (value.includes('\n') || value.includes('\r')) {
+        cleanup()
+        resolvePromise(chunks.join(''))
+        return
+      }
+      chunks.push(value)
+    }
+    const cleanup = () => {
+      process.stdin.off('data', onData)
+      if (process.stdin.isRaw) process.stdin.setRawMode(false)
+      process.stdin.pause()
+      process.stdout.write('\n')
+    }
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    process.stdin.on('data', onData)
+  })
+}
+
+async function login (options, json) {
+  const url = options.url ? normalizeUrl(options.url) : (options.env ? environmentUrl(options.env) : baseUrl())
+  const name = options.name || process.env.GREATERWMS_USERNAME || await readLine('Admin name: ')
+  const password = process.env.GREATERWMS_PASSWORD || await readLine('Password: ')
+  if (!name || !password) throw new Error('Admin name and password are required')
+
+  let response
+  try {
+    response = await fetch(`${url}/login/`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ name, password })
+    })
+  } catch (error) {
+    throw new Error(`Unable to reach GreaterWMS at ${url}: ${error.message}`)
+  }
+
+  const text = await response.text()
+  let payload
+  try {
+    payload = text ? JSON.parse(text) : {}
+  } catch {
+    payload = { detail: text || response.statusText }
+  }
+  if (!response.ok || payload.code !== '200' || !payload.data?.openid) {
+    const message = payload.msg || payload.detail || response.statusText || 'Login failed'
+    throw new Error(`GreaterWMS login failed at ${url}: ${message}`)
+  }
+
+  saveSession({
+    url,
+    name: payload.data.name || name,
+    operator: String(payload.data.user_id || ''),
+    token: payload.data.openid,
+    saved_at: new Date().toISOString()
+  })
+  print({ detail: 'login success', url, name: payload.data.name || name, operator: String(payload.data.user_id || ''), session_file: sessionFile() }, json)
+}
+
+function logout (json) {
+  const file = sessionFile()
+  const removed = existsSync(file)
+  if (removed) unlinkSync(file)
+  print({ detail: removed ? 'logout success' : 'no local session', session_file: file }, json)
+}
+
+function authStatus (json) {
+  const session = loadSession()
+  print({
+    detail: session.token ? 'local session available' : 'login required',
+    url: session.url || null,
+    name: session.name || null,
+    operator: session.operator || null,
+    token_present: Boolean(session.token),
+    session_file: sessionFile()
+  }, json)
 }
 
 async function request (path, options = {}) {
@@ -312,6 +475,7 @@ function print (payload, json) {
 }
 
 function help () {
+  process.stdout.write('Authentication:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs auth status\n  node tools/greaterwms.mjs logout\n  Password is prompted without echo and is never saved.\n\n')
   process.stdout.write('Exception review: serial exceptions --asn-code ASN; serial resolve --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Putaway: asn putaway --id ASN_DETAIL_ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('  serial exceptions --asn-code ASN [--json]\n  serial resolve --id ID --data {"action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  serial resolve-quantity --data {"asn_code":"ASN","goods_code":"SKU","action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  asn putaway --id ASN_DETAIL_ID --data {"asn_code":"ASN","goods_code":"SKU","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"} --dry-run|--confirm\n')
@@ -324,8 +488,30 @@ async function main () {
   const { options, positional } = parseArgs(process.argv.slice(2))
   const [resource, action] = positional
   const json = Boolean(options.json)
-  if (options.help || !resource || !action) {
+  if (options.help || !resource || (!action && !['login', 'logout'].includes(resource))) {
     help()
+    return
+  }
+
+  configureTarget(options)
+  if (resource === 'login') {
+    await login(options, json)
+    return
+  }
+  if (resource === 'logout') {
+    logout(json)
+    return
+  }
+  if (resource === 'auth' && action === 'login') {
+    await login(options, json)
+    return
+  }
+  if (resource === 'auth' && action === 'logout') {
+    logout(json)
+    return
+  }
+  if (resource === 'auth' && action === 'status') {
+    authStatus(json)
     return
   }
 

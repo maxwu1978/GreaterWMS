@@ -6,14 +6,19 @@ import never creates a second current Pack List record.
 
 ## Authentication
 
-Use the authenticated `openid` token from the current GreaterWMS session. Do
-not commit the token or place it in a script file.
+Use the CLI login flow to obtain the same `openid` token used by the web client.
+The password is prompted without echo and is never saved. The local session file
+contains only the token, operator id, login name, and selected URL.
 
 ```bash
-export GREATERWMS_URL=https://greaterwms-v2-test3-sn.onrender.com
-export GREATERWMS_TOKEN='session-openid-token'
-export GREATERWMS_OPERATOR='staff-id'
+node tools/greaterwms.mjs login --env production --name ADMIN
+node tools/greaterwms.mjs auth status --json
 ```
+
+Use `--env test` for the Render test service. The session is stored at
+`~/.config/greaterwms/session.json` with local-only permissions. For automation,
+`GREATERWMS_TOKEN` and `GREATERWMS_OPERATOR` can still override the local
+session without writing credentials to disk.
 
 ## Workflow
 
