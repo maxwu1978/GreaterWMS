@@ -91,6 +91,53 @@ class PackListWorkflowTests(TestCase):
             )
         self.assertEqual(error.exception.detail['code'], 'PACK_LIST_REPLACE_REQUIRED')
 
+    def test_summary_exposes_pending_pack_list_reconciliation(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            self.rows(),
+            content_hash='a' * 64,
+            package_qty=2,
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+        row = summary['reconciliation_rows'][0]
+
+        self.assertEqual(summary['reconciliation_status'], 'REVIEW')
+        self.assertEqual(summary['customer_sn_status'], 'NOT_PROVIDED')
+        self.assertEqual(row['goods_code'], '702-S')
+        self.assertEqual(row['customer_goods_code'], 'CUSTOMER-702')
+        self.assertEqual(row['pack_list_qty'], 2)
+        self.assertEqual(row['received_qty'], 2)
+        self.assertEqual(row['accepted_qty'], 2)
+        self.assertEqual(row['variance'], 0)
+        self.assertEqual(row['open_exception_count'], 0)
+        self.assertEqual(row['result'], 'REVIEW')
+        self.assertEqual(summary['receiving_summary']['status'], 'PASSED')
+
+    def test_summary_marks_reconciliation_exception_for_quantity_variance(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 1
+        detail.save(update_fields=['goods_actual_qty'])
+        _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            self.rows(),
+            content_hash='a' * 64,
+            package_qty=2,
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+
+        self.assertEqual(summary['reconciliation_status'], 'EXCEPTION')
+        self.assertEqual(summary['reconciliation_rows'][0]['variance'], -1)
+        self.assertEqual(summary['reconciliation_rows'][0]['result'], 'EXCEPTION')
+
     def test_archived_pack_list_does_not_compete_with_current_record(self):
         current = PackListDocument.objects.create(
             openid=self.openid,

@@ -12,6 +12,7 @@ from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
 from staff.models import ListModel as Staff
+from supplier.shortname import generated_supplier_short_name
 
 from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
 
@@ -168,12 +169,98 @@ def _record_json(record):
     }
 
 
+def _reconciliation_rows(document, details, records, strict_serial_check, exception_statuses):
+    """Join the customer Pack List, ASN receipt quantities, and QC scan results by SKU."""
+    pack_lines = {}
+    if document:
+        for line in document.lines.filter(is_current=True):
+            key = _clean(line.goods_code)
+            item = pack_lines.setdefault(key, {
+                'customer_goods_codes': set(),
+                'customer_sskus': set(),
+                'pack_list_qty': 0,
+            })
+            if line.customer_goods_code:
+                item['customer_goods_codes'].add(line.customer_goods_code)
+            if line.customer_ssku:
+                item['customer_sskus'].add(line.customer_ssku)
+            item['pack_list_qty'] += int(line.goods_qty or 0)
+
+    detail_list = list(details)
+    detail_map = {_clean(detail.goods_code): detail for detail in detail_list}
+    record_groups = {}
+    for record in records:
+        record_groups.setdefault(_clean(record.goods_code), []).append(record)
+
+    rows = []
+    keys = list(detail_map.keys())
+    keys.extend(key for key in pack_lines if key not in detail_map)
+    for key in keys:
+        detail = detail_map.get(key)
+        line = pack_lines.get(key, {})
+        line_records = record_groups.get(key, [])
+        expected_count = sum(1 for record in line_records if record.is_expected)
+        accepted_count = sum(1 for record in line_records if record.status == AsnSerialRecord.ACCEPTED)
+        resolved_count = sum(1 for record in line_records if record.exception_resolved)
+        exception_count = sum(
+            1 for record in line_records
+            if record.status in exception_statuses and not record.exception_resolved
+        )
+        received_qty = int(detail.goods_actual_qty or 0) if detail else 0
+        planned_qty = int(detail.goods_qty or 0) if detail else 0
+        pack_list_qty = int(line.get('pack_list_qty') or 0)
+        baseline_qty = pack_list_qty if document else planned_qty
+        quantity_exception_qty = 0
+        quantity_exception_resolved = False
+        if detail:
+            quantity_exception_qty = 0 if detail.exception_resolved else (
+                int(detail.goods_shortage_qty or 0)
+                + int(detail.goods_more_qty or 0)
+                + int(detail.goods_damage_qty or 0)
+            )
+            quantity_exception_resolved = bool(detail.exception_resolved)
+
+        open_exception_count = exception_count + int(quantity_exception_qty > 0)
+        resolved_exception_total = resolved_count + int(quantity_exception_resolved)
+        variance = received_qty - baseline_qty
+        accepted_qty = accepted_count if (strict_serial_check or (document and document.has_serials)) else received_qty
+        if open_exception_count or variance:
+            result = 'EXCEPTION'
+        elif not document or document.status == PackListDocument.PENDING:
+            result = 'REVIEW'
+        elif resolved_exception_total:
+            result = 'RESOLVED'
+        else:
+            result = 'PASSED'
+
+        rows.append({
+            'goods_code': detail.goods_code if detail else key,
+            'customer_goods_code': ', '.join(sorted(line.get('customer_goods_codes', set()))),
+            'customer_ssku': ', '.join(sorted(line.get('customer_sskus', set()))),
+            'pack_list_qty': pack_list_qty,
+            'asn_qty': planned_qty,
+            'received_qty': received_qty,
+            'accepted_qty': accepted_qty,
+            'variance': variance,
+            'baseline': 'PACK_LIST' if document else 'ASN',
+            'expected_serial_count': expected_count,
+            'customer_sn_status': 'PROVIDED' if document and document.has_serials else 'NOT_PROVIDED',
+            'open_exception_count': open_exception_count,
+            'resolved_exception_count': resolved_exception_total,
+            'quantity_exception_qty': quantity_exception_qty,
+            'result': result,
+        })
+    return rows
+
+
 def _summary(openid, asn_code):
     details = AsnDetailModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False)
     records = AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code)
     pack_lists = PackListDocument.objects.filter(openid=openid, asn_code=asn_code, is_current=True)
     current_pack_list = _current_pack_list(openid, asn_code)
     pending_pack_list = pack_lists.filter(status=PackListDocument.PENDING).first()
+    active_pack_list = pack_lists.order_by('-version', '-id').first()
+    asn = AsnListModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False).first()
     has_expected_serials = records.filter(is_expected=True).exists()
     if current_pack_list and current_pack_list.has_serials:
         verification_mode = 'PACK_LIST'
@@ -233,8 +320,32 @@ def _summary(openid, asn_code):
         )
         for detail in details
     )
+    reconciliation_rows = _reconciliation_rows(
+        active_pack_list,
+        details,
+        records,
+        strict_serial_check,
+        exception_statuses,
+    )
+    open_reconciliation_exceptions = sum(row['open_exception_count'] for row in reconciliation_rows)
+    resolved_reconciliation_exceptions = sum(row['resolved_exception_count'] for row in reconciliation_rows)
+    if open_reconciliation_exceptions or any(row['variance'] for row in reconciliation_rows):
+        reconciliation_status = 'EXCEPTION'
+    elif not active_pack_list or active_pack_list.status == PackListDocument.PENDING:
+        reconciliation_status = 'REVIEW'
+    elif resolved_reconciliation_exceptions:
+        reconciliation_status = 'RESOLVED'
+    else:
+        reconciliation_status = 'PASSED'
+    receiving_status = 'EXCEPTION' if open_reconciliation_exceptions else (
+        'RESOLVED' if resolved_reconciliation_exceptions else 'PASSED'
+    )
     return {
         'asn_code': asn_code,
+        'customer': asn.supplier if asn else '',
+        'customer_short_name': generated_supplier_short_name(asn.supplier if asn else ''),
+        'expected_arrival_at': asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
+        'actual_arrival_at': asn.actual_arrival_at.isoformat() if asn and asn.actual_arrival_at else None,
         'pack_list_present': pack_lists.exists(),
         'pack_list_status': (
             PackListDocument.CONFIRMED if current_pack_list else
@@ -243,6 +354,8 @@ def _summary(openid, asn_code):
         ),
         'pack_list_confirmed': bool(current_pack_list),
         'pack_list_has_serials': bool(current_pack_list and current_pack_list.has_serials),
+        'active_pack_list': _pack_list_json(active_pack_list) if active_pack_list else None,
+        'customer_sn_status': 'PROVIDED' if active_pack_list and active_pack_list.has_serials else 'NOT_PROVIDED',
         'current_pack_list': _pack_list_json(current_pack_list) if current_pack_list else None,
         'verification_mode': verification_mode,
         'verification_note': (
@@ -257,6 +370,16 @@ def _summary(openid, asn_code):
             'Expected SN was entered manually.'
         ),
         'lines': lines,
+        'reconciliation_status': reconciliation_status,
+        'reconciliation_rows': reconciliation_rows,
+        'receiving_summary': {
+            'expected': records.filter(is_expected=True).count(),
+            'scanned': records.filter(is_received=True).count(),
+            'accepted': accepted_total,
+            'open_exceptions': open_reconciliation_exceptions,
+            'resolved_exceptions': resolved_reconciliation_exceptions,
+            'status': receiving_status,
+        },
         'total_expected_serials': records.filter(is_expected=True).count(),
         'total_received_serials': records.filter(is_received=True).count(),
         'total_accepted_serials': accepted_total,

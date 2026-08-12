@@ -40,12 +40,58 @@
       </q-card-section>
     </q-card>
 
-    <q-banner v-if="summary" class="q-mt-sm" :class="summary.pack_list_status === 'PENDING' || !summary.ready_for_putaway ? 'bg-orange-1' : 'bg-green-1'">
-      <div class="text-subtitle2">{{ summary.verification_mode }}</div>
-      <div class="text-caption">{{ summary.verification_note }}</div>
-      <div class="text-caption">Pack List: <strong>{{ summary.pack_list_status || (summary.pack_list_present ? 'PRESENT' : 'NOT_RECEIVED') }}</strong> · SN: {{ summary.total_expected_serials || 0 }} expected / {{ summary.total_received_serials || 0 }} received / {{ summary.total_accepted_serials || 0 }} accepted · SN exceptions: {{ summary.total_exception_serials || 0 }} · Qty exceptions: {{ summary.total_quantity_exceptions || 0 }}</div>
-      <div v-if="summary.pack_list_status === 'PENDING'" class="text-caption text-orange-10">Pack List is pending confirmation. Confirm it before using customer SN data as the receiving baseline.</div>
+    <q-banner v-if="summary" class="q-mt-sm" :class="summary.reconciliation_status === 'EXCEPTION' ? 'bg-red-1' : (summary.reconciliation_status === 'PASSED' ? 'bg-green-1' : 'bg-orange-1')">
+      <div class="row items-center q-col-gutter-md">
+        <div class="col-12 col-md-4">
+          <div class="text-subtitle2">Receiving Reconciliation</div>
+          <div class="text-caption">{{ summary.customer_short_name || summary.customer || '-' }} · {{ asnCode }}</div>
+        </div>
+        <div class="col-6 col-md-2"><q-chip dense :color="statusColor(summary.reconciliation_status)">{{ statusLabel(summary.reconciliation_status) }}</q-chip></div>
+        <div class="col-6 col-md-2 text-caption">Pack List: <strong>{{ packListLabel(summary.pack_list_status) }}</strong></div>
+        <div class="col-6 col-md-2 text-caption">Customer SN: <strong>{{ summary.customer_sn_status || 'NOT_PROVIDED' }}</strong></div>
+        <div class="col-6 col-md-2 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
+      </div>
+      <div v-if="summary.receiving_summary" class="text-caption q-mt-xs">
+        Receiving: {{ summary.receiving_summary.scanned || 0 }} scanned / {{ summary.receiving_summary.accepted || 0 }} accepted · Open exceptions: {{ summary.receiving_summary.open_exceptions || 0 }} · Resolved: {{ summary.receiving_summary.resolved_exceptions || 0 }}
+      </div>
+      <div v-if="summary.pack_list_status === 'PENDING'" class="text-caption text-orange-10 q-mt-xs">Confirm the Pack List before using customer SN data as the receiving baseline.</div>
     </q-banner>
+
+    <q-table
+      v-if="summary"
+      class="q-mt-sm shadow-24 reconciliation-table"
+      flat
+      bordered
+      dense
+      row-key="goods_code"
+      :data="reconciliationRows"
+      :columns="reconciliationColumns"
+      no-data-label="No reconciliation rows"
+    >
+      <template v-slot:body-cell-customer_goods_code="props">
+        <q-td :props="props" class="ellipsis-cell">
+          <span>{{ props.value || '-' }}</span>
+          <q-tooltip v-if="props.value">{{ props.value }}</q-tooltip>
+        </q-td>
+      </template>
+      <template v-slot:body-cell-variance="props">
+        <q-td :props="props" :class="Number(props.value) ? 'text-negative text-weight-medium' : 'text-positive'">
+          {{ props.value > 0 ? '+' : '' }}{{ props.value }}
+        </q-td>
+      </template>
+      <template v-slot:body-cell-result="props">
+        <q-td :props="props">
+          <q-chip dense :color="statusColor(props.value)">{{ statusLabel(props.value) }}</q-chip>
+        </q-td>
+      </template>
+      <template v-slot:body-cell-detail="props">
+        <q-td :props="props">
+          <q-btn dense flat round color="primary" icon="fact_check" @click="showReconciliation(props.row)">
+            <q-tooltip>View receiving details</q-tooltip>
+          </q-btn>
+        </q-td>
+      </template>
+    </q-table>
 
     <q-table
       class="q-mt-sm my-sticky-header-table shadow-24"
@@ -128,6 +174,7 @@
             <div class="col-6 col-md-3">Qty: {{ selectedDocument.total_qty }}</div>
             <div class="col-6 col-md-3">SN: {{ selectedDocument.expected_serial_count }}</div>
             <div class="col-6 col-md-3">Load units: {{ selectedDocument.package_qty || 'Not provided' }}</div>
+            <div class="col-6 col-md-3">Customer SN: {{ selectedDocument.has_serials ? 'PROVIDED' : 'NOT_PROVIDED' }}</div>
           </div>
           <q-list bordered separator>
             <q-item v-for="(line, index) in selectedDocument.lines" :key="index">
@@ -143,14 +190,24 @@
         </q-card-section>
       </q-card>
     </q-dialog>
+
+    <asn-serial-panel
+      v-model="serialPanelOpen"
+      :asn-code="asnCode"
+      :goods-code="selectedReconciliation ? selectedReconciliation.goods_code : ''"
+    />
   </div>
 </template>
 
 <script>
 import { getauth, postauth, postauthfile } from 'boot/axios_request'
+import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
 
 export default {
   name: 'Pagepacklist',
+  components: {
+    AsnSerialPanel
+  },
   data () {
     return {
       asnCode: this.$route.query.asn_code || '',
@@ -166,6 +223,8 @@ export default {
       loading: false,
       detailOpen: false,
       selectedDocument: null,
+      serialPanelOpen: false,
+      selectedReconciliation: null,
       sourceTypes: [
         { label: 'Upload', value: 'UPLOAD' },
         { label: 'Email', value: 'EMAIL' },
@@ -181,7 +240,28 @@ export default {
         { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
         { name: 'action', label: 'Action', align: 'right' }
+      ],
+      reconciliationColumns: [
+        { name: 'goods_code', label: 'SKU', field: 'goods_code', align: 'left', style: 'width: 13%;', headerStyle: 'width: 13%;' },
+        { name: 'customer_goods_code', label: 'Customer SKU', field: 'customer_goods_code', align: 'left', style: 'width: 18%;', headerStyle: 'width: 18%;' },
+        { name: 'pack_list_qty', label: 'Pack List', field: 'pack_list_qty', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'received_qty', label: 'Received', field: 'received_qty', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'accepted_qty', label: 'Accepted', field: 'accepted_qty', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'variance', label: 'Variance', field: 'variance', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'open_exception_count', label: 'Open', field: 'open_exception_count', align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' },
+        { name: 'result', label: 'Result', field: 'result', align: 'center', style: 'width: 14%;', headerStyle: 'width: 14%;' },
+        { name: 'detail', label: '', align: 'center', style: 'width: 5%;', headerStyle: 'width: 5%;' }
       ]
+    }
+  },
+  computed: {
+    reconciliationRows () {
+      return this.summary && this.summary.reconciliation_rows ? this.summary.reconciliation_rows : []
+    },
+    etaLabel () {
+      if (!this.summary) return 'Not provided'
+      if (this.summary.actual_arrival_at) return 'Arrived ' + this.formatDate(this.summary.actual_arrival_at)
+      return this.summary.expected_arrival_at ? this.formatDate(this.summary.expected_arrival_at) : 'Not provided'
     }
   },
   created () {
@@ -249,7 +329,46 @@ export default {
     showDocument (document) {
       this.selectedDocument = document
       this.detailOpen = true
+    },
+    showReconciliation (row) {
+      this.selectedReconciliation = row
+      this.serialPanelOpen = true
+    },
+    statusLabel (status) {
+      return {
+        REVIEW: 'Review Required',
+        EXCEPTION: 'Exception',
+        PASSED: 'Passed',
+        RESOLVED: 'Resolved'
+      }[status] || status || 'Unknown'
+    },
+    statusColor (status) {
+      return {
+        REVIEW: 'orange-3',
+        EXCEPTION: 'red-3',
+        PASSED: 'green-3',
+        RESOLVED: 'blue-3'
+      }[status] || 'grey-3'
+    },
+    packListLabel (status) {
+      return {
+        PENDING: 'Pending',
+        CONFIRMED: 'Confirmed',
+        NOT_RECEIVED: 'Not Received'
+      }[status] || status || 'Not Received'
+    },
+    formatDate (value) {
+      return String(value || '').replace('T', ' ').slice(0, 16) || 'Not provided'
     }
   }
 }
 </script>
+
+<style scoped>
+.reconciliation-table .ellipsis-cell {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
