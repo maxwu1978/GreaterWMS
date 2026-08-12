@@ -126,18 +126,24 @@
                 {{ serialAcceptanceLabel(props.row.serial_acceptance) }}
               </div>
             </q-td>
-            <q-td key="exception_qty" :props="props" class="text-center">
-              <q-chip v-if="serialAcceptanceExceptions(props.row) > 0" dense square color="negative" text-color="white">
-                SN {{ serialAcceptanceExceptions(props.row) }}
-              </q-chip>
-              <q-chip v-else-if="!qcChecked(props.row) || precheckNeedsAttention(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
-                {{ precheckLabel(props.row.precheck_status) }}
-              </q-chip>
-              <q-chip v-else-if="Number(props.row.exception_qty || 0) > 0" dense square color="negative" text-color="white">
-                {{ props.row.exception_qty }}
-              </q-chip>
+            <q-td key="exception_qty" :props="props" class="text-center asn-exception-cell">
+              <div v-if="exceptionSignals(props.row).length" class="asn-exception-signals">
+                <q-chip
+                  v-for="signal in exceptionSignals(props.row)"
+                  :key="signal.key"
+                  dense
+                  square
+                  class="asn-exception-signal"
+                  :color="signal.color"
+                  :text-color="signal.textColor"
+                  :title="signal.title"
+                >
+                  {{ signal.label }}
+                  <q-tooltip>{{ signal.title }}</q-tooltip>
+                </q-chip>
+              </div>
               <q-chip v-else dense square color="positive" text-color="dark">
-                {{ $t('inbound.view_asn.qc_normal') }}
+                {{ $t('inbound.view_asn.exception_none') }}
               </q-chip>
             </q-td>
             <q-td key="next_action" :props="props" class="asn-action-cell">
@@ -902,6 +908,25 @@
   white-space: nowrap;
 }
 
+.asn-list-table .asn-exception-cell {
+  white-space: normal;
+}
+
+.asn-list-table .asn-exception-signals {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.asn-list-table .asn-exception-signal {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .asn-time-dialog-card {
   width: min(420px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
@@ -1156,6 +1181,75 @@ export default {
     serialAcceptanceTitle (summary) {
       return 'Serial acceptance: ' + (summary.accepted || 0) + '/' + (summary.expected || 0) +
         ' accepted, ' + (summary.exceptions || 0) + ' exceptions, ' + (summary.received || 0) + ' received'
+    },
+    exceptionSignals (row) {
+      const signals = []
+      const serialExceptions = this.serialAcceptanceExceptions(row)
+      const quantityExceptions = Number(row.exception_qty || 0)
+      const precheckStatus = row.precheck_status
+
+      if (serialExceptions > 0) {
+        signals.push({
+          key: 'serial',
+          label: this.$t('inbound.view_asn.exception_sn') + ': ' + serialExceptions,
+          title: 'Serial exceptions: ' + serialExceptions,
+          color: 'negative',
+          textColor: 'white'
+        })
+      }
+      if (quantityExceptions > 0) {
+        signals.push({
+          key: 'quantity',
+          label: this.$t('inbound.view_asn.exception_quantity') + ': ' + quantityExceptions,
+          title: 'Quantity exceptions: ' + quantityExceptions,
+          color: 'negative',
+          textColor: 'white'
+        })
+      }
+
+      if (precheckStatus === 'PACK_LIST_PENDING') {
+        signals.push({
+          key: 'pack-list-review',
+          label: this.$t('inbound.view_asn.exception_pack_list_review'),
+          title: 'Pack List is imported but not confirmed.',
+          color: 'orange-3',
+          textColor: 'dark'
+        })
+      } else if (precheckStatus === 'PACK_LIST_MISMATCH') {
+        signals.push({
+          key: 'pack-list-mismatch',
+          label: this.$t('inbound.view_asn.precheck_pack_list_mismatch'),
+          title: 'ASN and Pack List quantities or SKUs do not match.',
+          color: 'negative',
+          textColor: 'white'
+        })
+      } else if (precheckStatus === 'SN_INCOMPLETE') {
+        signals.push({
+          key: 'sn-pending',
+          label: this.$t('inbound.view_asn.precheck_sn_incomplete'),
+          title: 'SN verification is incomplete.',
+          color: 'negative',
+          textColor: 'white'
+        })
+      } else if (precheckStatus === 'NO_PACK_LIST' && !this.qcChecked(row)) {
+        signals.push({
+          key: 'no-pack-list',
+          label: this.$t('inbound.view_asn.precheck_no_pack_list'),
+          title: 'No customer Pack List is attached.',
+          color: 'orange-3',
+          textColor: 'dark'
+        })
+      } else if (!this.qcChecked(row) && signals.length === 0) {
+        signals.push({
+          key: 'not-checked',
+          label: this.$t('inbound.view_asn.exception_not_checked'),
+          title: 'Receiving inspection has not been completed.',
+          color: 'grey-4',
+          textColor: 'dark'
+        })
+      }
+
+      return signals
     },
     precheckLabel (status) {
       const labels = {
