@@ -289,11 +289,30 @@ function packListForm (file, options) {
   return form
 }
 
+function serialImportForm (file, options) {
+  const filePath = resolve(file)
+  const fileInfo = statSync(filePath)
+  if (!fileInfo.isFile()) throw new Error(`File not found: ${file}`)
+  const form = new FormData()
+  form.append(
+    'file',
+    new Blob([readFileSync(filePath)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    basename(filePath)
+  )
+  form.append('asn_code', options['asn-code'])
+  form.append('mode', options.mode || 'receive')
+  form.append('inbound_po', options['inbound-po'] || '')
+  form.append('shipout_ref', options['shipout-ref'] || '')
+  if (options['allow-all']) form.append('allow_all', 'true')
+  return form
+}
+
 function print (payload, json) {
   process.stdout.write(json ? `${JSON.stringify(payload, null, 2)}\n` : `${payload.detail || 'success'}\n${JSON.stringify(payload, null, 2)}\n`)
 }
 
 function help () {
+  process.stdout.write('Receiving acceptance: serial import --asn-code ASN --file FILE --mode receive --allow-all --dry-run|--confirm\n\n')
   process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated openid token from the current GreaterWMS session\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
 }
 
@@ -331,6 +350,33 @@ async function main () {
     const form = packListForm(options.file, options)
     const endpoint = options['dry-run'] ? '/asn/serial/packlists/preview/' : '/asn/serial/packlists/import/'
     print(await request(endpoint, { method: 'POST', body: form }), json)
+    return
+  }
+
+  if (resource === 'serial' && action === 'import') {
+    if (!options['asn-code']) throw new Error('--asn-code is required')
+    if (!options.file) throw new Error('--file is required')
+    if (!['expected', 'receive'].includes(String(options.mode || 'receive').toLowerCase())) {
+      throw new Error('--mode must be expected or receive')
+    }
+    requireConfirmation(options, 'serial import')
+    if (options['dry-run']) {
+      print({
+        dry_run: true,
+        method: 'POST',
+        endpoint: '/asn/serial/import/',
+        resource,
+        action,
+        asn_code: options['asn-code'],
+        file: resolve(String(options.file)),
+        mode: String(options.mode || 'receive').toLowerCase(),
+        inbound_po: options['inbound-po'] || '',
+        shipout_ref: options['shipout-ref'] || '',
+        allow_all: Boolean(options['allow-all']),
+      }, json)
+      return
+    }
+    print(await request('/asn/serial/import/', { method: 'POST', body: serialImportForm(options.file, options) }), json)
     return
   }
 

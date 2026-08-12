@@ -796,11 +796,13 @@ class SerialImportView(APIView):
             sheet = workbook.active
             raw_headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
             headers = [' '.join(str(value or '').strip().split()) for value in raw_headers]
-            index = {header: pos for pos, header in enumerate(headers) if header}
+            index = {_header_key(header): pos for pos, header in enumerate(headers) if header}
         except Exception as exc:
             raise APIException({'detail': 'Unable to read Excel file: ' + str(exc)})
-        if 'SKU#' not in index or 'SN#' not in index:
-            raise APIException({'detail': 'Excel must contain SKU# and SN# columns'})
+        sku_column = _first_column(index, ('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item'))
+        serial_column = _first_column(index, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
+        if sku_column is None or serial_column is None:
+            raise APIException({'detail': 'Excel must contain a SKU/Part Number and SN/Serial Number column'})
         source_file = str(upload.name)[:255]
         matched = 0
         created = 0
@@ -808,27 +810,27 @@ class SerialImportView(APIView):
         skipped = 0
         errors = []
         for row_number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-            def value(name):
-                pos = index.get(name)
+            def value(*names):
+                pos = _first_column(index, names)
                 return values[pos] if pos is not None and pos < len(values) else ''
 
-            row_po = _clean(value('Inbound PO#'))
-            row_shipout = _clean(value('SHIPOUT#'))
+            row_po = _clean(value('Inbound PO#', 'Inbound PO', 'PO#'))
+            row_shipout = _clean(value('SHIPOUT#', 'Shipout Ref', 'Shipout'))
             if inbound_po and row_po != inbound_po:
                 continue
             if shipout_ref and row_shipout != shipout_ref:
                 continue
-            if 'Inbound PO#' in index and not row_po and not shipout_ref:
+            if _first_column(index, ('Inbound PO#', 'Inbound PO', 'PO#')) is not None and not row_po and not shipout_ref:
                 continue
-            goods_code = _clean(value('SKU#'))
-            serial_number = _clean(value('SN#'))
+            goods_code = _clean(value('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item'))
+            serial_number = _clean(value('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
             if not goods_code or not serial_number:
                 continue
             matched += 1
             row_data = {
-                'double_scan_sn': value('Double-Scan SN#'),
+                'double_scan_sn': value('Double-Scan SN#', 'Double Scan SN', 'Double-Scan SN'),
                 'inbound_po': row_po,
-                'inbound_date': value('Inbound Date'),
+                'inbound_date': value('Inbound Date', 'Date'),
                 'source_location': value('Location'),
                 'shipout_ref': row_shipout,
                 'source_file': source_file,
