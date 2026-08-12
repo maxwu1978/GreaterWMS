@@ -46,10 +46,12 @@
         <template v-slot:body="props">
           <q-tr :props="props">
             <q-td key="asn_code" :props="props" class="asn-code-cell">
-              <q-btn flat dense no-caps color="primary" :label="props.row.asn_code" @click="viewData(props.row)" />
+              <q-btn flat dense no-caps color="primary" :label="compactAsnCode(props.row.asn_code)" @click="viewData(props.row)">
+                <q-tooltip>{{ props.row.asn_code }}</q-tooltip>
+              </q-btn>
             </q-td>
             <q-td key="supplier" :props="props" class="asn-owner-cell">
-              <span :title="props.row.supplier || ''">{{ props.row.supplier_short_name || props.row.supplier || '—' }}</span>
+              <span :title="props.row.supplier || ''">{{ compactOwnerName(props.row) }}</span>
             </q-td>
             <q-td key="asn_status" :props="props">
               <q-chip
@@ -75,18 +77,27 @@
                 <span>{{ arrivalValue(props.row) }}</span>
               </div>
             </q-td>
-            <q-td key="sku_quantity" :props="props" class="text-center">
-              {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }} / {{ props.row.actual_qty || 0 }}
+            <q-td
+              key="sku_quantity"
+              :props="props"
+              class="text-center"
+              :title="skuQuantityTitle(props.row)"
+            >
+              {{ props.row.sku_count || 0 }} / {{ props.row.planned_qty || 0 }}
             </q-td>
             <q-td key="staging_bin" :props="props" class="asn-staging-cell">
-              <span :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'" :title="stagingLabel(props.row)">
-                {{ stagingLabel(props.row) }}
+              <span
+                class="asn-staging-line"
+                :class="props.row.staging_bin ? 'text-weight-medium' : 'text-grey-6'"
+                :title="'Staging: ' + stagingLabel(props.row)"
+              >
+                STG {{ stagingLabel(props.row) }}
               </span>
-              <div class="text-caption text-grey-6">
+              <div class="asn-staging-line text-caption text-grey-6" :title="'Reserved / occupied: ' + (props.row.staging_reserved_qty || 0) + ' / ' + (props.row.staging_occupied_qty || 0)">
                 R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
               </div>
-              <div v-if="props.row.unload_driver" class="text-caption text-grey-6" :title="'Unloading driver: ' + props.row.unload_driver">
-                DRV {{ props.row.unload_driver }}
+              <div class="asn-staging-line text-caption text-grey-6" :title="'Unloading driver: ' + (props.row.unload_driver || 'Not assigned')">
+                DRV {{ props.row.unload_driver || '-' }}
               </div>
             </q-td>
             <q-td key="pack_list_status" :props="props" class="asn-pack-list-cell">
@@ -822,10 +833,12 @@
 }
 
 .asn-list-table .asn-owner-cell > span,
-.asn-list-table .asn-staging-cell > span {
+.asn-list-table .asn-staging-cell > span,
+.asn-list-table .asn-staging-line {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .asn-list-table .asn-arrival-cell {
@@ -954,7 +967,7 @@ export default {
         { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
         { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 11%;', headerStyle: 'width: 11%;' },
         { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
-        { name: 'staging_bin', label: this.$t('inbound.view_asn.staging_bin'), field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
+        { name: 'staging_bin', label: 'Staging / Driver', field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
         { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 12%;', headerStyle: 'width: 12%;' },
         { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 13%;', headerStyle: 'width: 13%;' },
         { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' }
@@ -1062,6 +1075,25 @@ export default {
         5: 'green-3'
       }
       return colors[Number(status)] || 'grey-4'
+    },
+    compactAsnCode (value) {
+      const code = String(value || '').trim()
+      if (code.length <= 10) return code || '-'
+      return code.slice(0, 4) + '...' + code.slice(-4)
+    },
+    compactOwnerName (row) {
+      const shortName = String(row.supplier_short_name || '').trim()
+      const fullName = String(row.supplier || '').trim()
+      const value = shortName || fullName
+      if (!value) return '-'
+      if (value.length <= 8) return value
+      const firstWord = value.split(/\s+/)[0].replace(/[^a-zA-Z0-9&-]/g, '')
+      return (firstWord || value).slice(0, 8).toUpperCase()
+    },
+    skuQuantityTitle (row) {
+      return 'SKUs: ' + (row.sku_count || 0) +
+        ' | Planned: ' + (row.planned_qty || 0) +
+        ' | Received: ' + (row.actual_qty || 0)
     },
     formatRows (rows) {
       return (rows || []).map(item => Object.assign({}, item, {
