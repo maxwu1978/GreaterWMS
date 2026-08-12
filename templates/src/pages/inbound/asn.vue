@@ -130,7 +130,7 @@
               <q-chip v-if="serialAcceptanceExceptions(props.row) > 0" dense square color="negative" text-color="white">
                 SN {{ serialAcceptanceExceptions(props.row) }}
               </q-chip>
-              <q-chip v-else-if="!qcChecked(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
+              <q-chip v-else-if="!qcChecked(props.row) || precheckNeedsAttention(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
                 {{ precheckLabel(props.row.precheck_status) }}
               </q-chip>
               <q-chip v-else-if="Number(props.row.exception_qty || 0) > 0" dense square color="negative" text-color="white">
@@ -1177,6 +1177,9 @@ export default {
         SN_INCOMPLETE: 'negative',
         NOT_APPLICABLE: 'grey-3'
       }[status] || 'grey-3'
+    },
+    precheckNeedsAttention (row) {
+      return ['PACK_LIST_PENDING', 'PACK_LIST_MISMATCH', 'SN_INCOMPLETE'].includes(row.precheck_status)
     },
     qcChecked (row) {
       return Number(row.asn_status_code) >= 4

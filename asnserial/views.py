@@ -236,6 +236,11 @@ def _summary(openid, asn_code):
     return {
         'asn_code': asn_code,
         'pack_list_present': pack_lists.exists(),
+        'pack_list_status': (
+            PackListDocument.CONFIRMED if current_pack_list else
+            PackListDocument.PENDING if pending_pack_list else
+            'NOT_RECEIVED'
+        ),
         'pack_list_confirmed': bool(current_pack_list),
         'pack_list_has_serials': bool(current_pack_list and current_pack_list.has_serials),
         'current_pack_list': _pack_list_json(current_pack_list) if current_pack_list else None,

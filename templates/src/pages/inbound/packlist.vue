@@ -40,10 +40,11 @@
       </q-card-section>
     </q-card>
 
-    <q-banner v-if="summary" class="q-mt-sm" :class="summary.ready_for_putaway ? 'bg-green-1' : 'bg-orange-1'">
+    <q-banner v-if="summary" class="q-mt-sm" :class="summary.pack_list_status === 'PENDING' || !summary.ready_for_putaway ? 'bg-orange-1' : 'bg-green-1'">
       <div class="text-subtitle2">{{ summary.verification_mode }}</div>
       <div class="text-caption">{{ summary.verification_note }}</div>
-      <div class="text-caption">Pack List: {{ summary.pack_list_present ? 'present' : 'not received' }} · SN: {{ summary.total_expected_serials || 0 }} expected / {{ summary.total_received_serials || 0 }} received / {{ summary.total_accepted_serials || 0 }} accepted · SN exceptions: {{ summary.total_exception_serials || 0 }} · Qty exceptions: {{ summary.total_quantity_exceptions || 0 }}</div>
+      <div class="text-caption">Pack List: <strong>{{ summary.pack_list_status || (summary.pack_list_present ? 'PRESENT' : 'NOT_RECEIVED') }}</strong> · SN: {{ summary.total_expected_serials || 0 }} expected / {{ summary.total_received_serials || 0 }} received / {{ summary.total_accepted_serials || 0 }} accepted · SN exceptions: {{ summary.total_exception_serials || 0 }} · Qty exceptions: {{ summary.total_quantity_exceptions || 0 }}</div>
+      <div v-if="summary.pack_list_status === 'PENDING'" class="text-caption text-orange-10">Pack List is pending confirmation. Confirm it before using customer SN data as the receiving baseline.</div>
     </q-banner>
 
     <q-table

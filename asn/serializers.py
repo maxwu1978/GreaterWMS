@@ -237,9 +237,6 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             return cache[cache_key]
 
         not_applicable = {'code': 'NOT_APPLICABLE'}
-        if int(obj.asn_status or 0) >= 4:
-            cache[cache_key] = not_applicable
-            return not_applicable
 
         details = list(AsnDetailModel.objects.filter(
             openid=obj.openid,
@@ -251,6 +248,12 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             planned[detail['goods_code']] = planned.get(detail['goods_code'], 0) + int(detail['goods_qty'] or 0)
 
         document = self._get_pack_list(obj)
+        # Keep an unconfirmed Pack List visible after receiving starts. It is
+        # not itself a putaway block for quantity-only lists, but hiding it as
+        # NOT_APPLICABLE removes an important control signal from the queue.
+        if int(obj.asn_status or 0) >= 4 and not document:
+            cache[cache_key] = not_applicable
+            return not_applicable
         if not document:
             cache[cache_key] = {'code': 'NO_PACK_LIST'}
             return cache[cache_key]
