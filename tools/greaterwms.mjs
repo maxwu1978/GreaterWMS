@@ -201,17 +201,19 @@ function readLine (prompt) {
     const chunks = []
     const onData = (chunk) => {
       const value = String(chunk)
-      if (value === '\u0003') {
-        cleanup()
-        reject(new Error('Input cancelled'))
-        return
+      for (const character of value) {
+        if (character === '\u0003') {
+          cleanup()
+          reject(new Error('Input cancelled'))
+          return
+        }
+        if (character === '\n' || character === '\r') {
+          cleanup()
+          resolvePromise(chunks.join(''))
+          return
+        }
+        chunks.push(character)
       }
-      if (value.includes('\n') || value.includes('\r')) {
-        cleanup()
-        resolvePromise(chunks.join(''))
-        return
-      }
-      chunks.push(value)
     }
     const cleanup = () => {
       process.stdin.off('data', onData)
