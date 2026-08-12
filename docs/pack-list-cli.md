@@ -1,8 +1,8 @@
 # Pack List CLI
 
 The CLI uses the same GreaterWMS Pack List endpoints as the web page. It does
-not write to the database directly and it does not create a second Pack List
-recording model.
+not write to the database directly. Each ASN has one current Pack List; an
+import never creates a second current Pack List record.
 
 ## Authentication
 
@@ -46,10 +46,23 @@ node tools/greaterwms.mjs packlist list --asn-code IB260807-11 --json
 node tools/greaterwms.mjs packlist confirm --id 123 --confirm --json
 ```
 
-Importing the same file again for the same ASN is idempotent. The existing
-document is returned instead of creating another version. Confirmation remains
-a separate step because a confirmed Pack List becomes the receiving
-verification baseline; it does not mean that the goods have arrived.
+Importing the same content again for the same ASN is idempotent. A different
+file must be previewed and explicitly replaced:
+
+```bash
+node tools/greaterwms.mjs packlist import \
+  --asn-code ASN202608123 \
+  --file ./replacement-pack-list.xlsx \
+  --replace \
+  --confirm \
+  --json
+```
+
+Replacement is blocked after physical receiving scans have started. The
+uploaded workbook is parsed and discarded; only normalized Pack List rows and
+serial records are stored. Confirmation remains a separate step because a
+confirmed Pack List becomes the receiving verification baseline; it does not
+mean that the goods have arrived.
 
 ## Receiving acceptance scan
 
@@ -85,7 +98,9 @@ node tools/greaterwms.mjs serial import \
 
 The result reports matched, created, updated, skipped, and exception rows.
 This import records receipt; it does not confirm a pending customer Pack
-List.
+List. The system stores import batch metadata, not the uploaded workbook name
+or file contents. In `receive` mode, standard damage/QC result columns are
+converted to a `DAMAGED` exception and the row note is retained for QC review.
 
 ### Exception review and putaway
 
@@ -97,8 +112,9 @@ node tools/greaterwms.mjs serial exceptions \
   --json
 \`\`\`
 
-Resolve one serial exception only after the QC decision is recorded. A note
-is required for an approval:
+If the scan shows a wrong SKU, duplicate SN, damage, unexpected SN, or missing
+SN, the record is an open exception. QC must record a resolution action and
+note before putaway. A note is required for an approval:
 
 \`\`\`bash
 node tools/greaterwms.mjs serial resolve \

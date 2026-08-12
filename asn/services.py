@@ -13,8 +13,9 @@ def inbound_package_quantity(asn):
     pack_list = PackListDocument.objects.filter(
         openid=asn.openid,
         asn_code=asn.asn_code,
+        is_current=True,
         status__in=(PackListDocument.CONFIRMED, PackListDocument.PENDING),
-    ).order_by('-version', '-id').first()
+    ).first()
     if pack_list and int(pack_list.package_qty or 0) > 0:
         return int(pack_list.package_qty), 'PACK_LIST'
 

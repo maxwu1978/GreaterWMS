@@ -1,4 +1,32 @@
 from django.db import models
+from django.db.models import Q
+
+
+class PackListImportBatch(models.Model):
+    PACK_LIST = 'PACK_LIST'
+    RECEIVING_ACCEPTANCE = 'RECEIVING_ACCEPTANCE'
+
+    IMPORT_TYPES = (
+        (PACK_LIST, 'Pack List'),
+        (RECEIVING_ACCEPTANCE, 'Receiving acceptance'),
+    )
+
+    openid = models.CharField(max_length=255)
+    asn_code = models.CharField(max_length=255)
+    import_type = models.CharField(max_length=32, choices=IMPORT_TYPES)
+    content_hash = models.CharField(max_length=64, blank=True, default='')
+    row_count = models.PositiveIntegerField(default=0)
+    imported_by = models.CharField(max_length=255, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'packlistimportbatch'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'asn_code', 'import_type']),
+            models.Index(fields=['openid', 'import_type', 'content_hash']),
+        ]
 
 
 class PackListDocument(models.Model):
@@ -23,14 +51,19 @@ class PackListDocument(models.Model):
     asn_code = models.CharField(max_length=255)
     version = models.PositiveIntegerField(default=1)
     source_type = models.CharField(max_length=32, choices=SOURCE_TYPES, default='UPLOAD')
-    source_file = models.CharField(max_length=255, blank=True, default='')
-    source_sha256 = models.CharField(max_length=64, blank=True, default='')
-    source_url = models.CharField(max_length=1000, blank=True, default='')
+    content_hash = models.CharField(max_length=64, blank=True, default='')
+    is_current = models.BooleanField(default=True)
+    import_batch = models.ForeignKey(
+        'PackListImportBatch',
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='pack_lists',
+    )
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=PENDING)
     has_serials = models.BooleanField(default=False)
     package_qty = models.PositiveIntegerField(default=0)
     note = models.TextField(blank=True, default='')
-    raw_payload = models.JSONField(default=dict, blank=True)
     created_by = models.CharField(max_length=255, blank=True, default='')
     confirmed_by = models.CharField(max_length=255, blank=True, default='')
     confirmed_at = models.DateTimeField(blank=True, null=True)
@@ -42,8 +75,15 @@ class PackListDocument(models.Model):
         ordering = ['-version', '-id']
         indexes = [
             models.Index(fields=['openid', 'asn_code', 'status']),
-            models.Index(fields=['openid', 'asn_code', 'source_sha256']),
+            models.Index(fields=['openid', 'asn_code', 'content_hash']),
             models.Index(fields=['openid', 'source_type']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['openid', 'asn_code'],
+                condition=Q(is_current=True),
+                name='packlistdocument_one_current_per_asn',
+            ),
         ]
 
 
@@ -53,8 +93,12 @@ class PackListLine(models.Model):
     asn_code = models.CharField(max_length=255)
     goods_code = models.CharField(max_length=255)
     customer_goods_code = models.CharField(max_length=255, blank=True, default='')
+    is_current = models.BooleanField(default=True)
     goods_qty = models.PositiveIntegerField(default=0)
+    total_qty = models.PositiveIntegerField(default=0)
+    package_type = models.CharField(max_length=255, blank=True, default='')
     goods_desc = models.CharField(max_length=1000, blank=True, default='')
+    customer_ssku = models.CharField(max_length=255, blank=True, default='')
     goods_weight = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     goods_volume = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     source_row = models.PositiveIntegerField(default=0)
@@ -101,8 +145,14 @@ class AsnSerialRecord(models.Model):
     inbound_date = models.DateField(blank=True, null=True)
     source_location = models.CharField(max_length=255, blank=True, default='')
     shipout_ref = models.CharField(max_length=255, blank=True, default='')
-    source_file = models.CharField(max_length=255, blank=True, default='')
     source_row = models.PositiveIntegerField(default=0)
+    import_batch = models.ForeignKey(
+        PackListImportBatch,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='serial_records',
+    )
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=EXPECTED)
     is_expected = models.BooleanField(default=True)
     is_received = models.BooleanField(default=False)

@@ -94,6 +94,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         documents = PackListDocument.objects.filter(
             openid=obj.openid,
             asn_code=obj.asn_code,
+            is_current=True,
         )
         document = documents.filter(
             status=PackListDocument.CONFIRMED,
@@ -155,6 +156,18 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         received = records.filter(is_received=True).count()
         accepted = records.filter(status=AsnSerialRecord.ACCEPTED).count()
         resolved = records.filter(exception_resolved=True).count()
+        quantity_exceptions = sum(
+            0 if detail.exception_resolved else (
+                int(detail.goods_shortage_qty or 0)
+                + int(detail.goods_more_qty or 0)
+                + int(detail.goods_damage_qty or 0)
+            )
+            for detail in AsnDetailModel.objects.filter(
+                openid=obj.openid,
+                asn_code=obj.asn_code,
+                is_delete=False,
+            )
+        )
         exception_statuses = {
             AsnSerialRecord.DUPLICATE,
             AsnSerialRecord.WRONG_SKU,
@@ -167,10 +180,10 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         missing = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
         accepted_for_putaway = accepted + resolved
 
-        if not records.exists():
-            status = 'NOT_IMPORTED'
-        elif exceptions:
+        if exceptions or quantity_exceptions:
             status = 'EXCEPTIONS'
+        elif not records.exists():
+            status = 'NOT_IMPORTED'
         elif expected and accepted_for_putaway >= expected and not missing:
             status = 'ACCEPTED'
         elif received:
@@ -186,6 +199,13 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'accepted_for_putaway': accepted_for_putaway,
             'resolved': resolved,
             'exceptions': exceptions,
+            'quantity_exceptions': quantity_exceptions,
+            'ready_for_putaway': (
+                quantity_exceptions == 0
+                and exceptions == 0
+                and missing == 0
+                and (not expected or accepted_for_putaway >= expected)
+            ),
         }
         return cache[cache_key]
 
@@ -238,7 +258,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             cache[cache_key] = {'code': 'PACK_LIST_PENDING'}
             return cache[cache_key]
 
-        pack_lines = document.lines.values('goods_code', 'goods_qty')
+        pack_lines = document.lines.filter(is_current=True).values('goods_code', 'goods_qty')
         packed = {}
         for line in pack_lines:
             packed[line['goods_code']] = packed.get(line['goods_code'], 0) + int(line['goods_qty'] or 0)

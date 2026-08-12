@@ -13,7 +13,7 @@ from rest_framework.exceptions import APIException
 from asn.models import AsnDetailModel, AsnListModel
 from staff.models import ListModel as Staff
 
-from .models import AsnSerialRecord, PackListDocument, PackListLine
+from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
 
 
 EXCEPTION_STATUSES = {
@@ -45,6 +45,13 @@ def _clean(value):
     if value is None:
         return ''
     return str(value).strip().upper()
+
+
+def _is_damage_flag(value):
+    normalized = str(value or '').strip().lower()
+    return normalized in {'1', 'true', 'yes', 'y', 'ng', 'nok'} or normalized.startswith((
+        'damage', 'defect', 'fail', 'reject',
+    ))
 
 
 def _asn_detail(openid, asn_code, goods_code):
@@ -88,8 +95,9 @@ def _current_pack_list(openid, asn_code):
     return PackListDocument.objects.filter(
         openid=openid,
         asn_code=asn_code,
+        is_current=True,
         status=PackListDocument.CONFIRMED,
-    ).order_by('-version', '-id').first()
+    ).first()
 
 
 def _pack_list_json(document):
@@ -99,9 +107,6 @@ def _pack_list_json(document):
         'asn_code': document.asn_code,
         'version': document.version,
         'source_type': document.source_type,
-        'source_file': document.source_file,
-        'source_sha256': document.source_sha256,
-        'source_url': document.source_url,
         'status': document.status,
         'has_serials': document.has_serials,
         'package_qty': document.package_qty,
@@ -110,17 +115,20 @@ def _pack_list_json(document):
         'confirmed_by': document.confirmed_by,
         'confirmed_at': document.confirmed_at.isoformat() if document.confirmed_at else None,
         'create_time': document.create_time.isoformat() if document.create_time else None,
-        'line_count': document.lines.count(),
-        'total_qty': sum(line.goods_qty for line in document.lines.all()),
+        'line_count': document.lines.filter(is_current=True).count(),
+        'total_qty': sum(line.goods_qty for line in document.lines.filter(is_current=True)),
         'lines': [
             {
                 'goods_code': line.goods_code,
                 'customer_goods_code': line.customer_goods_code,
+                'customer_ssku': line.customer_ssku,
                 'goods_qty': line.goods_qty,
+                'total_qty': line.total_qty,
+                'package_type': line.package_type,
                 'goods_desc': line.goods_desc,
                 'source_row': line.source_row,
             }
-            for line in document.lines.all()
+            for line in document.lines.filter(is_current=True)
         ],
         'expected_serial_count': serials.filter(is_expected=True).count(),
         'received_serial_count': serials.filter(is_received=True).count(),
@@ -140,7 +148,6 @@ def _record_json(record):
         'inbound_date': record.inbound_date.isoformat() if record.inbound_date else None,
         'source_location': record.source_location,
         'shipout_ref': record.shipout_ref,
-        'source_file': record.source_file,
         'source_row': record.source_row,
         'status': record.status,
         'is_expected': record.is_expected,
@@ -164,9 +171,9 @@ def _record_json(record):
 def _summary(openid, asn_code):
     details = AsnDetailModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False)
     records = AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code)
-    pack_lists = PackListDocument.objects.filter(openid=openid, asn_code=asn_code)
+    pack_lists = PackListDocument.objects.filter(openid=openid, asn_code=asn_code, is_current=True)
     current_pack_list = _current_pack_list(openid, asn_code)
-    pending_pack_list = pack_lists.filter(status=PackListDocument.PENDING).order_by('-version', '-id').first()
+    pending_pack_list = pack_lists.filter(status=PackListDocument.PENDING).first()
     has_expected_serials = records.filter(is_expected=True).exists()
     if current_pack_list and current_pack_list.has_serials:
         verification_mode = 'PACK_LIST'
@@ -263,7 +270,7 @@ def _summary(openid, asn_code):
     }
 
 
-def _save_expected(openid, request, asn_code, goods_code, serial_number, row=None, source='manual', pack_list=None):
+def _save_expected(openid, request, asn_code, goods_code, serial_number, row=None, source='manual', pack_list=None, import_batch=None):
     serial_number = _clean(serial_number)
     if not serial_number:
         raise APIException({'detail': 'Serial Number is required'})
@@ -285,9 +292,10 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         record.inbound_date = _date_value(metadata.get('inbound_date')) or record.inbound_date
         record.source_location = _clean(metadata.get('source_location')) or record.source_location
         record.shipout_ref = _clean(metadata.get('shipout_ref')) or record.shipout_ref
-        record.source_file = str(metadata.get('source_file') or record.source_file)
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
+        record.note = str(metadata.get('note') or record.note or '').strip()
         record.pack_list = pack_list or record.pack_list
+        record.import_batch = import_batch or record.import_batch
         record.expected_by = _operator_name(request, openid)
         record.expected_at = record.expected_at or now
         if record.is_received and record.scanned_goods_code == goods_code and record.status not in EXCEPTION_STATUSES:
@@ -318,8 +326,9 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         inbound_date=_date_value(metadata.get('inbound_date')),
         source_location=_clean(metadata.get('source_location')),
         shipout_ref=_clean(metadata.get('shipout_ref')),
-        source_file=str(metadata.get('source_file') or ''),
         source_row=int(metadata.get('source_row') or 0),
+        note=str(metadata.get('note') or '').strip(),
+        import_batch=import_batch,
         status=AsnSerialRecord.EXPECTED,
         is_expected=True,
         expected_by=_operator_name(request, openid),
@@ -334,7 +343,7 @@ def _scan_status_without_pack_list(openid, asn_code):
     return AsnSerialRecord.UNEXPECTED if pack_list and pack_list.has_serials else AsnSerialRecord.UNVERIFIED
 
 
-def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, row=None, source='manual'):
+def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, row=None, source='manual', import_batch=None):
     serial_number = _clean(serial_number)
     goods_code = _clean(goods_code)
     if not serial_number or not goods_code:
@@ -358,8 +367,9 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         record.inbound_date = _date_value(metadata.get('inbound_date')) or record.inbound_date
         record.source_location = _clean(metadata.get('source_location')) or record.source_location
         record.shipout_ref = _clean(metadata.get('shipout_ref')) or record.shipout_ref
-        record.source_file = str(metadata.get('source_file') or record.source_file)
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
+        record.import_batch = import_batch or record.import_batch
+        record.note = str(metadata.get('note') or record.note or '').strip()
         record.damaged = record.damaged or bool(damaged)
         if record.scan_count > 1:
             record.status = AsnSerialRecord.DUPLICATE
@@ -390,8 +400,9 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         inbound_date=_date_value(metadata.get('inbound_date')),
         source_location=_clean(metadata.get('source_location')),
         shipout_ref=_clean(metadata.get('shipout_ref')),
-        source_file=str(metadata.get('source_file') or ''),
         source_row=int(metadata.get('source_row') or 0),
+        note=str(metadata.get('note') or '').strip(),
+        import_batch=metadata.get('import_batch'),
         status=AsnSerialRecord.DAMAGED if damaged else _scan_status_without_pack_list(openid, asn_code),
         is_expected=False,
         is_received=True,
@@ -687,12 +698,15 @@ def _pack_list_rows_from_workbook(upload):
         if _header_key(value)
     }
     sku_column = _first_column(index, ('SKU#', 'SKU', 'Goods Code', 'GoodsCode', 'Item', 'Part Number'))
-    qty_column = _first_column(index, ('Qty', 'Quantity', 'Total Qty', 'Goods Qty', 'ASN Qty'))
+    qty_column = _first_column(index, ('Item Qty', 'Qty', 'Quantity', 'Goods Qty', 'ASN Qty', 'Total Qty'))
     serial_column = _first_column(index, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
     customer_sku_column = _first_column(index, ('Customer SKU', 'Customer Part Number', 'Customer Item'))
+    customer_ssku_column = _first_column(index, ('S-SKU', 'Customer S-SKU', 'Client SKU'))
+    package_type_column = _first_column(index, ('Package Type', 'Package Code', 'Package ID', 'Package'))
     desc_column = _first_column(index, ('Description', 'Goods Description', 'Product Description'))
     weight_column = _first_column(index, ('Weight', 'Goods Weight'))
     volume_column = _first_column(index, ('Volume', 'Goods Volume'))
+    total_column = _first_column(index, ('Total', 'Total Qty', 'Item Total'))
     if sku_column is None:
         raise APIException({'detail': 'Pack List must contain a SKU or Goods Code column'})
     rows = []
@@ -709,8 +723,11 @@ def _pack_list_rows_from_workbook(upload):
         rows.append({
             'goods_code': goods_code,
             'customer_goods_code': _clean(value_at(customer_sku_column)),
+            'customer_ssku': _clean(value_at(customer_ssku_column)),
+            'package_type': _clean(value_at(package_type_column)),
             'serial_number': serial_number,
             'goods_qty': qty,
+            'total_qty': int(_number(value_at(total_column), Decimal(str(qty))) or qty),
             'goods_desc': str(value_at(desc_column) or '').strip(),
             'goods_weight': _number(value_at(weight_column)),
             'goods_volume': _number(value_at(volume_column)),
@@ -751,8 +768,11 @@ def _validate_pack_list_rows(openid, asn_code, rows):
         normalized_rows.append({
             'goods_code': goods_code,
             'customer_goods_code': _clean(raw_row.get('customer_goods_code')),
+            'customer_ssku': _clean(raw_row.get('customer_ssku')),
+            'package_type': _clean(raw_row.get('package_type')),
             'serial_number': serial_number,
             'goods_qty': qty,
+            'total_qty': int(_number(raw_row.get('total_qty'), Decimal(str(qty))) or qty),
             'goods_desc': str(raw_row.get('goods_desc') or '').strip(),
             'goods_weight': _number(raw_row.get('goods_weight')),
             'goods_volume': _number(raw_row.get('goods_volume')),
@@ -767,22 +787,27 @@ def _validate_pack_list_rows(openid, asn_code, rows):
     }
 
 
-def _pack_list_preview_json(asn_code, validation, package_qty, source_sha256, duplicate_document=None):
+def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, duplicate_document=None, current_document=None):
     return {
         'asn_code': asn_code,
         'status': 'DUPLICATE' if duplicate_document else 'PREVIEW',
-        'source_sha256': source_sha256,
+        'content_hash': content_hash,
         'row_count': len(validation['rows']),
         'total_qty': validation['total_qty'],
         'has_serials': validation['has_serials'],
         'expected_serial_count': validation['expected_serial_count'],
         'package_qty': max(0, int(package_qty or 0)),
         'duplicate_document': _pack_list_json(duplicate_document) if duplicate_document else None,
+        'current_document': _pack_list_json(current_document) if current_document else None,
+        'replace_required': bool(current_document and not duplicate_document),
         'lines': [
             {
                 'goods_code': row['goods_code'],
                 'customer_goods_code': row['customer_goods_code'],
+                'customer_ssku': row['customer_ssku'],
+                'package_type': row['package_type'],
                 'goods_qty': row['goods_qty'],
+                'total_qty': row['total_qty'],
                 'serial_number': row['serial_number'],
                 'goods_desc': row['goods_desc'],
                 'source_row': row['source_row'],
@@ -792,26 +817,76 @@ def _pack_list_preview_json(asn_code, validation, package_qty, source_sha256, du
     }
 
 
-def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', source_file='', source_sha256='', source_url='', note='', package_qty=0):
+def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', content_hash='', note='', package_qty=0, replace=False):
     validation = _validate_pack_list_rows(openid, asn_code, rows)
     asn = validation['asn']
     normalized_rows = validation['rows']
     has_serials = validation['has_serials']
-    last_version = PackListDocument.objects.filter(openid=openid, asn_code=asn_code).order_by('-version').values_list('version', flat=True).first() or 0
-    document = PackListDocument.objects.create(
+    package_qty = max(0, int(package_qty or 0))
+    source_type = source_type if source_type in dict(PackListDocument.SOURCE_TYPES) else 'MANUAL'
+    document = PackListDocument.objects.select_for_update().filter(
         openid=openid,
         asn_code=asn_code,
-        version=int(last_version) + 1,
-        source_type=source_type if source_type in dict(PackListDocument.SOURCE_TYPES) else 'MANUAL',
-        source_file=str(source_file or '')[:255],
-        source_sha256=str(source_sha256 or '')[:64],
-        source_url=str(source_url or '')[:1000],
-        has_serials=has_serials,
-        package_qty=max(0, int(package_qty or 0)),
-        note=str(note or ''),
-        raw_payload={'row_count': len(normalized_rows), 'has_serials': has_serials},
-        created_by=_operator_name(request, openid),
-    )
+        is_current=True,
+    ).first()
+    if document:
+        if document.content_hash == str(content_hash or ''):
+            return document, None, False
+        if not replace:
+            raise APIException({
+                'detail': 'A different Pack List already exists for this ASN. Preview the differences and use the explicit Replace action.',
+                'code': 'PACK_LIST_REPLACE_REQUIRED',
+                'document_id': document.id,
+            })
+        if document.serial_records.filter(is_received=True).exists():
+            raise APIException({'detail': 'Receiving has started; the Pack List cannot be replaced after physical scans'})
+        document.serial_records.filter(is_expected=True, is_received=False).update(
+            pack_list=None,
+            is_expected=False,
+            expected_goods_code='',
+            status=AsnSerialRecord.UNVERIFIED,
+        )
+        document.lines.filter(is_current=True).update(is_current=False)
+        document.version = int(document.version or 0) + 1
+        document.has_serials = has_serials
+        document.package_qty = package_qty
+        document.note = str(note or '')
+        document.source_type = source_type
+        document.content_hash = str(content_hash or '')[:64]
+        document.confirmed_by = ''
+        document.confirmed_at = None
+        document.status = PackListDocument.PENDING
+        document.save(update_fields=[
+            'version', 'source_type', 'content_hash', 'status', 'has_serials',
+            'package_qty', 'note', 'confirmed_by', 'confirmed_at', 'update_time',
+        ])
+    created_document = document is None
+    if created_document:
+        document = PackListDocument.objects.create(
+            openid=openid,
+            asn_code=asn_code,
+            version=1,
+            source_type=source_type,
+            content_hash=str(content_hash or '')[:64],
+            is_current=True,
+            has_serials=has_serials,
+            package_qty=package_qty,
+            note=str(note or ''),
+            created_by=_operator_name(request, openid),
+        )
+    import_batch = None
+    if content_hash:
+        import_batch = PackListImportBatch.objects.create(
+            openid=openid,
+            asn_code=asn_code,
+            import_type=PackListImportBatch.PACK_LIST,
+            content_hash=str(content_hash)[:64],
+            row_count=len(normalized_rows),
+            imported_by=_operator_name(request, openid),
+            note=str(note or ''),
+        )
+        document.import_batch = import_batch
+        document.save(update_fields=['import_batch', 'update_time'])
     if document.package_qty > 0 and int(asn.package_qty or 0) != document.package_qty:
         asn.package_qty = document.package_qty
         asn.save(update_fields=['package_qty', 'update_time'])
@@ -822,7 +897,11 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', sou
             asn_code=asn_code,
             goods_code=row['goods_code'],
             customer_goods_code=row['customer_goods_code'],
+            is_current=True,
+            customer_ssku=row['customer_ssku'],
             goods_qty=row['goods_qty'],
+            total_qty=row['total_qty'],
+            package_type=row['package_type'],
             goods_desc=row['goods_desc'],
             goods_weight=row['goods_weight'],
             goods_volume=row['goods_volume'],
@@ -838,8 +917,9 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', sou
                 row=row,
                 source='pack_list',
                 pack_list=document,
+                import_batch=import_batch,
             )
-    return document
+    return document, import_batch, created_document
 
 
 def _reconcile_pack_list(document):
@@ -869,7 +949,7 @@ class PackListListView(APIView):
     def get(self, request):
         openid = _openid(request)
         asn_code = _clean(request.query_params.get('asn_code'))
-        documents = PackListDocument.objects.filter(openid=openid)
+        documents = PackListDocument.objects.filter(openid=openid, is_current=True)
         if asn_code:
             documents = documents.filter(asn_code=asn_code)
         return Response({
@@ -888,13 +968,12 @@ class PackListCreateView(APIView):
         if not asn_code or not rows:
             raise APIException({'detail': 'ASN Code and Pack List rows are required'})
         with transaction.atomic():
-            document = _create_pack_list(
+            document, _, _ = _create_pack_list(
                 openid,
                 request,
                 asn_code,
                 rows,
                 source_type=str(data.get('source_type') or 'MANUAL').upper(),
-                source_url=data.get('source_url'),
                 note=data.get('note'),
                 package_qty=data.get('package_qty'),
             )
@@ -912,21 +991,23 @@ class PackListPreviewView(APIView):
             raise APIException({'detail': 'Pack List file is too large'})
         if not asn_code:
             raise APIException({'detail': 'ASN Code is required'})
-        rows, file_hash = _pack_list_rows_from_workbook(upload)
+        rows, content_hash = _pack_list_rows_from_workbook(upload)
         validation = _validate_pack_list_rows(openid, asn_code, rows)
-        duplicate_document = PackListDocument.objects.filter(
+        current_document = PackListDocument.objects.filter(
             openid=openid,
             asn_code=asn_code,
-            source_sha256=file_hash,
-        ).order_by('-id').first()
+            is_current=True,
+        ).first()
+        duplicate_document = current_document if current_document and current_document.content_hash == content_hash else None
         return Response({
             'detail': 'preview',
             'preview': _pack_list_preview_json(
                 asn_code,
                 validation,
                 request.data.get('package_qty'),
-                file_hash,
+                content_hash,
                 duplicate_document=duplicate_document,
+                current_document=current_document,
             ),
         })
 
@@ -942,34 +1023,37 @@ class PackListImportView(APIView):
             raise APIException({'detail': 'Pack List file is too large'})
         if not asn_code:
             raise APIException({'detail': 'ASN Code is required'})
-        rows, file_hash = _pack_list_rows_from_workbook(upload)
+        rows, content_hash = _pack_list_rows_from_workbook(upload)
+        validation = _validate_pack_list_rows(openid, asn_code, rows)
         existing_document = PackListDocument.objects.filter(
             openid=openid,
             asn_code=asn_code,
-            source_sha256=file_hash,
-        ).order_by('-id').first()
-        if existing_document:
+            is_current=True,
+        ).first()
+        if existing_document and existing_document.content_hash == content_hash:
             return Response({
                 'detail': 'already_exists',
                 'duplicate': True,
                 'document': _pack_list_json(existing_document),
                 'summary': _summary(openid, asn_code),
             })
+        replaced = bool(existing_document)
         with transaction.atomic():
-            document = _create_pack_list(
+            document, _, created = _create_pack_list(
                 openid,
                 request,
                 asn_code,
                 rows,
                 source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
-                source_file=upload.name,
-                source_sha256=file_hash,
-                source_url=request.data.get('source_url'),
+                content_hash=content_hash,
                 note=request.data.get('note'),
                 package_qty=request.data.get('package_qty'),
+                replace=str(request.data.get('replace', '')).lower() == 'true',
             )
         return Response({
-            'detail': 'success',
+            'detail': 'success' if created else 'already_exists',
+            'duplicate': not created,
+            'replaced': replaced,
             'document': _pack_list_json(document),
             'summary': _summary(openid, asn_code),
         })
@@ -982,15 +1066,10 @@ class PackListConfirmView(APIView):
             document_id = int(request.data.get('id'))
         except (TypeError, ValueError):
             raise APIException({'detail': 'Pack List id is required'})
-        document = PackListDocument.objects.filter(id=document_id, openid=openid).first()
+        document = PackListDocument.objects.filter(id=document_id, openid=openid, is_current=True).first()
         if not document:
             raise APIException({'detail': 'Pack List does not exist'})
         with transaction.atomic():
-            PackListDocument.objects.filter(
-                openid=openid,
-                asn_code=document.asn_code,
-                status=PackListDocument.CONFIRMED,
-            ).exclude(id=document.id).update(status=PackListDocument.ARCHIVED)
             document.status = PackListDocument.CONFIRMED
             document.confirmed_by = _operator_name(request, openid)
             document.confirmed_at = timezone.now()
@@ -1018,7 +1097,9 @@ class SerialImportView(APIView):
         if not inbound_po and not shipout_ref and str(request.data.get('allow_all', '')).lower() != 'true':
             raise APIException({'detail': 'Provide inbound_po or shipout_ref before importing a mixed scan sheet'})
         try:
-            workbook = load_workbook(upload, read_only=True, data_only=True)
+            file_bytes = upload.read()
+            upload.seek(0)
+            workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
             sheet = workbook.active
             raw_headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
             headers = [' '.join(str(value or '').strip().split()) for value in raw_headers]
@@ -1029,7 +1110,34 @@ class SerialImportView(APIView):
         serial_column = _first_column(index, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
         if sku_column is None or serial_column is None:
             raise APIException({'detail': 'Excel must contain a SKU/Part Number and SN/Serial Number column'})
-        source_file = str(upload.name)[:255]
+        content_hash = sha256((mode + ':' ).encode('utf-8') + file_bytes).hexdigest()
+        existing_batch = PackListImportBatch.objects.filter(
+            openid=openid,
+            asn_code=asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            content_hash=content_hash,
+        ).first()
+        if existing_batch:
+            return Response({
+                'detail': 'already_exists',
+                'duplicate': True,
+                'mode': mode,
+                'batch_id': existing_batch.id,
+                'matched_rows': existing_batch.row_count,
+                'created': 0,
+                'updated': 0,
+                'skipped': 0,
+                'errors': [],
+                'summary': _summary(openid, asn_code),
+            })
+        import_batch = PackListImportBatch.objects.create(
+            openid=openid,
+            asn_code=asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            content_hash=content_hash,
+            imported_by=_operator_name(request, openid),
+            note='Serial import mode: ' + mode,
+        )
         matched = 0
         created = 0
         updated = 0
@@ -1053,30 +1161,45 @@ class SerialImportView(APIView):
             if not goods_code or not serial_number:
                 continue
             matched += 1
+            inspection_result = value('Inspection Result', 'QC Result', 'Check Result', 'Condition', 'Result')
             row_data = {
                 'double_scan_sn': value('Double-Scan SN#', 'Double Scan SN', 'Double-Scan SN'),
                 'inbound_po': row_po,
                 'inbound_date': value('Inbound Date', 'Date'),
                 'source_location': value('Location'),
                 'shipout_ref': row_shipout,
-                'source_file': source_file,
+                'damaged': _is_damage_flag(value('Damaged', 'Damage', 'Damage Flag', 'Damage Status')) or _is_damage_flag(inspection_result),
+                'note': value('QC Note', 'Inspection Note', 'Check Note', 'Note', 'Remarks') or inspection_result,
                 'source_row': row_number,
+                'import_batch': import_batch,
             }
             try:
                 if mode == 'expected':
-                    record, was_created = _save_expected(openid, request, asn_code, goods_code, serial_number, row=row_data, source='excel')
+                    record, was_created = _save_expected(openid, request, asn_code, goods_code, serial_number, row=row_data, source='excel', import_batch=import_batch)
                 else:
-                    record, was_created = _scan(openid, request, asn_code, goods_code, serial_number, row=row_data, source='excel')
+                    record, was_created = _scan(
+                        openid,
+                        request,
+                        asn_code,
+                        goods_code,
+                        serial_number,
+                        damaged=row_data['damaged'],
+                        row=row_data,
+                        source='excel',
+                        import_batch=import_batch,
+                    )
                 created += int(was_created)
                 updated += int(not was_created)
             except Exception as exc:
                 skipped += 1
                 if len(errors) < 50:
                     errors.append({'row': row_number, 'sku': goods_code, 'sn': serial_number, 'detail': str(exc)})
+        import_batch.row_count = matched
+        import_batch.save(update_fields=['row_count'])
         return Response({
             'detail': 'success' if not errors else 'partial_success',
             'mode': mode,
-            'source_file': source_file,
+            'batch_id': import_batch.id,
             'matched_rows': matched,
             'created': created,
             'updated': updated,
