@@ -33,6 +33,7 @@ from .files import FileListRenderCN, FileListRenderEN, FileDetailRenderCN, FileD
 from rest_framework.settings import api_settings
 from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
+from driver.models import ListModel as driverlist
 from asnserial.models import AsnSerialRecord
 from staging.models import StagingAssignment
 from staging.services import (
@@ -831,6 +832,17 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
                                                                 asn_status=1, is_delete=False).exists():
                     if not qs.actual_arrival_at:
                         raise APIException({"detail": "Mark the ASN as arrived before starting unloading"})
+                    unload_driver = str(
+                        request.data.get('unload_driver') or request.data.get('driver') or ''
+                    ).strip()
+                    if not unload_driver:
+                        raise APIException({"detail": "Select an unloading driver before starting unloading"})
+                    if not driverlist.objects.filter(
+                        openid=self.request.auth.openid,
+                        driver_name=unload_driver,
+                        is_delete=False,
+                    ).exists():
+                        raise APIException({"detail": "Selected unloading driver does not exist"})
                     asn_detail_list = AsnDetailModel.objects.select_for_update().filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                     asn_status=1, is_delete=False)
                     quantity, _ = inbound_package_quantity(qs)
@@ -864,7 +876,19 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
                         goods_qty_change.pre_load_stock = goods_qty_change.pre_load_stock + asn_detail_list[i].goods_qty
                         goods_qty_change.save()
                     asn_detail_list.update(asn_status=2)
-                    qs.save()
+                    qs.unload_driver = unload_driver
+                    qs.save(update_fields=['asn_status', 'unload_driver', 'update_time'])
+                    AsnEventModel.objects.create(
+                        openid=self.request.auth.openid,
+                        asn_code=qs.asn_code,
+                        event_type=AsnEventModel.UNLOADING_STARTED,
+                        operator=_operator_name(request),
+                        source='WAREHOUSE',
+                        note='Driver: %s; Staging: %s' % (
+                            unload_driver,
+                            ', '.join(sorted(str(item) for item in staging_bins)),
+                        ),
+                    )
                     serializer = self.get_serializer(qs, many=False)
                     headers = self.get_success_headers(serializer.data)
                     return Response(serializer.data, status=200, headers=headers)

@@ -8,6 +8,7 @@ class AsnListModel(models.Model):
     container_tracking = models.CharField(max_length=255, blank=True, default='', verbose_name="Container / Tracking")
     actual_arrival_at = models.DateTimeField(blank=True, null=True, verbose_name="Actual Arrival Time")
     arrival_confirmed_by = models.CharField(max_length=255, blank=True, default='', verbose_name="Arrival Confirmed By")
+    unload_driver = models.CharField(max_length=255, blank=True, default='', verbose_name="Unloading Driver")
     eta_received_at = models.DateTimeField(blank=True, null=True, verbose_name="ETA Received Time")
     eta_received_by = models.CharField(max_length=255, blank=True, default='', verbose_name="ETA Received By")
     eta_source = models.CharField(max_length=64, blank=True, default='', verbose_name="ETA Source")
@@ -34,11 +35,13 @@ class AsnEventModel(models.Model):
     ETA_UPDATED = 'ETA_UPDATED'
     ARRIVAL_CONFIRMED = 'ARRIVAL_CONFIRMED'
     STAGING_RESERVED = 'STAGING_RESERVED'
+    UNLOADING_STARTED = 'UNLOADING_STARTED'
 
     EVENT_TYPES = (
         (ETA_UPDATED, 'ETA Updated'),
         (ARRIVAL_CONFIRMED, 'Arrival Confirmed'),
         (STAGING_RESERVED, 'Staging Reserved'),
+        (UNLOADING_STARTED, 'Unloading Started'),
     )
 
     openid = models.CharField(max_length=255)

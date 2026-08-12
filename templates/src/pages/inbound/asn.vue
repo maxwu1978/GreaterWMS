@@ -85,6 +85,9 @@
               <div class="text-caption text-grey-6">
                 R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
               </div>
+              <div v-if="props.row.unload_driver" class="text-caption text-grey-6" :title="'Unloading driver: ' + props.row.unload_driver">
+                DRV {{ props.row.unload_driver }}
+              </div>
             </q-td>
             <q-td key="pack_list_status" :props="props" class="asn-pack-list-cell">
               <q-chip
@@ -610,6 +613,27 @@
         </q-bar>
         <q-card-section style="max-height: 500px; width: 500px" class="scroll">
           <div class="text-subtitle2 q-mb-sm">{{ preloadMode === 'reserve' ? 'Reserve staging locations before arrival' : 'Select the reserved locations for this physical unload' }}</div>
+          <q-select
+            v-if="preloadMode !== 'reserve'"
+            dense
+            outlined
+            square
+            use-input
+            hide-selected
+            fill-input
+            v-model="preloadDriver"
+            label="Unloading driver"
+            :options="driver_options"
+            @filter="filterFnUnloadDriver"
+            autofocus
+          >
+            <template v-slot:no-option>
+              <q-item><q-item-section class="text-grey">No drivers found</q-item-section></q-item>
+            </template>
+            <template v-if="preloadDriver" v-slot:append>
+              <q-icon name="cancel" @click.stop="preloadDriver = ''" class="cursor-pointer" />
+            </template>
+          </q-select>
           <StagingSlotPicker
             flow="INBOUND"
             v-model="preloadStagingBin"
@@ -981,6 +1005,8 @@ export default {
       preloadStagingBin: [],
       preloadRequiredSlots: 0,
       preloadMode: 'unload',
+      preloadDriver: '',
+      driver_options: LocalStorage.getItem('inbound_driver_name_list') || [],
       etaForm: false,
       etaRow: null,
       etaDraft: '',
@@ -1550,7 +1576,9 @@ export default {
         _this.preloadMode = mode
         _this.preloadid = e.id
         _this.preloadStagingBin = mode === 'unload' ? (e.staging_bins || []) : []
+        _this.preloadDriver = mode === 'unload' ? (e.unload_driver || '') : ''
         _this.preloadRequiredSlots = _this.requiredStagingSlots(e)
+        if (mode === 'unload') _this.loadUnloadDriverOptions()
         getauth(_this.pathname + 'detail/?asn_code=' + e.asn_code).then(res => {
           if (!_this.preloadRequiredSlots) {
             _this.preloadRequiredSlots = (res.results || []).reduce((total, item) => {
@@ -1578,10 +1606,20 @@ export default {
         })
         return
       }
+      if (actionMode === 'unload' && !_this.preloadDriver) {
+        _this.$q.notify({
+          message: 'Select an unloading driver before starting unloading',
+          icon: 'close',
+          color: 'negative'
+        })
+        return
+      }
       const endpoint = _this.preloadMode === 'reserve'
         ? _this.pathname + 'reserve-staging/' + _this.preloadid + '/'
         : _this.pathname + 'preload/' + _this.preloadid + '/'
-      postauth(endpoint, { staging_bins: _this.preloadStagingBin })
+      const payload = { staging_bins: _this.preloadStagingBin }
+      if (actionMode === 'unload') payload.driver = _this.preloadDriver
+      postauth(endpoint, payload)
         .then(res => {
           _this.table_list = []
           _this.preloadDataCancel()
@@ -1609,6 +1647,7 @@ export default {
       _this.preloadStagingBin = []
       _this.preloadRequiredSlots = 0
       _this.preloadMode = 'unload'
+      _this.preloadDriver = ''
     },
     reserveStaging (row) {
       this.preloadData(row, 'reserve')
@@ -1664,6 +1703,24 @@ export default {
       this.arrivalForm = false
       this.arrivalRow = null
       this.arrivalDraft = ''
+    },
+    loadUnloadDriverOptions (needle = '') {
+      const query = '?driver_name__icontains=' + encodeURIComponent(needle)
+      getauth('driver/' + query).then(res => {
+        const rows = Array.isArray(res) ? res : (res.results || [])
+        const options = rows.map(item => item.driver_name).filter(Boolean)
+        this.driver_options = options
+        LocalStorage.set('inbound_driver_name_list', options)
+      }).catch(() => {})
+    },
+    filterFnUnloadDriver (val, update, abort) {
+      if (val.length < 1) {
+        abort()
+        return
+      }
+      update(() => {
+        this.loadUnloadDriverOptions(val)
+      })
     },
     presortData (e) {
       var _this = this

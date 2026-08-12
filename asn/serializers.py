@@ -237,7 +237,7 @@ class ASNListPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
 
 class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
@@ -248,7 +248,7 @@ class ASNListPartialUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
 
 class ASNListUpdateSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.asn_data_validate])
@@ -259,7 +259,7 @@ class ASNListUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'unload_driver', ]
 
 class ASNDetailGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
