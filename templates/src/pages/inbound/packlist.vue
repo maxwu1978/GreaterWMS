@@ -46,7 +46,7 @@
     <q-banner v-if="summary" class="q-mt-sm" :class="summary.ready_for_putaway ? 'bg-green-1' : 'bg-orange-1'">
       <div class="text-subtitle2">{{ summary.verification_mode }}</div>
       <div class="text-caption">{{ summary.verification_note }}</div>
-      <div class="text-caption">Pack List: {{ summary.pack_list_present ? 'present' : 'not received' }} · SN: {{ summary.total_expected_serials || 0 }} expected / {{ summary.total_received_serials || 0 }} received</div>
+      <div class="text-caption">Pack List: {{ summary.pack_list_present ? 'present' : 'not received' }} · SN: {{ summary.total_expected_serials || 0 }} expected / {{ summary.total_received_serials || 0 }} received / {{ summary.total_accepted_serials || 0 }} accepted · Exceptions: {{ summary.total_exception_serials || 0 }}</div>
     </q-banner>
 
     <q-table

@@ -112,9 +112,22 @@
                   <q-tooltip>{{ $t('asn_actions.serial_numbers') }}</q-tooltip>
                 </q-icon>
               </q-chip>
+              <div
+                v-if="props.row.serial_acceptance && props.row.serial_acceptance.status !== 'NOT_IMPORTED'"
+                class="asn-serial-summary text-caption"
+                :class="'text-' + serialAcceptanceColor(props.row.serial_acceptance)"
+                :title="serialAcceptanceTitle(props.row.serial_acceptance)"
+                @click="openSerialPanel(props.row)"
+              >
+                SN {{ props.row.serial_acceptance.accepted || 0 }}/{{ props.row.serial_acceptance.expected || 0 }}
+                {{ serialAcceptanceLabel(props.row.serial_acceptance) }}
+              </div>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center">
-              <q-chip v-if="!qcChecked(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
+              <q-chip v-if="serialAcceptanceExceptions(props.row) > 0" dense square color="negative" text-color="white">
+                SN {{ serialAcceptanceExceptions(props.row) }}
+              </q-chip>
+              <q-chip v-else-if="!qcChecked(props.row)" dense square :color="precheckColor(props.row.precheck_status)" text-color="dark">
                 {{ precheckLabel(props.row.precheck_status) }}
               </q-chip>
               <q-chip v-else-if="Number(props.row.exception_qty || 0) > 0" dense square color="negative" text-color="white">
@@ -1115,6 +1128,31 @@ export default {
         PENDING: 'orange-3',
         CONFIRMED: 'green-3'
       }[status] || 'grey-4'
+    },
+    serialAcceptanceLabel (summary) {
+      return {
+        ACCEPTED: 'Accepted',
+        EXCEPTIONS: 'Exceptions',
+        PARTIAL: 'Partial',
+        EXPECTED: 'Expected',
+        UNVERIFIED: 'Unverified'
+      }[summary.status] || summary.status
+    },
+    serialAcceptanceColor (summary) {
+      return {
+        ACCEPTED: 'positive',
+        EXCEPTIONS: 'negative',
+        PARTIAL: 'warning',
+        EXPECTED: 'grey-7',
+        UNVERIFIED: 'orange-8'
+      }[summary.status] || 'grey-7'
+    },
+    serialAcceptanceExceptions (row) {
+      return Number(row.serial_acceptance && row.serial_acceptance.exceptions || 0)
+    },
+    serialAcceptanceTitle (summary) {
+      return 'Serial acceptance: ' + (summary.accepted || 0) + '/' + (summary.expected || 0) +
+        ' accepted, ' + (summary.exceptions || 0) + ' exceptions, ' + (summary.received || 0) + ' received'
     },
     precheckLabel (status) {
       const labels = {

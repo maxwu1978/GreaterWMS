@@ -29,6 +29,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     staging_reserved_qty = serializers.SerializerMethodField()
     staging_occupied_qty = serializers.SerializerMethodField()
     arrival_status = serializers.SerializerMethodField()
+    serial_acceptance = serializers.SerializerMethodField()
 
     def get_supplier_short_name(self, obj):
         cache = self.context.setdefault('_asn_supplier_cache', {})
@@ -133,6 +134,55 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         if obj.actual_arrival_at:
             return 'ARRIVED'
         return 'PRE_ARRIVAL'
+
+    def _get_serial_acceptance(self, obj):
+        """Expose the receiving scan result in the ASN work queue."""
+        cache = self.context.setdefault('_asn_serial_acceptance_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        from asnserial.models import AsnSerialRecord
+
+        records = AsnSerialRecord.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+        )
+        expected = records.filter(is_expected=True).count()
+        received = records.filter(is_received=True).count()
+        accepted = records.filter(status=AsnSerialRecord.ACCEPTED).count()
+        exception_statuses = {
+            AsnSerialRecord.DUPLICATE,
+            AsnSerialRecord.WRONG_SKU,
+            AsnSerialRecord.DAMAGED,
+            AsnSerialRecord.REJECTED,
+        }
+        if expected:
+            exception_statuses.add(AsnSerialRecord.UNEXPECTED)
+        exceptions = records.filter(status__in=exception_statuses).count()
+
+        if not records.exists():
+            status = 'NOT_IMPORTED'
+        elif exceptions:
+            status = 'EXCEPTIONS'
+        elif expected and accepted >= expected and received >= expected:
+            status = 'ACCEPTED'
+        elif received:
+            status = 'PARTIAL'
+        else:
+            status = 'EXPECTED'
+
+        cache[cache_key] = {
+            'status': status,
+            'expected': expected,
+            'received': received,
+            'accepted': accepted,
+            'exceptions': exceptions,
+        }
+        return cache[cache_key]
+
+    def get_serial_acceptance(self, obj):
+        return self._get_serial_acceptance(obj)
 
     def get_actual_qty(self, obj):
         return self._get_detail_aggregate(obj)['actual_qty']
