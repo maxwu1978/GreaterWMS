@@ -105,9 +105,11 @@ docker-compose restart
 ### GreaterWMS CLI (read and controlled write)
 
 The repository includes `tools/greaterwms.mjs` for access to the current menu
-pages and Pack List workflow. It uses the same `token` header as the web client,
-calls the application API, and never writes directly to the database. Production
-and test targets are explicit; production defaults to the customer domain.
+pages and Pack List workflow. The Pack List page is read-only; Pack List and QC
+results are imported through the CLI/AI Agent path. The CLI uses the same
+`token` header as the web client, calls the application API, and never writes
+directly to the database. Production and test targets are explicit; production
+defaults to the customer domain.
 
 ~~~shell
 node tools/greaterwms.mjs login --env production --name ADMIN
@@ -129,8 +131,9 @@ different approved deployment. `GREATERWMS_TOKEN` remains available as an
 explicit session-token override for automation.
 
 Master-data create/update and enabled single-record deletes require explicit
-`--dry-run`/`--confirm` handling. Pack List import and confirmation retain their
-existing two-step flow. Pack List deletion and bulk cleanup are not supported.
+`--dry-run`/`--confirm` handling. Pack List import, confirmation, replacement,
+and QC import are CLI/AI Agent operations; the web page only displays their
+results. Pack List deletion and bulk cleanup are not supported.
 
 <h4>
   <a href="https://www.56yhz.com/win_10.html">Windows X64</a>

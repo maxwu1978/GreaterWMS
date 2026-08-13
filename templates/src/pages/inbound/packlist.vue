@@ -1,62 +1,20 @@
 <template>
   <div class="q-pa-sm packlist-page">
-    <div class="row q-col-gutter-sm">
-      <div class="col-12 col-lg-7">
-        <q-card flat bordered class="full-height">
-          <q-card-section class="q-pb-xs">
-            <div class="text-subtitle2">Customer Pack List</div>
-          </q-card-section>
-          <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
-            <div class="col-12 col-md-5">
-              <q-select
-                v-model="asnCode"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="asnOptions"
-                label="ASN"
-                @input="loadDocuments"
-              />
-            </div>
-            <div class="col-12 col-md-7">
-              <q-file v-model="selectedFile" outlined dense accept=".xlsx" label="Customer Pack List (.xlsx)" />
-            </div>
-            <div class="col-12 col-md-4">
-              <q-select v-model="sourceType" outlined dense emit-value map-options :options="sourceTypes" label="Source" />
-            </div>
-            <div class="col-12 col-md-4">
-              <q-input v-model.number="packageQty" outlined dense type="number" min="0" label="Load units" />
-            </div>
-            <div class="col-12 col-md-4 text-right">
-              <q-btn color="primary" icon="preview" label="Preview" :disable="!asnCode || !selectedFile" @click="previewFile" />
-            </div>
-            <div class="col-12">
-              <q-input v-model="note" outlined dense label="Note" />
-            </div>
-          </q-card-section>
-        </q-card>
+    <div class="row items-center q-col-gutter-sm">
+      <div class="col-12 col-md-5 col-lg-3">
+        <q-select
+          v-model="asnCode"
+          outlined
+          dense
+          emit-value
+          map-options
+          :options="asnOptions"
+          label="ASN"
+          @input="loadDocuments"
+        />
       </div>
-      <div class="col-12 col-lg-5">
-        <q-card flat bordered class="full-height">
-          <q-card-section class="q-pb-xs">
-            <div class="text-subtitle2">QC Inspection</div>
-          </q-card-section>
-          <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
-            <div class="col-12">
-              <q-file v-model="inspectionFile" outlined dense accept=".xlsx" label="QC Inspection Workbook (.xlsx)" />
-            </div>
-            <div class="col-12 col-md-5">
-              <q-select v-model="inspectionSourceType" outlined dense emit-value map-options :options="sourceTypes" label="Source" />
-            </div>
-            <div class="col-12 col-md-7 text-right">
-              <q-btn color="secondary" icon="fact_check" label="Import QC Results" :disable="!asnCode || !inspectionFile" @click="importInspection" />
-            </div>
-            <div class="col-12">
-              <q-input v-model="inspectionNote" outlined dense label="QC note" />
-            </div>
-          </q-card-section>
-        </q-card>
+      <div class="col text-caption text-grey-7">
+        Pack List and QC results are imported by the AI Agent / CLI.
       </div>
     </div>
 
@@ -135,9 +93,6 @@
       </template>
       <template v-slot:body-cell-action="props">
         <q-td :props="props">
-          <q-btn v-if="props.row.is_current && props.row.status !== 'CONFIRMED'" dense flat round color="positive" icon="check" @click="confirmDocument(props.row)">
-            <q-tooltip>Confirm Pack List</q-tooltip>
-          </q-btn>
           <q-btn dense flat round color="info" icon="visibility" @click="showDocument(props.row)">
             <q-tooltip>View Pack List</q-tooltip>
           </q-btn>
@@ -163,52 +118,6 @@
         <q-td :props="props"><q-chip dense :color="inspectionColor(props.value)">{{ props.value }}</q-chip></q-td>
       </template>
     </q-table>
-
-    <q-dialog v-model="previewOpen">
-      <q-card style="width: 1000px; max-width: 95vw">
-        <q-bar class="bg-light-blue-10 text-white">
-          <div>Pack List Preview</div>
-          <q-space />
-          <q-btn dense flat icon="close" v-close-popup />
-        </q-bar>
-        <q-card-section v-if="previewData">
-          <div class="text-caption q-mb-sm">The uploaded file is not stored. Only the parsed Pack List content is saved.</div>
-          <div class="row q-col-gutter-md text-caption q-mb-sm">
-            <div class="col-6 col-md-2">ASN: {{ previewData.asn_code }}</div>
-            <div class="col-6 col-md-2">Rows: {{ previewData.row_count }}</div>
-            <div class="col-6 col-md-2">Qty: {{ previewData.total_qty }}</div>
-            <div class="col-6 col-md-2">SN: {{ previewData.expected_serial_count }}</div>
-            <div class="col-6 col-md-2">Packages: {{ previewData.package_qty || 'Not provided' }}</div>
-            <div class="col-6 col-md-2">File: {{ previewData.status }}</div>
-          </div>
-          <q-banner v-if="previewData.duplicate_document" class="bg-green-1 q-mb-sm">
-            The same Pack List content is already current for this ASN. No second record will be created.
-          </q-banner>
-          <q-banner v-else-if="previewData.replace_required" class="bg-orange-1 q-mb-sm">
-            A different Pack List is already current for this ASN. Importing will explicitly replace its current content and keep the old rows as history.
-          </q-banner>
-          <q-banner v-if="previewData.late_reference_required" class="bg-blue-1 q-mb-sm">
-            Receiving has already started. This import will be stored as a late reference revision and will not overwrite the prior receiving history.
-          </q-banner>
-          <q-list bordered separator style="max-height: 420px; overflow-y: auto">
-            <q-item v-for="(line, index) in previewData.lines" :key="index">
-                <q-item-section>
-                  <q-item-label>{{ line.goods_code }} · {{ line.goods_qty }}</q-item-label>
-                  <q-item-label caption v-if="line.customer_goods_code">Customer SKU: {{ line.customer_goods_code }}</q-item-label>
-                  <q-item-label caption v-if="line.customer_ssku">Customer S-SKU: {{ line.customer_ssku }}</q-item-label>
-                  <q-item-label caption v-if="line.package_type">Package: {{ line.package_type }}</q-item-label>
-                  <q-item-label caption v-if="line.serial_number">SN: {{ line.serial_number }}</q-item-label>
-              </q-item-section>
-              <q-item-section side>{{ line.goods_desc }}</q-item-section>
-            </q-item>
-          </q-list>
-          <div class="text-right q-mt-md">
-            <q-btn flat label="Cancel" v-close-popup />
-            <q-btn color="primary" :label="previewData.duplicate_document ? 'Use Existing Pack List' : (previewData.replace_required ? 'Replace Current Pack List' : 'Import as Pending')" @click="importFile" />
-          </div>
-        </q-card-section>
-      </q-card>
-    </q-dialog>
 
     <q-dialog v-model="detailOpen">
       <q-card style="width: 900px; max-width: 95vw">
@@ -242,23 +151,33 @@
       </q-card>
     </q-dialog>
 
-    <asn-serial-panel
-      v-model="serialPanelOpen"
-      :asn-code="asnCode"
-      :goods-code="selectedReconciliation ? selectedReconciliation.goods_code : ''"
-    />
+    <q-dialog v-model="reconciliationOpen">
+      <q-card style="width: 680px; max-width: 95vw">
+        <q-bar class="bg-light-blue-10 text-white">
+          <div>Receiving Reconciliation</div>
+          <q-space />
+          <q-btn dense flat icon="close" v-close-popup />
+        </q-bar>
+        <q-card-section v-if="selectedReconciliation" class="row q-col-gutter-md text-caption">
+          <div class="col-6 col-md-4">SKU: <strong>{{ selectedReconciliation.goods_code }}</strong></div>
+          <div class="col-6 col-md-4">Customer SKU: <strong>{{ selectedReconciliation.customer_goods_code || '-' }}</strong></div>
+          <div class="col-6 col-md-4">Result: <q-chip dense :color="statusColor(selectedReconciliation.result)">{{ statusLabel(selectedReconciliation.result) }}</q-chip></div>
+          <div class="col-6 col-md-3">Pack List: <strong>{{ selectedReconciliation.pack_list_qty }}</strong></div>
+          <div class="col-6 col-md-3">Received: <strong>{{ selectedReconciliation.received_qty }}</strong></div>
+          <div class="col-6 col-md-3">Accepted: <strong>{{ selectedReconciliation.accepted_qty }}</strong></div>
+          <div class="col-6 col-md-3">Variance: <strong>{{ selectedReconciliation.variance }}</strong></div>
+          <div class="col-6 col-md-3">Open exceptions: <strong>{{ selectedReconciliation.open_exception_count }}</strong></div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
 <script>
-import { getauth, postauth, postauthfile } from 'boot/axios_request'
-import AsnSerialPanel from '../../components/AsnSerialPanel.vue'
+import { getauth } from 'boot/axios_request'
 
 export default {
   name: 'Pagepacklist',
-  components: {
-    AsnSerialPanel
-  },
   data () {
     return {
       asnCode: this.$route.query.asn_code || '',
@@ -266,26 +185,11 @@ export default {
       documents: [],
       inspectionBatches: [],
       summary: null,
-      selectedFile: null,
-      inspectionFile: null,
-      sourceType: 'UPLOAD',
-      inspectionSourceType: 'UPLOAD',
-      note: '',
-      inspectionNote: '',
-      packageQty: 0,
-      previewOpen: false,
-      previewData: null,
       loading: false,
       detailOpen: false,
       selectedDocument: null,
-      serialPanelOpen: false,
+      reconciliationOpen: false,
       selectedReconciliation: null,
-      sourceTypes: [
-        { label: 'Upload', value: 'UPLOAD' },
-        { label: 'Email', value: 'EMAIL' },
-        { label: 'Google Drive', value: 'GOOGLE_DRIVE' },
-        { label: 'Manual', value: 'MANUAL' }
-      ],
       columns: [
         { name: 'version', label: 'Revision', field: 'version', align: 'center' },
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
@@ -293,7 +197,7 @@ export default {
         { name: 'total_qty', label: 'Qty', field: 'total_qty', align: 'center' },
         { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
-        { name: 'action', label: 'Action', align: 'right' }
+        { name: 'action', label: 'View', align: 'right' }
       ],
       inspectionColumns: [
         { name: 'id', label: 'Round', field: 'id', align: 'center' },
@@ -350,70 +254,13 @@ export default {
         this.loading = false
       })
     },
-    packListForm () {
-      const form = new FormData()
-      form.append('file', this.selectedFile)
-      form.append('asn_code', this.asnCode)
-      form.append('source_type', this.sourceType)
-      form.append('note', this.note)
-      form.append('package_qty', this.packageQty || 0)
-      if (this.previewData && this.previewData.replace_required) form.append('replace', 'true')
-      if (this.previewData && this.previewData.late_reference_required) form.append('late_reference', 'true')
-      return form
-    },
-    previewFile () {
-      postauthfile('asn/serial/packlists/preview/', this.packListForm()).then(res => {
-        this.previewData = res.preview
-        this.previewOpen = true
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to preview Pack List', color: 'negative' })
-      })
-    },
-    importFile () {
-      postauthfile('asn/serial/packlists/import/', this.packListForm()).then(res => {
-        this.selectedFile = null
-        this.previewOpen = false
-        this.previewData = null
-        this.loadDocuments()
-        this.$q.notify({ message: res.duplicate ? 'Existing Pack List reused.' : (res.replaced ? 'Pack List replaced. Confirm it before receiving.' : 'Pack List imported. Confirm it before receiving.'), color: 'positive' })
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to import Pack List', color: 'negative' })
-      })
-    },
-    importInspection () {
-      const form = new FormData()
-      form.append('file', this.inspectionFile)
-      form.append('asn_code', this.asnCode)
-      form.append('mode', 'receive')
-      form.append('allow_all', 'true')
-      form.append('source_type', this.inspectionSourceType)
-      form.append('note', this.inspectionNote)
-      postauthfile('asn/serial/inspections/import/', form).then(res => {
-        this.inspectionFile = null
-        this.inspectionNote = ''
-        this.loadDocuments()
-        this.$q.notify({ message: res.duplicate ? 'This QC workbook was already imported.' : 'QC inspection imported.', color: res.summary && res.summary.qc_status === 'EXCEPTION' ? 'warning' : 'positive' })
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to import QC inspection', color: 'negative' })
-      })
-    },
-    confirmDocument (document) {
-      this.$q.dialog({ title: 'Confirm Pack List', message: 'Use this Pack List for receiving verification?', cancel: true, persistent: true }).onOk(() => {
-        postauth('asn/serial/packlists/confirm/', { id: document.id }).then(() => {
-          this.loadDocuments()
-          this.$q.notify({ message: 'Pack List confirmed', color: 'positive' })
-        }).catch(err => {
-          this.$q.notify({ message: err.detail || 'Unable to confirm Pack List', color: 'negative' })
-        })
-      })
-    },
     showDocument (document) {
       this.selectedDocument = document
       this.detailOpen = true
     },
     showReconciliation (row) {
       this.selectedReconciliation = row
-      this.serialPanelOpen = true
+      this.reconciliationOpen = true
     },
     statusLabel (status) {
       return {

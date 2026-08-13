@@ -1084,7 +1084,7 @@ def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, dup
     }
 
 
-def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', content_hash='', note='', package_qty=0, replace=False, late_reference=False):
+def _create_pack_list(openid, request, asn_code, rows, source_type='AI_AGENT', content_hash='', note='', package_qty=0, replace=False, late_reference=False):
     validation = _validate_pack_list_rows(openid, asn_code, rows)
     asn = validation['asn']
     normalized_rows = validation['rows']
@@ -1164,6 +1164,7 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', con
             import_type=PackListImportBatch.PACK_LIST,
             content_hash=str(content_hash)[:64],
             row_count=len(normalized_rows),
+            source_type=source_type,
             imported_by=_operator_name(request, openid),
             note=str(note or ''),
         )
@@ -1263,7 +1264,7 @@ class PackListCreateView(APIView):
                 request,
                 asn_code,
                 rows,
-                source_type=str(data.get('source_type') or 'MANUAL').upper(),
+                source_type=str(data.get('source_type') or 'AI_AGENT').upper(),
                 note=data.get('note'),
                 package_qty=data.get('package_qty'),
                 replace=str(data.get('replace', '')).lower() == 'true',
@@ -1340,7 +1341,7 @@ class PackListImportView(APIView):
                 request,
                 asn_code,
                 rows,
-                source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
+                source_type=str(request.data.get('source_type') or 'AI_AGENT').upper(),
                 content_hash=content_hash,
                 note=request.data.get('note'),
                 package_qty=request.data.get('package_qty'),
@@ -1442,7 +1443,7 @@ class SerialImportView(APIView):
             content_hash=content_hash,
             imported_by=_operator_name(request, openid),
             note=str(request.data.get('note') or ('QC inspection import' if mode == 'receive' else 'Expected serial import')),
-            source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
+            source_type=str(request.data.get('source_type') or 'AI_AGENT').upper(),
         )
         matched = 0
         created = 0

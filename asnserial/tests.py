@@ -92,6 +92,19 @@ class PackListWorkflowTests(TestCase):
             )
         self.assertEqual(error.exception.detail['code'], 'PACK_LIST_REPLACE_REQUIRED')
 
+    def test_pack_list_defaults_to_ai_agent_source_and_audits_batch_source(self):
+        document, batch, created = _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            self.rows(),
+            content_hash='f' * 64,
+        )
+
+        self.assertTrue(created)
+        self.assertEqual(document.source_type, 'AI_AGENT')
+        self.assertEqual(batch.source_type, 'AI_AGENT')
+
     def test_summary_exposes_pending_pack_list_reconciliation(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
         detail.goods_actual_qty = 2

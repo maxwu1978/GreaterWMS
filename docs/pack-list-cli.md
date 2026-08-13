@@ -1,10 +1,16 @@
-# Pack List CLI
+# Pack List CLI / AI Agent Ingestion
 
-The CLI uses the same GreaterWMS Pack List and QC endpoints as the web page. It
-does not write to the database directly. Each ASN has one current customer Pack
+The Pack List page is read-only. Pack List and QC results are written through
+the governed CLI/AI Agent ingestion path, which uses GreaterWMS APIs and does
+not write to the database directly. Each ASN has one current customer Pack
 List; older revisions remain as history. A Pack List received after physical
 receiving must be imported as a late reference and never overwrites the prior
 receiving or QC history.
+
+The CLI is the current execution adapter for the AI Agent. The Agent is
+responsible for reading the customer email or workbook, mapping customer SKUs
+to internal SKUs, and passing the normalized result to this CLI/API flow. The
+web page only displays the saved Pack List, reconciliation, and QC results.
 
 ## Authentication
 
@@ -25,7 +31,7 @@ session without writing credentials to disk.
 ## Workflow
 
 Preview the Excel file first. This reads the same headers and validates the
-same ASN/SKU/quantity/SN rules as the Pack List page, without saving a record.
+same ASN/SKU/quantity/SN rules as the ingestion API, without saving a record.
 
 ```bash
 node tools/greaterwms.mjs packlist import \
@@ -45,8 +51,7 @@ node tools/greaterwms.mjs packlist import \
   --json
 ```
 
-List documents or confirm a pending document through the same API used by the
-web page:
+List documents or confirm a pending document through the CLI/Agent path:
 
 ```bash
 node tools/greaterwms.mjs packlist list --asn-code IB260807-11 --json
@@ -119,6 +124,8 @@ This import records receipt; it does not confirm a pending customer Pack
 List. The system stores import batch metadata, not the uploaded workbook name
 or file contents. In `receive` mode, standard damage/QC result columns are
 converted to a `DAMAGED` exception and the row note is retained for QC review.
+The Pack List page displays each QC round but does not provide an import
+control.
 
 ### Exception review and putaway
 

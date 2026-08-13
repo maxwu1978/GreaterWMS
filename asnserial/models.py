@@ -34,7 +34,7 @@ class PackListImportBatch(models.Model):
     accepted_count = models.PositiveIntegerField(default=0)
     exception_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=IMPORTED)
-    source_type = models.CharField(max_length=32, blank=True, default='UPLOAD')
+    source_type = models.CharField(max_length=32, blank=True, default='AI_AGENT')
     imported_by = models.CharField(max_length=255, blank=True, default='')
     note = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -60,6 +60,7 @@ class PackListDocument(models.Model):
     )
 
     SOURCE_TYPES = (
+        ('AI_AGENT', 'AI Agent'),
         ('UPLOAD', 'Uploaded file'),
         ('EMAIL', 'Email attachment'),
         ('GOOGLE_DRIVE', 'Google Drive'),
@@ -69,7 +70,7 @@ class PackListDocument(models.Model):
     openid = models.CharField(max_length=255)
     asn_code = models.CharField(max_length=255)
     version = models.PositiveIntegerField(default=1)
-    source_type = models.CharField(max_length=32, choices=SOURCE_TYPES, default='UPLOAD')
+    source_type = models.CharField(max_length=32, choices=SOURCE_TYPES, default='AI_AGENT')
     content_hash = models.CharField(max_length=64, blank=True, default='')
     is_current = models.BooleanField(default=True)
     import_batch = models.ForeignKey(

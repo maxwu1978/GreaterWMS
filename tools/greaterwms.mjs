@@ -434,7 +434,7 @@ async function deleteResource (resource, action, options, json) {
 
 function addPackListFields (form, options) {
   form.append('asn_code', options['asn-code'])
-  form.append('source_type', options['source'] || 'UPLOAD')
+  form.append('source_type', options['source'] || 'AI_AGENT')
   form.append('note', options.note || '')
   form.append('package_qty', options['package-qty'] || '0')
   if (options.replace) form.append('replace', 'true')
@@ -469,7 +469,7 @@ function serialImportForm (file, options) {
   form.append('mode', options.mode || 'receive')
   form.append('inbound_po', options['inbound-po'] || '')
   form.append('shipout_ref', options['shipout-ref'] || '')
-  form.append('source_type', options.source || 'UPLOAD')
+  form.append('source_type', options.source || 'AI_AGENT')
   form.append('note', options.note || '')
   if (options['allow-all']) form.append('allow_all', 'true')
   return form
@@ -484,6 +484,7 @@ function help () {
   process.stdout.write('Exception review: serial exceptions --asn-code ASN; serial resolve --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Putaway: asn putaway --id ASN_DETAIL_ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('  serial exceptions --asn-code ASN [--json]\n  serial resolve --id ID --data {"action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  serial resolve-quantity --data {"asn_code":"ASN","goods_code":"SKU","action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  asn putaway --id ASN_DETAIL_ID --data {"asn_code":"ASN","goods_code":"SKU","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"} --dry-run|--confirm\n')
+  process.stdout.write('AI Agent/CLI ingestion: Pack List and QC imports are not available in the web page.\n')
   process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
