@@ -758,7 +758,7 @@ export default {
         { value: 'ja', label: '日本語' }
       ],
       title: this.$t('index.webtitle'),
-      admin: false,
+      admin: true,
       adminlogin: {
         name: '',
         password: ''
@@ -783,7 +783,7 @@ export default {
         password2: ''
       },
       needLogin: '',
-      activeTab: ''
+      activeTab: 'admin'
     }
   },
   methods: {
@@ -1065,10 +1065,13 @@ export default {
     var _this = this
     if (LocalStorage.has('openid')) {
       _this.openid = LocalStorage.getItem('openid')
-      _this.activeTab = LocalStorage.getItem('login_mode')
+      _this.activeTab = LocalStorage.getItem('login_mode') || 'admin'
+      _this.admin = _this.activeTab === 'admin'
     } else {
       _this.openid = ''
       LocalStorage.set('openid', '')
+      _this.activeTab = 'admin'
+      _this.admin = true
     }
     if (LocalStorage.has('login_name')) {
       _this.login_name = LocalStorage.getItem('login_name')
