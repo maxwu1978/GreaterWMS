@@ -353,7 +353,8 @@ def _summary(openid, asn_code):
         resolved_count = line_records.filter(exception_resolved=True).count()
         exception_count = line_records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing_count = line_records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
-        accepted_for_putaway = accepted_count + resolved_count
+        actual_received_qty = int(detail.goods_actual_qty or 0)
+        accepted_for_putaway = min(accepted_count + resolved_count, actual_received_qty)
         quantity_exception_qty = 0 if detail.exception_resolved else (
             int(detail.goods_shortage_qty or 0)
             + int(detail.goods_more_qty or 0)
@@ -362,9 +363,12 @@ def _summary(openid, asn_code):
         lines.append({
             'goods_code': detail.goods_code,
             'planned_qty': detail.goods_qty,
+            'received_qty': actual_received_qty,
             'expected_serial_count': expected_count,
             'received_serial_count': received_count,
+            'extra_scan_count': max(received_count - actual_received_qty, 0),
             'accepted_serial_count': accepted_count,
+            'accepted_for_putaway': accepted_for_putaway,
             'resolved_exception_count': resolved_count,
             'missing_serial_count': missing_count,
             'exception_count': exception_count,
@@ -382,6 +386,10 @@ def _summary(openid, asn_code):
     missing_total = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
     resolved_total = records.filter(exception_resolved=True).count()
     accepted_total = records.filter(status=AsnSerialRecord.ACCEPTED).count()
+    actual_received_qty = sum(int(detail.goods_actual_qty or 0) for detail in details)
+    scanned_record_count = records.filter(is_received=True).count()
+    accepted_for_putaway_total = min(accepted_total + resolved_total, actual_received_qty)
+    extra_scan_record_count = max(scanned_record_count - actual_received_qty, 0)
     quantity_exception_total = sum(
         0 if detail.exception_resolved else (
             int(detail.goods_shortage_qty or 0)
@@ -480,8 +488,12 @@ def _summary(openid, asn_code):
         'reconciliation_rows': reconciliation_rows,
         'receiving_summary': {
             'expected': records.filter(is_expected=True).count(),
-            'scanned': records.filter(is_received=True).count(),
+            'received_qty': actual_received_qty,
+            'scanned': scanned_record_count,
+            'scan_record_count': scanned_record_count,
             'accepted': accepted_total,
+            'accepted_for_putaway': accepted_for_putaway_total,
+            'extra_scan_records': extra_scan_record_count,
             'open_exceptions': open_reconciliation_exceptions,
             'resolved_exceptions': resolved_reconciliation_exceptions,
             'status': receiving_status,
@@ -490,10 +502,13 @@ def _summary(openid, asn_code):
             'pack_list_variance': pack_list_variance,
         },
         'total_expected_serials': records.filter(is_expected=True).count(),
-        'total_received_serials': records.filter(is_received=True).count(),
+        'total_received_qty': actual_received_qty,
+        'total_received_serials': scanned_record_count,
+        'total_scan_records': scanned_record_count,
         'total_accepted_serials': accepted_total,
         'total_resolved_exceptions': resolved_total,
-        'total_accepted_for_putaway': accepted_total + resolved_total,
+        'total_accepted_for_putaway': accepted_for_putaway_total,
+        'total_extra_scan_records': extra_scan_record_count,
         'total_exception_serials': exception_total,
         'total_missing_serials': missing_total,
         'total_quantity_exceptions': quantity_exception_total,
@@ -504,7 +519,7 @@ def _summary(openid, asn_code):
             quantity_exception_total == 0 and (
                 records.count() == 0
                 or (not strict_serial_check and exception_total == 0)
-                or (strict_serial_check and exception_total == 0 and missing_total == 0 and accepted_total + resolved_total >= records.filter(is_expected=True).count())
+                or (strict_serial_check and exception_total == 0 and missing_total == 0 and accepted_for_putaway_total >= records.filter(is_expected=True).count())
             ) and pack_list_variance == 0 and open_reconciliation_exceptions == 0
         ),
     }

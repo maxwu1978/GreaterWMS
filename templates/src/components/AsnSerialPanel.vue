@@ -21,8 +21,12 @@
 
         <div class="row q-col-gutter-sm">
           <div class="col-6 col-sm-3"><q-chip color="blue-1">Planned: {{ selectedLine.planned_qty || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="blue-1">Received Qty: {{ selectedLine.received_qty || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="grey-3">Expected SN: {{ selectedLine.expected_serial_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="grey-3">SN Records: {{ selectedLine.received_serial_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="green-2">Accepted: {{ selectedLine.accepted_serial_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="green-2">Putaway Qty: {{ selectedLine.accepted_for_putaway || 0 }}</q-chip></div>
+          <div v-if="selectedLine.extra_scan_count" class="col-6 col-sm-3"><q-chip color="orange-2">Extra scans: {{ selectedLine.extra_scan_count }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Exceptions: {{ selectedLine.exception_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="blue-1">Resolved: {{ selectedLine.resolved_exception_count || 0 }}</q-chip></div>
           <div v-if="quantityExceptionQty" class="col-12 col-sm-6">

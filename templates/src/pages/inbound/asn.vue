@@ -123,7 +123,7 @@
                 @click="openSerialPanel(props.row)"
               >
                 SN {{ props.row.serial_acceptance.accepted || 0 }}/{{ props.row.serial_acceptance.expected || 0 }}
-                {{ serialAcceptanceLabel(props.row.serial_acceptance) }}
+                {{ serialAcceptanceLabel(props.row.serial_acceptance) }} · Qty {{ props.row.actual_qty || 0 }}
               </div>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center asn-exception-cell">
@@ -1180,7 +1180,9 @@ export default {
     },
     serialAcceptanceTitle (summary) {
       return 'Serial acceptance: ' + (summary.accepted || 0) + '/' + (summary.expected || 0) +
-        ' accepted, ' + (summary.exceptions || 0) + ' exceptions, ' + (summary.received || 0) + ' received'
+        ' accepted, actual received qty ' + (summary.actual_received_qty || 0) +
+        ', ' + (summary.scan_record_count || summary.received || 0) + ' SN records, ' +
+        (summary.exceptions || 0) + ' open exceptions'
     },
     exceptionSignals (row) {
       const signals = []

@@ -75,7 +75,7 @@
         <div class="col-6 col-md-2 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
       </div>
       <div v-if="summary.receiving_summary" class="text-caption q-mt-xs">
-        Receiving: {{ summary.receiving_summary.scanned || 0 }} scanned / {{ summary.receiving_summary.accepted || 0 }} accepted · Open exceptions: {{ summary.receiving_summary.open_exceptions || 0 }} · Resolved: {{ summary.receiving_summary.resolved_exceptions || 0 }}
+        Received Qty: <strong>{{ summary.receiving_summary.received_qty || 0 }}</strong> · SN Records: <strong>{{ summary.receiving_summary.scan_record_count || 0 }}</strong> · Accepted SN: <strong>{{ summary.receiving_summary.accepted || 0 }}</strong> · Putaway Qty: <strong>{{ summary.receiving_summary.accepted_for_putaway || 0 }}</strong> · Open exceptions: {{ summary.receiving_summary.open_exceptions || 0 }} · Resolved: {{ summary.receiving_summary.resolved_exceptions || 0 }}<span v-if="summary.receiving_summary.extra_scan_records"> · Extra scan records: {{ summary.receiving_summary.extra_scan_records }}</span>
       </div>
       <div v-if="summary.pack_list_status === 'PENDING' || summary.pack_list_status === 'LATE_PENDING'" class="text-caption text-orange-10 q-mt-xs">Confirm the customer Pack List before using it as the receiving baseline.</div>
       <div v-if="summary.pack_list_timing === 'LATE_REFERENCE'" class="text-caption text-blue-10 q-mt-xs">This Pack List was received after physical receiving started and is stored as a late reference revision.</div>

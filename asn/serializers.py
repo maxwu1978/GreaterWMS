@@ -153,6 +153,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             openid=obj.openid,
             asn_code=obj.asn_code,
         )
+        actual_received_qty = int(self._get_detail_aggregate(obj)['actual_qty'] or 0)
         expected = records.filter(is_expected=True).count()
         received = records.filter(is_received=True).count()
         accepted = records.filter(status=AsnSerialRecord.ACCEPTED).count()
@@ -179,7 +180,8 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             exception_statuses.add(AsnSerialRecord.UNEXPECTED)
         exceptions = records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
-        accepted_for_putaway = accepted + resolved
+        accepted_for_putaway = min(accepted + resolved, actual_received_qty)
+        extra_scan_count = max(received - actual_received_qty, 0)
         current_pack_list = PackListDocument.objects.filter(
             openid=obj.openid,
             asn_code=obj.asn_code,
@@ -240,8 +242,12 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'status': status,
             'expected': expected,
             'received': received,
+            'scan_record_count': received,
+            'actual_received_qty': actual_received_qty,
+            'extra_scan_count': extra_scan_count,
             'accepted': accepted,
             'accepted_for_putaway': accepted_for_putaway,
+            'putaway_qty': accepted_for_putaway,
             'resolved': resolved,
             'exceptions': exceptions,
             'quantity_exceptions': quantity_exceptions,

@@ -128,6 +128,46 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(data['pack_list_status'], 'NOT_RECEIVED')
         self.assertEqual(data['serial_acceptance']['status'], 'NOT_IMPORTED')
 
+    def test_extra_scan_record_does_not_increase_received_or_putaway_qty(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        for serial_number in ('SN-702-001', 'SN-702-002'):
+            AsnSerialRecord.objects.create(
+                openid=self.openid,
+                asn_code=self.asn_code,
+                goods_code='702-S',
+                serial_number=serial_number,
+                status=AsnSerialRecord.ACCEPTED,
+                is_expected=True,
+                is_received=True,
+            )
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-702-EXTRA',
+            status=AsnSerialRecord.UNEXPECTED,
+            is_expected=False,
+            is_received=True,
+            exception_resolved=True,
+        )
+
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        acceptance = ASNListGetSerializer(asn, context={}).data['serial_acceptance']
+        summary = _summary(self.openid, self.asn_code)
+
+        self.assertEqual(acceptance['actual_received_qty'], 2)
+        self.assertEqual(acceptance['scan_record_count'], 3)
+        self.assertEqual(acceptance['extra_scan_count'], 1)
+        self.assertEqual(acceptance['accepted_for_putaway'], 2)
+        self.assertEqual(acceptance['putaway_qty'], 2)
+        self.assertEqual(summary['receiving_summary']['received_qty'], 2)
+        self.assertEqual(summary['receiving_summary']['scan_record_count'], 3)
+        self.assertEqual(summary['receiving_summary']['extra_scan_records'], 1)
+        self.assertEqual(summary['total_accepted_for_putaway'], 2)
+        self.assertEqual(summary['reconciliation_rows'][0]['received_qty'], 2)
+
     def test_summary_marks_reconciliation_exception_for_quantity_variance(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
         detail.goods_actual_qty = 1
