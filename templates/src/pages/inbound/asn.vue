@@ -53,7 +53,7 @@
             <q-td key="supplier" :props="props" class="asn-owner-cell">
               <span :title="props.row.supplier || ''">{{ compactOwnerName(props.row) }}</span>
             </q-td>
-            <q-td key="asn_status" :props="props">
+            <q-td key="asn_status" :props="props" class="asn-status-cell">
               <q-chip
                 dense
                 square
@@ -857,8 +857,25 @@
 .asn-list-table .asn-code-cell,
 .asn-list-table .asn-owner-cell,
 .asn-list-table .asn-staging-cell,
-.asn-list-table .asn-pack-list-cell {
+.asn-list-table .asn-pack-list-cell,
+.asn-list-table .asn-status-cell {
   white-space: nowrap;
+}
+
+.asn-list-table .asn-status-cell .q-chip {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  min-height: 24px;
+  justify-content: center;
+  white-space: normal;
+  text-align: center;
+}
+
+.asn-list-table .asn-status-cell .q-chip__content {
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.2;
 }
 
 .asn-list-table .asn-owner-cell > span,
@@ -897,9 +914,13 @@
 }
 
 .asn-list-table .asn-action-cell {
-  min-width: 76px;
+  min-width: 128px;
   padding-left: 4px;
   padding-right: 4px;
+}
+
+.asn-list-table .asn-action-cell > .row {
+  gap: 2px;
 }
 
 .asn-list-table .asn-action-cell .q-btn {
@@ -908,6 +929,8 @@
 }
 
 .asn-list-table .asn-next-action {
+  flex: 1 1 auto;
+  justify-content: flex-start;
   max-width: 100%;
   min-width: 0 !important;
   overflow: hidden;
@@ -1025,15 +1048,15 @@ export default {
       supplier_list1: [],
       supplier_detail: {},
       columns: [
-        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 11%;', headerStyle: 'width: 11%;' },
-        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 15%;', headerStyle: 'width: 15%;' },
-        { name: 'asn_status', label: this.$t('inbound.view_asn.operational_status'), field: 'operational_status', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
-        { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 11%;', headerStyle: 'width: 11%;' },
-        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 10%;', headerStyle: 'width: 10%;' },
+        { name: 'asn_status', label: this.$t('inbound.view_asn.operational_status'), field: 'operational_status', align: 'center', style: 'width: 16%;', headerStyle: 'width: 16%;' },
+        { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
+        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' },
         { name: 'staging_bin', label: 'Staging / Driver', field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
-        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 12%;', headerStyle: 'width: 12%;' },
-        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 13%;', headerStyle: 'width: 13%;' },
-        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' }
+        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
+        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 15%;', headerStyle: 'width: 15%;' }
       ],
       filter: '',
       statusFilter: '',
