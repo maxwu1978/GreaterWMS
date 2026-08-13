@@ -135,6 +135,37 @@ class PackListLine(models.Model):
         ]
 
 
+class AgentCommandPreview(models.Model):
+    """One-time server-side preview used by the GreaterWMS CLI."""
+
+    PENDING = 'PENDING'
+    EXECUTED = 'EXECUTED'
+
+    openid = models.CharField(max_length=255)
+    operation = models.CharField(max_length=64)
+    resource_id = models.CharField(max_length=255, blank=True, default='')
+    asn_code = models.CharField(max_length=255, blank=True, default='')
+    payload_hash = models.CharField(max_length=64)
+    confirmation_token_hash = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=255, blank=True, default='')
+    preview_payload = models.JSONField(default=dict)
+    result = models.JSONField(blank=True, null=True)
+    status = models.CharField(max_length=16, default=PENDING)
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'agentcommandpreview'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'operation', 'created_at']),
+            models.Index(fields=['openid', 'confirmation_token_hash']),
+            models.Index(fields=['openid', 'idempotency_key']),
+        ]
+
+
 class AsnSerialRecord(models.Model):
     EXPECTED = 'EXPECTED'
     ACCEPTED = 'ACCEPTED'
@@ -188,6 +219,9 @@ class AsnSerialRecord(models.Model):
     exception_resolution_location = models.CharField(max_length=255, blank=True, default='')
     exception_resolved_by = models.CharField(max_length=255, blank=True, default='')
     exception_resolved_at = models.DateTimeField(blank=True, null=True)
+    exception_moved = models.BooleanField(default=False)
+    exception_move_bin = models.CharField(max_length=255, blank=True, default='')
+    exception_moved_at = models.DateTimeField(blank=True, null=True)
     expected_by = models.CharField(max_length=255, blank=True, default='')
     received_by = models.CharField(max_length=255, blank=True, default='')
     expected_at = models.DateTimeField(blank=True, null=True)
@@ -215,6 +249,24 @@ class AsnSerialRecord(models.Model):
                 fields=['openid', 'asn_code', 'serial_number'],
                 name='asnserial_openid_asn_sn_uniq'
             )
+        ]
+
+
+class ExceptionQuantityMovement(models.Model):
+    openid = models.CharField(max_length=255)
+    asn_code = models.CharField(max_length=255)
+    goods_code = models.CharField(max_length=255)
+    quantity = models.PositiveIntegerField()
+    action = models.CharField(max_length=64)
+    bin_name = models.CharField(max_length=255)
+    operator = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'exceptionquantitymovement'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'asn_code', 'goods_code']),
         ]
 
 

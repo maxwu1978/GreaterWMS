@@ -1,14 +1,20 @@
+from io import BytesIO
 from types import SimpleNamespace
 
 from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import Workbook
 from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
 from asn.serializers import ASNListGetSerializer
+from binset.models import ListModel as Bin
+from stock.models import StockBinModel, StockListModel
+from staff.models import ListModel as Staff
 
 from .models import (
+    ACCEPT_FOR_PUTAWAY,
     HOLD_QUARANTINE,
     REPAIR_REWORK,
     REJECT_RETURN,
@@ -17,7 +23,16 @@ from .models import (
     PackListImportBatch,
     PackListLine,
 )
-from .views import _create_pack_list, _scan, _summary
+from .views import (
+    SerialExceptionResolveView,
+    SerialExceptionMoveView,
+    _create_pack_list,
+    _receiving_started,
+    _scan,
+    _serial_rows_from_workbook,
+    _summary,
+)
+from .agent import complete_preview, consume_preview, create_preview, request_payload
 
 
 class PackListWorkflowTests(TestCase):
@@ -48,6 +63,22 @@ class PackListWorkflowTests(TestCase):
         return SimpleNamespace(
             auth=SimpleNamespace(openid=self.openid),
             META={},
+        )
+
+    def agent_request(self, data=None, operator_id=None):
+        if operator_id is None:
+            operator_id = Staff.objects.create(
+                openid=self.openid,
+                staff_name='Inbound Operator',
+                staff_type='Inbound',
+            ).id
+        return SimpleNamespace(
+            auth=SimpleNamespace(openid=self.openid),
+            META={
+                'HTTP_X_AGENT_CLIENT': 'greaterwms-cli',
+                'HTTP_OPERATOR': str(operator_id),
+            },
+            data=data or {},
         )
 
     def rows(self):
@@ -101,6 +132,91 @@ class PackListWorkflowTests(TestCase):
             )
         self.assertEqual(error.exception.detail['code'], 'PACK_LIST_REPLACE_REQUIRED')
 
+    def test_receiving_status_blocks_pack_list_replacement_before_quantity_is_entered(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        asn.asn_status = 3
+        asn.save(update_fields=['asn_status'])
+
+        self.assertTrue(_receiving_started(self.openid, self.asn_code))
+
+    def test_missing_expected_serial_cannot_be_accepted_for_putaway(self):
+        record = AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-MISSING',
+            is_expected=True,
+            is_received=False,
+            status=AsnSerialRecord.EXPECTED,
+        )
+        request = self.request()
+        request.data = {
+            'id': record.id,
+            'action': ACCEPT_FOR_PUTAWAY,
+            'note': 'Incorrectly attempted to bypass missing SN',
+        }
+
+        with self.assertRaises(APIException) as error:
+            SerialExceptionResolveView().post(request)
+
+        self.assertEqual(error.exception.detail['code'], 'MISSING_SN_NOT_PUTAWAY_ELIGIBLE')
+
+    def test_resolved_received_serial_exception_moves_stock_and_releases_staging(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        asn.asn_status = 4
+        asn.save(update_fields=['asn_status'])
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.asn_status = 4
+        detail.goods_actual_qty = 1
+        detail.sorted_qty = 0
+        detail.save(update_fields=['asn_status', 'goods_actual_qty', 'sorted_qty'])
+        StockListModel.objects.create(
+            openid=self.openid,
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            sorted_stock=1,
+        )
+        Bin.objects.create(
+            openid=self.openid,
+            bin_name='QC-HOLD-01',
+            bin_size='STD',
+            bin_property='Holding',
+            location_role='STORAGE',
+            staging_flow='NONE',
+            creater='tester',
+            bar_code='QC-HOLD-01',
+        )
+        record = AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-HOLD-001',
+            is_expected=True,
+            is_received=True,
+            status=AsnSerialRecord.DAMAGED,
+            exception_resolved=True,
+            exception_resolution_action=HOLD_QUARANTINE,
+            exception_resolution_location='QC-HOLD-01',
+        )
+        request = self.request()
+        request.data = {'id': record.id, 'bin_name': 'QC-HOLD-01'}
+
+        response = SerialExceptionMoveView().post(request)
+
+        self.assertEqual(response.data['destination_bin'], 'QC-HOLD-01')
+        record.refresh_from_db()
+        detail.refresh_from_db()
+        asn.refresh_from_db()
+        stock = StockListModel.objects.get(openid=self.openid, goods_code='702-S')
+        self.assertTrue(record.exception_moved)
+        self.assertEqual(detail.sorted_qty, 1)
+        self.assertEqual(detail.asn_status, 5)
+        self.assertEqual(asn.asn_status, 5)
+        self.assertEqual(stock.sorted_stock, 0)
+        self.assertEqual(stock.onhand_stock, 1)
+        self.assertEqual(StockBinModel.objects.get(goods_code='702-S').goods_qty, 1)
+
     def test_pack_list_defaults_to_ai_agent_source_and_audits_batch_source(self):
         document, batch, created = _create_pack_list(
             self.openid,
@@ -113,6 +229,37 @@ class PackListWorkflowTests(TestCase):
         self.assertTrue(created)
         self.assertEqual(document.source_type, 'AI_AGENT')
         self.assertEqual(batch.source_type, 'AI_AGENT')
+
+    def test_agent_preview_token_is_payload_bound_and_idempotent(self):
+        request = self.agent_request()
+        preview = create_preview(
+            request,
+            'packlist.confirm',
+            {'id': 123},
+            resource_id='123',
+        )
+        execute_request = self.agent_request({
+            'id': 123,
+            'confirmation_token': preview['confirmation_token'],
+            'idempotency_key': 'packlist-confirm-123-1',
+        }, operator_id=request.META['HTTP_OPERATOR'])
+        command, replay = consume_preview(
+            execute_request,
+            'packlist.confirm',
+            request_payload(execute_request),
+            resource_id='123',
+        )
+        self.assertIsNone(replay)
+        complete_preview(command, {'detail': 'success'})
+
+        replay_command, replay = consume_preview(
+            execute_request,
+            'packlist.confirm',
+            request_payload(execute_request),
+            resource_id='123',
+        )
+        self.assertEqual(replay, {'detail': 'success'})
+        self.assertEqual(replay_command.id, command.id)
 
     def test_summary_exposes_pending_pack_list_reconciliation(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
@@ -141,6 +288,58 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(row['open_exception_count'], 0)
         self.assertEqual(row['result'], 'REVIEW')
         self.assertEqual(summary['receiving_summary']['status'], 'PASSED')
+
+    def test_acceptance_workbook_reads_matching_rows_across_sheets_and_sections(self):
+        workbook = Workbook()
+        first = workbook.active
+        first.title = 'Scan'
+        first.append(['Inbound PO#', 'SKU#', 'SN#'])
+        first.append(['PO-001', '702-S', 'SN-001'])
+        first.append(['PO-002', '702-S', 'SN-002'])
+        first.append(['SKU#', 'SN#', 'Result'])
+        first.append(['702-S', 'SN-003', 'PASS'])
+        second = workbook.create_sheet('Verification')
+        second.append(['SKU', 'Serial Number', 'Status'])
+        second.append(['702-S', 'SN-004', 'PASS'])
+        payload = BytesIO()
+        workbook.save(payload)
+
+        rows = _serial_rows_from_workbook(payload.getvalue(), inbound_po='PO-001')
+
+        self.assertEqual([(row['sheet'], row['row_number']) for row in rows], [('Scan', 2)])
+
+    def test_acceptance_workbook_returns_no_rows_for_nonmatching_filter(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(['Inbound PO#', 'SKU#', 'SN#'])
+        sheet.append(['PO-001', '702-S', 'SN-001'])
+        payload = BytesIO()
+        workbook.save(payload)
+
+        rows = _serial_rows_from_workbook(payload.getvalue(), inbound_po='PO-MISSING')
+
+        self.assertEqual(rows, [])
+
+    def test_imported_qc_batch_cannot_report_passed_or_ready(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        PackListImportBatch.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            status=PackListImportBatch.IMPORTED,
+            row_count=2,
+            matched_count=2,
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+
+        self.assertEqual(summary['qc_status'], 'PARTIAL')
+        self.assertEqual(summary['receiving_summary']['status'], 'REVIEW')
+        self.assertTrue(summary['qc_import_incomplete'])
+        self.assertFalse(summary['qc_complete'])
+        self.assertFalse(summary['ready_for_putaway'])
 
     def test_asn_serializer_handles_missing_pack_list(self):
         asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
@@ -392,6 +591,7 @@ class PackListWorkflowTests(TestCase):
             openid=self.openid,
             asn_code=self.asn_code,
             import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            status=PackListImportBatch.PASSED,
             source_type='UPLOAD',
         )
         record, _ = _scan(
@@ -409,6 +609,7 @@ class PackListWorkflowTests(TestCase):
             openid=self.openid,
             asn_code=self.asn_code,
             import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            status=PackListImportBatch.PASSED,
             source_type='UPLOAD',
         )
         record, _ = _scan(

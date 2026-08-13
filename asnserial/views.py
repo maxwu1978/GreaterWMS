@@ -11,6 +11,9 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
+from binset.models import ListModel as Bin
+from stock.models import StockBinModel, StockListModel
+from utils.md5 import Md5
 from staff.models import ListModel as Staff
 from supplier.shortname import generated_supplier_short_name
 
@@ -22,11 +25,21 @@ from .models import (
     REPAIR_REWORK,
     REJECT_RETURN,
     AsnSerialRecord,
+    ExceptionQuantityMovement,
     PackListDocument,
     PackListImportBatch,
     PackListLine,
     PUTAWAY_APPROVED_RESOLUTIONS,
     resolution_allows_putaway,
+)
+from .agent import (
+    SUPPORTED_OPERATIONS,
+    complete_preview,
+    consume_preview,
+    create_preview,
+    is_agent_request,
+    request_payload,
+    require_agent_role,
 )
 
 
@@ -83,6 +96,116 @@ def _openid(request):
     if not value:
         raise APIException({'detail': 'Authentication is required'})
     return str(value)
+
+
+class AgentCommandPreviewView(APIView):
+    """Create a short-lived, tenant-scoped preview token for CLI mutations."""
+
+    def post(self, request):
+        require_agent_role(request)
+        operation = _clean(request.data.get('operation')).lower()
+        if operation not in SUPPORTED_OPERATIONS:
+            raise APIException({'detail': 'Unsupported agent operation', 'operation': operation})
+        payload = request.data.get('payload') or {}
+        if isinstance(payload, str):
+            try:
+                import json
+                payload = json.loads(payload)
+            except Exception:
+                raise APIException({'detail': 'payload must be a JSON object'})
+        if not isinstance(payload, dict):
+            raise APIException({'detail': 'payload must be a JSON object'})
+        resource_id = _text(request.data.get('resource_id'))
+        asn_code = _clean(request.data.get('asn_code'))
+        if operation in {'asn.eta', 'asn.arrival', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.receive'} and not resource_id:
+            raise APIException({'detail': 'resource_id is required for %s' % operation})
+        if operation in {'asn.putaway', 'packlist.confirm', 'serial.resolve', 'serial.exception_move'} and not resource_id:
+            raise APIException({'detail': 'resource_id is required for %s' % operation})
+        if operation in {'asn.receive', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.putaway_bulk', 'serial.resolve_quantity', 'serial.exception_move', 'serial.exception_move_quantity', 'packlist.import', 'serial.import', 'inspection.import'} and not asn_code:
+            raise APIException({'detail': 'asn_code is required for %s' % operation})
+        if operation in {'asn.eta', 'asn.arrival', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.receive'}:
+            asn = AsnListModel.objects.filter(
+                openid=request.auth.openid,
+                id=resource_id,
+                is_delete=False,
+            ).first()
+            if asn is None:
+                raise APIException({'detail': 'ASN does not exist'})
+            if asn_code and asn.asn_code != asn_code:
+                raise APIException({'detail': 'ASN code does not match the selected ASN'})
+            expected_status = {
+                'asn.arrival': 1,
+                'asn.reserve_staging': 1,
+                'asn.unload_start': 1,
+                'asn.unload_finish': 2,
+                'asn.receive': 3,
+            }.get(operation)
+            if expected_status is not None and int(asn.asn_status or 0) != expected_status:
+                raise APIException({'detail': '%s requires ASN status %s' % (operation, expected_status)})
+            if operation == 'asn.unload_start' and not asn.actual_arrival_at:
+                raise APIException({'detail': 'Mark the ASN as arrived before starting unloading'})
+        if operation == 'asn.eta' and not AsnListModel.objects.filter(
+            openid=request.auth.openid, id=resource_id, is_delete=False,
+        ).exists():
+            raise APIException({'detail': 'ASN does not exist'})
+        if operation == 'asn.putaway':
+            detail = AsnDetailModel.objects.filter(
+                openid=request.auth.openid, id=resource_id, asn_status=4, is_delete=False,
+            ).first()
+            if detail is None:
+                raise APIException({'detail': 'ASN detail is not ready for putaway'})
+            if asn_code and detail.asn_code != asn_code:
+                raise APIException({'detail': 'ASN code does not match the selected ASN detail'})
+        if operation == 'asn.putaway_bulk':
+            asn = AsnListModel.objects.filter(
+                openid=request.auth.openid,
+                asn_code=asn_code,
+                asn_status=4,
+                is_delete=False,
+            ).first()
+            if asn is None:
+                raise APIException({'detail': 'ASN is not ready for putaway'})
+        if operation == 'packlist.confirm':
+            if not PackListDocument.objects.filter(
+                openid=request.auth.openid, id=resource_id, is_current=True,
+            ).exists():
+                raise APIException({'detail': 'Pack List does not exist'})
+        if operation == 'serial.resolve':
+            if not AsnSerialRecord.objects.filter(openid=request.auth.openid, id=resource_id).exists():
+                raise APIException({'detail': 'Serial record does not exist'})
+        if operation == 'serial.exception_move':
+            if not AsnSerialRecord.objects.filter(
+                openid=request.auth.openid,
+                id=resource_id,
+                asn_code=asn_code,
+                exception_resolved=True,
+                exception_moved=False,
+            ).exists():
+                raise APIException({'detail': 'Serial exception is not ready for physical movement'})
+        if operation == 'serial.resolve_quantity':
+            if not AsnDetailModel.objects.filter(
+                openid=request.auth.openid,
+                asn_code=asn_code,
+                goods_code=_clean(payload.get('goods_code')),
+                is_delete=False,
+            ).exists():
+                raise APIException({'detail': 'ASN detail does not exist'})
+        if operation == 'serial.exception_move_quantity':
+            if not AsnDetailModel.objects.filter(
+                openid=request.auth.openid,
+                asn_code=asn_code,
+                goods_code=_clean(payload.get('goods_code')),
+                exception_resolved=True,
+                is_delete=False,
+            ).exists():
+                raise APIException({'detail': 'Quantity exception is not ready for physical movement'})
+        return Response(create_preview(
+            request,
+            operation,
+            payload,
+            resource_id=resource_id,
+            asn_code=asn_code,
+        ))
 
 
 def _operator_name(request, openid):
@@ -214,6 +337,13 @@ def _inspection_batch_json(batch):
 
 
 def _receiving_started(openid, asn_code):
+    if AsnListModel.objects.filter(
+        openid=openid,
+        asn_code=asn_code,
+        is_delete=False,
+        asn_status__gte=3,
+    ).exists():
+        return True
     if AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code, is_received=True).exists():
         return True
     return AsnDetailModel.objects.filter(
@@ -288,6 +418,9 @@ def _record_json(record):
         'resolution_location': record.exception_resolution_location,
         'exception_resolved_by': record.exception_resolved_by,
         'exception_resolved_at': record.exception_resolved_at.isoformat() if record.exception_resolved_at else None,
+        'exception_moved': record.exception_moved,
+        'exception_move_bin': record.exception_move_bin,
+        'exception_moved_at': record.exception_moved_at.isoformat() if record.exception_moved_at else None,
         'expected_by': record.expected_by,
         'received_by': record.received_by,
         'expected_at': record.expected_at.isoformat() if record.expected_at else None,
@@ -550,13 +683,26 @@ def _summary(openid, asn_code):
         import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
     )[:10])
     latest_inspection = inspection_batches[0] if inspection_batches else None
+    qc_import_incomplete = bool(
+        latest_inspection and latest_inspection.status in (
+            PackListImportBatch.IMPORTED,
+            PackListImportBatch.PARTIAL,
+        )
+    )
+    if qc_import_incomplete:
+        qc_complete = False
+        if not open_reconciliation_exceptions and not pack_list_variance:
+            receiving_status = 'REVIEW'
     if open_reconciliation_exceptions or pack_list_variance or (inspection_batches and missing_total):
         qc_status = 'EXCEPTION'
         reconciliation_status = 'EXCEPTION'
         receiving_status = 'EXCEPTION'
     elif not inspection_batches:
         qc_status = 'NOT_STARTED'
-    elif latest_inspection.status == PackListImportBatch.PARTIAL:
+    elif latest_inspection.status in (
+        PackListImportBatch.IMPORTED,
+        PackListImportBatch.PARTIAL,
+    ):
         qc_status = 'PARTIAL'
     else:
         qc_status = 'PASSED'
@@ -592,6 +738,7 @@ def _summary(openid, asn_code):
         'latest_inspection_batch': _inspection_batch_json(latest_inspection) if latest_inspection else None,
         'qc_status': qc_status,
         'qc_complete': qc_complete,
+        'qc_import_incomplete': qc_import_incomplete,
         'verification_mode': verification_mode,
         'verification_note': (
             'Receiving scans are not checked against a Pack List yet.'
@@ -901,6 +1048,7 @@ class SerialExceptionsView(APIView):
 class SerialExceptionResolveView(APIView):
     """Resolve or reopen one serial exception with an audit note."""
 
+    @transaction.atomic
     def post(self, request):
         openid = _openid(request)
         data = request.data
@@ -922,14 +1070,30 @@ class SerialExceptionResolveView(APIView):
             raise APIException({'detail': 'This serial record has no open exception'})
         if action == 'WAIVE_MISSING' and not is_missing:
             raise APIException({'detail': 'WAIVE_MISSING is only valid for an expected SN that was not received'})
+        if is_missing and action not in {'WAIVE_MISSING', 'REOPEN'}:
+            raise APIException({
+                'detail': 'A missing expected SN cannot be accepted or moved to putaway. Use WAIVE_MISSING only after the shortage is approved.',
+                'code': 'MISSING_SN_NOT_PUTAWAY_ELIGIBLE',
+            })
         if action != 'REOPEN' and not _resolution_note(data):
             raise APIException({'detail': 'A resolution note is required'})
         resolution_location = _clean(data.get('resolution_location'))
         if action in NON_PUTAWAY_RESOLUTIONS and not resolution_location:
             raise APIException({'detail': 'A hold or return location is required'})
+        command, replay = consume_preview(
+            request,
+            'serial.resolve',
+            request_payload(request),
+            resource_id=str(record_id),
+            asn_code=record.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         if action == 'REOPEN':
             if not record.exception_resolved:
                 raise APIException({'detail': 'This serial exception is already open'})
+            if record.exception_moved:
+                raise APIException({'detail': 'A physically moved exception cannot be reopened; create a new reinspection record'})
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
@@ -952,16 +1116,208 @@ class SerialExceptionResolveView(APIView):
             'exception_resolved_at',
             'update_time',
         ])
-        return Response({
+        result = {
             'detail': 'Serial exception updated',
             'record': _record_json(record),
             'summary': _summary(openid, record.asn_code),
-        })
+        }
+        complete_preview(command, result)
+        return Response(result)
+
+
+EXCEPTION_BIN_PROPERTIES = {
+    HOLD_QUARANTINE: {'holding', 'inspection'},
+    REPAIR_REWORK: {'holding', 'inspection'},
+    REJECT_RETURN: {'holding', 'damage'},
+}
+
+
+def _exception_bin(openid, action, requested_bin):
+    bin_name = _clean(requested_bin)
+    if not bin_name:
+        raise APIException({'detail': 'A destination exception bin is required'})
+    bin_detail = Bin.objects.filter(openid=openid, bin_name=bin_name, is_delete=False).first()
+    if bin_detail is None:
+        raise APIException({'detail': 'Exception destination bin does not exist'})
+    if str(bin_detail.location_role or '').upper() == 'STAGING':
+        raise APIException({'detail': 'Staging bins cannot receive exception inventory'})
+    allowed = EXCEPTION_BIN_PROPERTIES.get(action, set())
+    if str(bin_detail.bin_property or '').strip().lower() not in allowed:
+        raise APIException({'detail': 'Bin property %s is not valid for %s' % (bin_detail.bin_property, action)})
+    return bin_detail
+
+
+def _move_exception_stock(openid, detail, quantity, bin_detail):
+    stock = StockListModel.objects.select_for_update().filter(
+        openid=openid,
+        goods_code=detail.goods_code,
+    ).first()
+    if stock is None:
+        raise APIException({'detail': 'Stock record does not exist for %s' % detail.goods_code})
+    if int(stock.sorted_stock or 0) < quantity:
+        raise APIException({'detail': 'Not enough receiving-stage stock remains to move this exception'})
+    remaining = int(detail.goods_actual_qty or 0) - int(detail.sorted_qty or 0)
+    if remaining < quantity:
+        raise APIException({'detail': 'Exception move quantity exceeds the remaining received quantity'})
+    stock.sorted_stock = int(stock.sorted_stock or 0) - quantity
+    stock.onhand_stock = int(stock.onhand_stock or 0) + quantity
+    property_name = str(bin_detail.bin_property or '').strip().lower()
+    if property_name == 'damage':
+        stock.damage_stock = int(stock.damage_stock or 0) + quantity
+    elif property_name == 'inspection':
+        stock.inspect_stock = int(stock.inspect_stock or 0) + quantity
+    else:
+        stock.hold_stock = int(stock.hold_stock or 0) + quantity
+    stock.save(update_fields=[
+        'sorted_stock', 'onhand_stock', 'damage_stock', 'inspect_stock', 'hold_stock', 'update_time',
+    ])
+    StockBinModel.objects.create(
+        openid=openid,
+        bin_name=bin_detail.bin_name,
+        goods_code=detail.goods_code,
+        goods_desc=detail.goods_desc,
+        goods_qty=quantity,
+        bin_size=bin_detail.bin_size,
+        bin_property=bin_detail.bin_property,
+        t_code=Md5.md5('%s:%s' % (detail.goods_code, bin_detail.bin_name)),
+        create_time=detail.create_time,
+    )
+    detail.sorted_qty = int(detail.sorted_qty or 0) + quantity
+    if int(detail.sorted_qty or 0) >= int(detail.goods_actual_qty or 0):
+        detail.asn_status = 5
+    detail.save(update_fields=['sorted_qty', 'asn_status', 'update_time'])
+    asn = AsnListModel.objects.select_for_update().filter(
+        openid=openid,
+        asn_code=detail.asn_code,
+        is_delete=False,
+    ).first()
+    if asn and not AsnDetailModel.objects.filter(
+        openid=openid,
+        asn_code=detail.asn_code,
+        asn_status=4,
+        is_delete=False,
+    ).exists():
+        asn.asn_status = 5
+        asn.save(update_fields=['asn_status', 'update_time'])
+        from staging.models import StagingAssignment
+        from staging.services import release_staging_slot
+        release_staging_slot(openid, StagingAssignment.INBOUND, detail.asn_code)
+
+
+class SerialExceptionMoveView(APIView):
+    """Move one resolved serial exception out of receiving staging."""
+
+    @transaction.atomic
+    def post(self, request):
+        openid = _openid(request)
+        try:
+            record_id = int(request.data.get('id'))
+        except (TypeError, ValueError):
+            raise APIException({'detail': 'Serial record id is required'})
+        record = AsnSerialRecord.objects.select_for_update().filter(id=record_id, openid=openid).first()
+        if record is None:
+            raise APIException({'detail': 'Serial record does not exist'})
+        if not record.exception_resolved or record.exception_resolution_action not in NON_PUTAWAY_RESOLUTIONS:
+            raise APIException({'detail': 'Resolve the serial exception as HOLD, REPAIR, or REJECT before moving it'})
+        if record.exception_moved:
+            raise APIException({'detail': 'This serial exception has already been moved'})
+        if not record.is_received:
+            raise APIException({'detail': 'A missing serial has no physical unit to move'})
+        bin_detail = _exception_bin(openid, record.exception_resolution_action, request.data.get('bin_name'))
+        command, replay = consume_preview(
+            request,
+            'serial.exception_move',
+            request_payload(request),
+            resource_id=str(record_id),
+            asn_code=record.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
+        detail = AsnDetailModel.objects.select_for_update().filter(
+            openid=openid,
+            asn_code=record.asn_code,
+            goods_code=record.goods_code,
+            is_delete=False,
+        ).first()
+        if detail is None:
+            raise APIException({'detail': 'ASN detail does not exist for this serial'})
+        _move_exception_stock(openid, detail, 1, bin_detail)
+        record.exception_moved = True
+        record.exception_move_bin = bin_detail.bin_name
+        record.exception_moved_at = timezone.now()
+        record.save(update_fields=['exception_moved', 'exception_move_bin', 'exception_moved_at', 'update_time'])
+        result = {
+            'detail': 'Serial exception moved out of staging',
+            'record': _record_json(record),
+            'destination_bin': bin_detail.bin_name,
+            'summary': _summary(openid, record.asn_code),
+        }
+        complete_preview(command, result)
+        return Response(result)
+
+
+class QuantityExceptionMoveView(APIView):
+    """Move a physical quantity exception to an explicit exception bin."""
+
+    @transaction.atomic
+    def post(self, request):
+        openid = _openid(request)
+        asn_code = _clean(request.data.get('asn_code'))
+        goods_code = _clean(request.data.get('goods_code'))
+        action = str(request.data.get('action') or '').strip().upper()
+        try:
+            quantity = int(request.data.get('qty'))
+        except (TypeError, ValueError):
+            raise APIException({'detail': 'qty must be a positive integer'})
+        if action not in NON_PUTAWAY_RESOLUTIONS:
+            raise APIException({'detail': 'Only HOLD_QUARANTINE, REPAIR_REWORK, or REJECT_RETURN can be physically moved'})
+        if quantity <= 0 or not asn_code or not goods_code:
+            raise APIException({'detail': 'ASN code, goods code, and positive qty are required'})
+        detail = AsnDetailModel.objects.select_for_update().filter(
+            openid=openid,
+            asn_code=asn_code,
+            goods_code=goods_code,
+            is_delete=False,
+        ).first()
+        if detail is None or not detail.exception_resolved or detail.exception_resolution_action != action:
+            raise APIException({'detail': 'Resolve the quantity exception with the same action before moving it'})
+        bin_detail = _exception_bin(openid, action, request.data.get('bin_name'))
+        command, replay = consume_preview(
+            request,
+            'serial.exception_move_quantity',
+            request_payload(request),
+            resource_id='%s:%s' % (asn_code, goods_code),
+            asn_code=asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
+        _move_exception_stock(openid, detail, quantity, bin_detail)
+        movement = ExceptionQuantityMovement.objects.create(
+            openid=openid,
+            asn_code=asn_code,
+            goods_code=goods_code,
+            quantity=quantity,
+            action=action,
+            bin_name=bin_detail.bin_name,
+            operator=_operator_name(request, openid),
+        )
+        result = {
+            'detail': 'Quantity exception moved out of staging',
+            'movement_id': movement.id,
+            'asn_code': asn_code,
+            'goods_code': goods_code,
+            'qty': quantity,
+            'destination_bin': bin_detail.bin_name,
+            'summary': _summary(openid, asn_code),
+        }
+        complete_preview(command, result)
+        return Response(result)
 
 
 class QuantityExceptionResolveView(APIView):
     """Resolve or reopen the quantity variance recorded during QC."""
 
+    @transaction.atomic
     def post(self, request):
         openid = _openid(request)
         data = request.data
@@ -997,6 +1353,15 @@ class QuantityExceptionResolveView(APIView):
         resolution_location = _clean(data.get('resolution_location'))
         if action in NON_PUTAWAY_RESOLUTIONS and not resolution_location:
             raise APIException({'detail': 'A hold or return location is required'})
+        command, replay = consume_preview(
+            request,
+            'serial.resolve_quantity',
+            request_payload(request),
+            resource_id='%s:%s' % (asn_code, goods_code),
+            asn_code=asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         if action == 'REOPEN':
             if not detail.exception_resolved:
                 raise APIException({'detail': 'This quantity exception is already open'})
@@ -1022,7 +1387,7 @@ class QuantityExceptionResolveView(APIView):
             'exception_resolved_at',
             'update_time',
         ])
-        return Response({
+        result = {
             'detail': 'Quantity exception updated',
             'asn_detail_id': detail.id,
             'asn_code': detail.asn_code,
@@ -1032,7 +1397,9 @@ class QuantityExceptionResolveView(APIView):
             'exception_resolution_note': detail.exception_resolution_note,
             'resolution_location': detail.exception_resolution_location,
             'summary': _summary(openid, detail.asn_code),
-        })
+        }
+        complete_preview(command, result)
+        return Response(result)
 
 
 class SerialSummaryView(APIView):
@@ -1100,6 +1467,60 @@ def _first_column(index, names):
         if _header_key(name) in index:
             return index[_header_key(name)]
     return None
+
+
+def _serial_rows_from_workbook(file_bytes, inbound_po='', shipout_ref=''):
+    """Read every SKU/SN table section from the customer acceptance workbook."""
+    try:
+        workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    except Exception as exc:
+        raise APIException({'detail': 'Unable to read Excel file: ' + str(exc)})
+
+    rows = []
+    try:
+        for sheet in workbook.worksheets:
+            section_index = None
+            for row_number, values in enumerate(sheet.iter_rows(values_only=True), start=1):
+                headers = {
+                    _header_key(value): position
+                    for position, value in enumerate(values)
+                    if _header_key(value)
+                }
+                if (
+                    _first_column(headers, ('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item')) is not None
+                    and _first_column(headers, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No')) is not None
+                ):
+                    section_index = headers
+                    continue
+                if section_index is None or not any(value not in (None, '') for value in values):
+                    continue
+
+                def value(*names):
+                    pos = _first_column(section_index, names)
+                    return values[pos] if pos is not None and pos < len(values) else ''
+
+                row_po = _clean(value('Inbound PO#', 'Inbound PO', 'PO#'))
+                row_shipout = _clean(value('SHIPOUT#', 'Shipout Ref', 'Shipout'))
+                if inbound_po and row_po != inbound_po:
+                    continue
+                if shipout_ref and row_shipout != shipout_ref:
+                    continue
+                if _first_column(section_index, ('Inbound PO#', 'Inbound PO', 'PO#')) is not None and not row_po and not shipout_ref:
+                    continue
+                goods_code = _clean(value('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item'))
+                serial_number = _clean(value('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
+                if not goods_code or not serial_number:
+                    continue
+                rows.append({
+                    'sheet': sheet.title,
+                    'row_number': row_number,
+                    'values': values,
+                    'index': section_index,
+                })
+    finally:
+        workbook.close()
+
+    return rows
 
 
 def _pack_list_rows_from_workbook(upload):
@@ -1449,7 +1870,7 @@ class PackListPreviewView(APIView):
         ).first()
         duplicate_document = current_document if current_document and current_document.content_hash == content_hash else None
         receiving_started = _receiving_started(openid, asn_code)
-        return Response({
+        result = {
             'detail': 'preview',
             'preview': _pack_list_preview_json(
                 asn_code,
@@ -1460,10 +1881,27 @@ class PackListPreviewView(APIView):
                 current_document=current_document,
                 receiving_started=receiving_started,
             ),
-        })
+        }
+        if is_agent_request(request):
+            result['agent'] = create_preview(
+                request,
+                'packlist.import',
+                {
+                    'asn_code': asn_code,
+                    'content_hash': content_hash,
+                    'package_qty': str(request.data.get('package_qty') or ''),
+                    'source_type': str(request.data.get('source_type') or 'AI_AGENT').upper(),
+                    'note': str(request.data.get('note') or ''),
+                    'replace': str(request.data.get('replace', '')).lower() == 'true',
+                    'late_reference': str(request.data.get('late_reference', '')).lower() == 'true',
+                },
+                asn_code=asn_code,
+            )
+        return Response(result)
 
 
 class PackListImportView(APIView):
+    @transaction.atomic
     def post(self, request):
         openid = _openid(request)
         upload = request.FILES.get('file')
@@ -1476,18 +1914,36 @@ class PackListImportView(APIView):
             raise APIException({'detail': 'ASN Code is required'})
         rows, content_hash = _pack_list_rows_from_workbook(upload)
         validation = _validate_pack_list_rows(openid, asn_code, rows)
+        command, replay = consume_preview(
+            request,
+            'packlist.import',
+            {
+                'asn_code': asn_code,
+                'content_hash': content_hash,
+                'package_qty': str(request.data.get('package_qty') or ''),
+                'source_type': str(request.data.get('source_type') or 'AI_AGENT').upper(),
+                'note': str(request.data.get('note') or ''),
+                'replace': str(request.data.get('replace', '')).lower() == 'true',
+                'late_reference': str(request.data.get('late_reference', '')).lower() == 'true',
+            },
+            asn_code=asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         existing_document = PackListDocument.objects.filter(
             openid=openid,
             asn_code=asn_code,
             is_current=True,
         ).first()
         if existing_document and existing_document.content_hash == content_hash:
-            return Response({
+            result = {
                 'detail': 'already_exists',
                 'duplicate': True,
                 'document': _pack_list_json(existing_document),
                 'summary': _summary(openid, asn_code),
-            })
+            }
+            complete_preview(command, result)
+            return Response(result)
         replaced = bool(existing_document)
         receiving_started = _receiving_started(openid, asn_code)
         late_reference = str(request.data.get('late_reference', '')).lower() == 'true'
@@ -1504,17 +1960,20 @@ class PackListImportView(APIView):
                 replace=str(request.data.get('replace', '')).lower() == 'true',
                 late_reference=late_reference,
             )
-        return Response({
+        result = {
             'detail': 'success' if created else 'already_exists',
             'duplicate': not created,
             'replaced': replaced,
             'late_reference': late_reference or receiving_started,
             'document': _pack_list_json(document),
             'summary': _summary(openid, asn_code),
-        })
+        }
+        complete_preview(command, result)
+        return Response(result)
 
 
 class PackListConfirmView(APIView):
+    @transaction.atomic
     def post(self, request):
         openid = _openid(request)
         try:
@@ -1524,16 +1983,91 @@ class PackListConfirmView(APIView):
         document = PackListDocument.objects.filter(id=document_id, openid=openid, is_current=True).first()
         if not document:
             raise APIException({'detail': 'Pack List does not exist'})
+        command, replay = consume_preview(
+            request,
+            'packlist.confirm',
+            request_payload(request),
+            resource_id=str(document_id),
+            asn_code=document.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         with transaction.atomic():
             document.status = PackListDocument.CONFIRMED
             document.confirmed_by = _operator_name(request, openid)
             document.confirmed_at = timezone.now()
             document.save(update_fields=['status', 'confirmed_by', 'confirmed_at', 'update_time'])
             _reconcile_pack_list(document)
-        return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, document.asn_code)})
+        result = {'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, document.asn_code)}
+        complete_preview(command, result)
+        return Response(result)
+
+
+class SerialImportPreviewView(APIView):
+    """Parse an acceptance workbook without writing SN/QC or inventory data."""
+
+    def post(self, request, inspection=False):
+        openid = _openid(request)
+        upload = request.FILES.get('file')
+        asn_code = _clean(request.data.get('asn_code'))
+        if not upload:
+            raise APIException({'detail': 'Excel file is required'})
+        if upload.size > 10 * 1024 * 1024:
+            raise APIException({'detail': 'Excel file is too large'})
+        mode = 'receive' if inspection else str(request.data.get('mode') or 'expected').lower()
+        inbound_po = _clean(request.data.get('inbound_po'))
+        shipout_ref = _clean(request.data.get('shipout_ref'))
+        allow_all = str(request.data.get('allow_all', '')).lower() == 'true'
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        if not inbound_po and not shipout_ref and not allow_all:
+            raise APIException({'detail': 'Provide inbound_po or shipout_ref before importing a mixed scan sheet'})
+        try:
+            file_bytes = upload.read()
+            candidate_rows = _serial_rows_from_workbook(file_bytes, inbound_po, shipout_ref)
+        except Exception as exc:
+            raise APIException({'detail': 'Unable to read Excel file: ' + str(exc)})
+        if not candidate_rows:
+            raise APIException({
+                'detail': 'No matching SKU/SN rows were found in the acceptance workbook; import was not created',
+                'code': 'QC_IMPORT_NO_MATCH',
+            })
+        content_hash = sha256((mode + ':').encode('utf-8') + file_bytes).hexdigest()
+        operation = 'inspection.import' if inspection else 'serial.import'
+        payload = {
+            'asn_code': asn_code,
+            'mode': mode,
+            'content_hash': content_hash,
+            'inbound_po': inbound_po,
+            'shipout_ref': shipout_ref,
+            'allow_all': allow_all,
+            'source_type': str(request.data.get('source_type') or 'AI_AGENT').upper(),
+            'note': str(request.data.get('note') or ''),
+            'evidence_url': _text(request.data.get('evidence_url')),
+        }
+        result = {
+            'detail': 'preview',
+            'operation': operation,
+            'asn_code': asn_code,
+            'mode': mode,
+            'content_hash': content_hash,
+            'matched_rows': len(candidate_rows),
+            'sample': [
+                {
+                    'sheet': row.get('sheet'),
+                    'row_number': row.get('row_number'),
+                    'values': row.get('values'),
+                }
+                for row in candidate_rows[:20]
+            ],
+        }
+        if is_agent_request(request):
+            result['agent'] = create_preview(request, operation, payload, asn_code=asn_code)
+        return Response(result)
 
 
 class SerialImportView(APIView):
+    @transaction.atomic
     def post(self, request, inspection=False):
         openid = _openid(request)
         upload = request.FILES.get('file')
@@ -1555,19 +2089,44 @@ class SerialImportView(APIView):
         try:
             file_bytes = upload.read()
             upload.seek(0)
-            workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
-            sheet = workbook.active
-            raw_headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-            headers = [' '.join(str(value or '').strip().split()) for value in raw_headers]
-            index = {_header_key(header): pos for pos, header in enumerate(headers) if header}
+            candidate_rows = _serial_rows_from_workbook(file_bytes, inbound_po, shipout_ref)
         except Exception as exc:
+            if isinstance(exc, APIException):
+                raise
             raise APIException({'detail': 'Unable to read Excel file: ' + str(exc)})
-        sku_column = _first_column(index, ('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item'))
-        serial_column = _first_column(index, ('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
-        if sku_column is None or serial_column is None:
-            raise APIException({'detail': 'Excel must contain a SKU/Part Number and SN/Serial Number column'})
+        if not candidate_rows:
+            raise APIException({
+                'detail': 'No matching SKU/SN rows were found in the acceptance workbook; import was not created',
+                'code': 'QC_IMPORT_NO_MATCH',
+            })
         content_hash = sha256((mode + ':' ).encode('utf-8') + file_bytes).hexdigest()
-        existing_batch = PackListImportBatch.objects.filter(
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=openid,
+            asn_code=asn_code,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({'detail': 'ASN Code does not exists'})
+        operation = 'inspection.import' if inspection else 'serial.import'
+        command, replay = consume_preview(
+            request,
+            operation,
+            {
+                'asn_code': asn_code,
+                'mode': mode,
+                'content_hash': content_hash,
+                'inbound_po': inbound_po,
+                'shipout_ref': shipout_ref,
+                'allow_all': str(request.data.get('allow_all', '')).lower() == 'true',
+                'source_type': str(request.data.get('source_type') or 'AI_AGENT').upper(),
+                'note': str(request.data.get('note') or ''),
+                'evidence_url': evidence_url,
+            },
+            asn_code=asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
+        existing_batch = PackListImportBatch.objects.select_for_update().filter(
             openid=openid,
             asn_code=asn_code,
             import_type=(
@@ -1577,7 +2136,7 @@ class SerialImportView(APIView):
             content_hash=content_hash,
         ).first()
         if existing_batch:
-            return Response({
+            result = {
                 'detail': 'already_exists',
                 'duplicate': True,
                 'mode': mode,
@@ -1589,7 +2148,9 @@ class SerialImportView(APIView):
                 'errors': [],
                 'batch': _inspection_batch_json(existing_batch),
                 'summary': _summary(openid, asn_code),
-            })
+            }
+            complete_preview(command, result)
+            return Response(result)
         import_batch = PackListImportBatch.objects.create(
             openid=openid,
             asn_code=asn_code,
@@ -1608,23 +2169,19 @@ class SerialImportView(APIView):
         updated = 0
         skipped = 0
         errors = []
-        for row_number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        for candidate in candidate_rows:
+            row_number = candidate['row_number']
+            values = candidate['values']
+            index = candidate['index']
+
             def value(*names):
                 pos = _first_column(index, names)
                 return values[pos] if pos is not None and pos < len(values) else ''
 
             row_po = _clean(value('Inbound PO#', 'Inbound PO', 'PO#'))
             row_shipout = _clean(value('SHIPOUT#', 'Shipout Ref', 'Shipout'))
-            if inbound_po and row_po != inbound_po:
-                continue
-            if shipout_ref and row_shipout != shipout_ref:
-                continue
-            if _first_column(index, ('Inbound PO#', 'Inbound PO', 'PO#')) is not None and not row_po and not shipout_ref:
-                continue
             goods_code = _clean(value('SKU#', 'SKU', 'Part Number', 'Goods Code', 'Item'))
             serial_number = _clean(value('SN#', 'SN', 'Serial Number', 'Serial', 'Serial No'))
-            if not goods_code or not serial_number:
-                continue
             matched += 1
             inspection_result = value('Inspection Result', 'QC Result', 'Check Result', 'Condition', 'Result')
             row_data = {
@@ -1676,7 +2233,7 @@ class SerialImportView(APIView):
         import_batch.save(update_fields=[
             'row_count', 'matched_count', 'accepted_count', 'exception_count', 'status',
         ])
-        return Response({
+        result = {
             'detail': 'success' if not errors else 'partial_success',
             'mode': mode,
             'batch_id': import_batch.id,
@@ -1687,7 +2244,9 @@ class SerialImportView(APIView):
             'errors': errors,
             'batch': _inspection_batch_json(import_batch),
             'summary': _summary(openid, asn_code),
-        })
+        }
+        complete_preview(command, result)
+        return Response(result)
 
 
 class InspectionBatchListView(APIView):

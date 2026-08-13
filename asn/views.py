@@ -43,6 +43,7 @@ from asnserial.models import (
     PUTAWAY_APPROVED_RESOLUTIONS,
     REJECT_RETURN,
 )
+from asnserial.agent import complete_preview, consume_preview, request_payload
 from staging.models import StagingAssignment
 from staging.services import (
     StagingError,
@@ -138,8 +139,16 @@ class AsnListViewSet(viewsets.ModelViewSet):
     def notice_lang(self):
         return FBMsg(self.request.META.get('HTTP_LANGUAGE'))
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
+        command, replay = consume_preview(
+            request,
+            'asn.create',
+            request_payload(request),
+        )
+        if replay is not None:
+            return Response(replay)
         data['openid'] = self.request.auth.openid
         container_tracking = str(data.get('container_tracking') or '').strip()
         if container_tracking:
@@ -175,7 +184,9 @@ class AsnListViewSet(viewsets.ModelViewSet):
         serializer.save()
         scanner.objects.create(openid=self.request.auth.openid, mode="ASN", code=data['asn_code'], bar_code=data['bar_code'])
         headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=200, headers=headers)
+        result = serializer.data
+        complete_preview(command, result)
+        return Response(result, status=200, headers=headers)
 
     def destroy(self, request, pk):
         qs = self.get_object()
@@ -216,6 +227,15 @@ class AsnEtaUpdateView(APIView):
             raise APIException({'detail': 'ASN does not exist'})
         if int(asn.asn_status or 0) >= 5:
             raise APIException({'detail': 'Completed ASN ETA cannot be changed'})
+        command, replay = consume_preview(
+            request,
+            'asn.eta',
+            request_payload(request),
+            resource_id=str(pk),
+            asn_code=asn.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         new_eta = _request_datetime(request.data.get('expected_arrival_at'), 'ETA')
         old_eta = asn.expected_arrival_at
         asn.expected_arrival_at = new_eta
@@ -239,7 +259,9 @@ class AsnEtaUpdateView(APIView):
             source=asn.eta_source,
             note=str(request.data.get('note') or ''),
         )
-        return Response({'detail': 'ETA updated', 'asn': _asn_response(request, asn)})
+        result = {'detail': 'ETA updated', 'asn': _asn_response(request, asn)}
+        complete_preview(command, result)
+        return Response(result)
 
 
 class AsnArrivalConfirmView(APIView):
@@ -256,6 +278,15 @@ class AsnArrivalConfirmView(APIView):
             raise APIException({'detail': 'ASN does not exist'})
         if int(asn.asn_status or 0) != 1:
             raise APIException({'detail': 'Only Pre Arrival ASN can be marked arrived'})
+        command, replay = consume_preview(
+            request,
+            'asn.arrival',
+            request_payload(request),
+            resource_id=str(pk),
+            asn_code=asn.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         actual_arrival = _request_datetime(request.data.get('actual_arrival_at'), 'Actual arrival time') or timezone.now()
         asn.actual_arrival_at = actual_arrival
         asn.arrival_confirmed_by = _operator_name(request)
@@ -269,7 +300,9 @@ class AsnArrivalConfirmView(APIView):
             source=str(request.data.get('source') or 'WAREHOUSE').strip()[:64],
             note=str(request.data.get('note') or ''),
         )
-        return Response({'detail': 'Arrival confirmed', 'asn': _asn_response(request, asn)})
+        result = {'detail': 'Arrival confirmed', 'asn': _asn_response(request, asn)}
+        complete_preview(command, result)
+        return Response(result)
 
 
 class AsnStagingReserveView(APIView):
@@ -286,6 +319,15 @@ class AsnStagingReserveView(APIView):
             raise APIException({'detail': 'ASN does not exist'})
         if int(asn.asn_status or 0) != 1:
             raise APIException({'detail': 'Staging can only be reserved before unloading'})
+        command, replay = consume_preview(
+            request,
+            'asn.reserve_staging',
+            request_payload(request),
+            resource_id=str(pk),
+            asn_code=asn.asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
         quantity, quantity_source = inbound_package_quantity(asn)
         staging_bins = request.data.get('staging_bins') or []
         if not staging_bins and request.data.get('staging_bin'):
@@ -310,12 +352,14 @@ class AsnStagingReserveView(APIView):
             source='WAREHOUSE',
             note='Reserved %s load units from %s' % (quantity, quantity_source),
         )
-        return Response({
+        result = {
             'detail': 'Staging capacity reserved',
             'package_qty': quantity,
             'package_qty_source': quantity_source,
             'asn': _asn_response(request, asn),
-        })
+        }
+        complete_preview(command, result)
+        return Response(result)
 
 
 class AsnEventListView(APIView):
@@ -488,8 +532,17 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
+        command, replay = consume_preview(
+            request,
+            'asn.detail.create',
+            request_payload(request),
+            asn_code=str(data.get('asn_code') or '').strip(),
+        )
+        if replay is not None:
+            return Response(replay)
         if AsnListModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']), is_delete=False).exists():
             if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=str(data['supplier']), is_delete=False).exists():
                 staff_name = staff.objects.filter(openid=self.request.auth.openid, id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
@@ -597,7 +650,9 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
                 AsnListModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code'])).update(
                     supplier=str(data['supplier']), total_weight=total_weight, total_volume=total_volume,
                     total_cost=total_cost, transportation_fee=transportation_res)
-                return Response({"detail": "success"}, status=200)
+                result = {"detail": "success"}
+                complete_preview(command, result)
+                return Response(result, status=200)
             else:
                 raise APIException({"detail": "Supplier does not exists"})
         else:
@@ -860,6 +915,15 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
                         staging_bins = [staging_bin] if staging_bin else []
                     if not staging_bins:
                         raise APIException({"detail": "Please select inbound staging locations"})
+                    command, replay = consume_preview(
+                        request,
+                        'asn.unload_start',
+                        request_payload(request),
+                        resource_id=str(pk),
+                        asn_code=qs.asn_code,
+                    )
+                    if replay is not None:
+                        return Response(replay)
                     try:
                         reserve_staging_slots(
                             self.request.auth.openid,
@@ -899,7 +963,9 @@ class AsnPreLoadViewSet(viewsets.ModelViewSet):
                     )
                     serializer = self.get_serializer(qs, many=False)
                     headers = self.get_success_headers(serializer.data)
-                    return Response(serializer.data, status=200, headers=headers)
+                    result = serializer.data
+                    complete_preview(command, result)
+                    return Response(result, status=200, headers=headers)
                 else:
                     raise APIException({"detail": "Please Enter The ASN Detail"})
             else:
@@ -938,12 +1004,22 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
             raise APIException({"detail": "Cannot delete data which not yours"})
         else:
             if qs.asn_status == 2:
+                command, replay = consume_preview(
+                    request,
+                    'asn.unload_finish',
+                    request_payload(request),
+                    resource_id=str(pk),
+                    asn_code=qs.asn_code,
+                )
+                if replay is not None:
+                    return Response(replay)
                 qs.asn_status = 3
                 occupy_staging_slot(
                     self.request.auth.openid,
@@ -953,7 +1029,7 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
                 asn_detail_list = AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=qs.asn_code,
                                                                 asn_status=2, is_delete=False)
                 for i in range(len(asn_detail_list)):
-                    goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
+                    goods_qty_change = stocklist.objects.select_for_update().filter(openid=self.request.auth.openid,
                                                                 goods_code=str(asn_detail_list[i].goods_code)).first()
                     goods_qty_change.pre_load_stock = goods_qty_change.pre_load_stock - asn_detail_list[i].goods_qty
                     if goods_qty_change.pre_load_stock < 0:
@@ -964,9 +1040,74 @@ class AsnPreSortViewSet(viewsets.ModelViewSet):
                 qs.save()
                 serializer = self.get_serializer(qs, many=False)
                 headers = self.get_success_headers(serializer.data)
-                return Response(serializer.data, status=200, headers=headers)
+                result = serializer.data
+                complete_preview(command, result)
+                return Response(result, status=200, headers=headers)
             else:
                 raise APIException({"detail": "This ASN Status Is Not 2"})
+
+def _validate_receiving_payload(openid, asn_code, supplier_name, goods_data):
+    """Validate the complete receiving snapshot before changing inventory."""
+    if not isinstance(goods_data, list) or not goods_data:
+        raise APIException({"detail": "goodsData must contain every ASN detail line"})
+    if not str(supplier_name or '').strip():
+        raise APIException({"detail": "Receiving supplier is required"})
+
+    details = list(AsnDetailModel.objects.select_for_update().filter(
+        openid=openid,
+        asn_code=asn_code,
+        asn_status=3,
+        is_delete=False,
+    ))
+    if not details:
+        raise APIException({"detail": "No receiving detail lines are available for this ASN"})
+
+    details_by_goods = {}
+    for detail in details:
+        if detail.goods_code in details_by_goods:
+            raise APIException({
+                "detail": "Receiving requires unique SKU lines; duplicate ASN detail found for %s" % detail.goods_code,
+            })
+        details_by_goods[detail.goods_code] = detail
+        if supplier_name and detail.supplier != str(supplier_name):
+            raise APIException({"detail": "Receiving supplier does not match the ASN"})
+
+    quantities = {}
+    seen = set()
+    for row in goods_data:
+        if not isinstance(row, dict):
+            raise APIException({"detail": "Each goodsData item must be an object"})
+        goods_code = str(row.get('goods_code') or '').strip()
+        if not goods_code:
+            raise APIException({"detail": "Receiving SKU is required"})
+        if goods_code in seen:
+            raise APIException({"detail": "Duplicate receiving SKU: %s" % goods_code})
+        if goods_code not in details_by_goods:
+            raise APIException({"detail": "SKU %s is not part of this ASN" % goods_code})
+        try:
+            actual_qty = int(row.get('goods_actual_qty'))
+        except (TypeError, ValueError):
+            raise APIException({"detail": "Received quantity must be an integer for %s" % goods_code})
+        if actual_qty < 0:
+            raise APIException({"detail": "Received quantity cannot be negative for %s" % goods_code})
+        quantities[goods_code] = actual_qty
+        seen.add(goods_code)
+
+    expected = set(details_by_goods)
+    missing = sorted(expected - seen)
+    if missing:
+        raise APIException({
+            "detail": "Receiving payload is incomplete; missing SKU(s): %s" % ', '.join(missing),
+        })
+
+    # Fail before the first stock mutation if a required supporting record is missing.
+    for detail in details:
+        if stocklist.objects.select_for_update().filter(openid=openid, goods_code=str(detail.goods_code)).first() is None:
+            raise APIException({"detail": "Stock record does not exist for %s" % detail.goods_code})
+        if goods.objects.filter(openid=openid, goods_code=str(detail.goods_code), is_delete=False).first() is None:
+            raise APIException({"detail": "SKU master data does not exist for %s" % detail.goods_code})
+    return details, quantities
+
 
 class AsnSortedViewSet(viewsets.ModelViewSet):
     """
@@ -1004,19 +1145,39 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.asn_status != 3:
             raise APIException({"detail": "This ASN Status Is Not 3"})
         else:
             data = self.request.data
+            requested_asn_code = str(data.get('asn_code') or '').strip()
+            if requested_asn_code != str(qs.asn_code):
+                raise APIException({"detail": "Receiving ASN code does not match the selected ASN"})
+            _validate_receiving_payload(
+                self.request.auth.openid,
+                requested_asn_code,
+                data.get('supplier'),
+                data.get('goodsData'),
+            )
+            command, replay = consume_preview(
+                request,
+                'asn.receive',
+                request_payload(request),
+                resource_id=str(pk),
+                asn_code=requested_asn_code,
+            )
+            if replay is not None:
+                return Response(replay)
             for j in range(len(data['goodsData'])):
-                goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
+                goods_qty_change = stocklist.objects.select_for_update().filter(openid=self.request.auth.openid,
                                                             goods_code=str(
                                                                 data['goodsData'][j].get('goods_code'))).first()
                 asn_detail = AsnDetailModel.objects.filter(openid=self.request.auth.openid,
                                                            asn_code=str(data['asn_code']),
-                                                           asn_status=3, supplier=str(data['supplier']),
+                                                           asn_status=3, is_delete=False,
+                                                           supplier=str(data['supplier']),
                                                            goods_code=str(
                                                                data['goodsData'][j].get('goods_code'))).first()
                 asn_detail.exception_resolved = False
@@ -1070,7 +1231,7 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
                     if goods_qty_change.goods_qty == 0 and goods_qty_change.back_order_stock == 0:
                         goods_qty_change.delete()
             if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']),
-                                                      asn_status=4, supplier=str(data['supplier'])).exists():
+                                                      asn_status=4, is_delete=False, supplier=str(data['supplier'])).exists():
                 qs.asn_status = 4
             else:
                 qs.asn_status = 5
@@ -1078,22 +1239,49 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
             if qs.asn_status == 5:
                 # No physical goods remain to be put away (for example, a fully short shipment).
                 release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
-            return Response({"detail": "success"}, status=200)
+            result = {"detail": "success"}
+            complete_preview(command, result)
+            return Response(result, status=200)
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         data = self.request.data
-        qs = self.get_queryset().filter(asn_code=data['asn_code']).first()
+        asn_code = str(data.get('asn_code') or '').strip()
+        if not asn_code:
+            raise APIException({"detail": "ASN code is required"})
+        qs = self.get_queryset().filter(asn_code=asn_code).select_for_update().first()
+        if qs is None:
+            raise APIException({"detail": "ASN does not exist"})
         if qs.asn_status != 3:
             raise APIException({"detail": "This ASN Status Is Not 3"})
         else:
+            _validate_receiving_payload(
+                self.request.auth.openid,
+                asn_code,
+                data.get('supplier'),
+                data.get('goodsData'),
+            )
+            command, replay = consume_preview(
+                request,
+                'asn.receive',
+                request_payload(request),
+                resource_id=str(qs.id),
+                asn_code=asn_code,
+            )
+            if replay is not None:
+                return Response(replay)
             for j in range(len(data['goodsData'])):
-                goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
+                goods_qty_change = stocklist.objects.select_for_update().filter(openid=self.request.auth.openid,
                                                             goods_code=str(
                                                                 data['goodsData'][j].get('goods_code'))).first()
                 asn_detail = AsnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                           asn_code=str(data['asn_code']),
+                                                           asn_code=asn_code,
+                                                           asn_status=3,
+                                                           is_delete=False,
                                                            goods_code=str(
                                                                data['goodsData'][j].get('goods_code'))).first()
+                if asn_detail is None:
+                    raise APIException({"detail": "Receiving detail does not exist for %s" % data['goodsData'][j].get('goods_code')})
                 asn_detail.exception_resolved = False
                 asn_detail.exception_resolution_action = ''
                 asn_detail.exception_resolution_note = ''
@@ -1145,14 +1333,16 @@ class AsnSortedViewSet(viewsets.ModelViewSet):
                     if goods_qty_change.goods_qty == 0 and goods_qty_change.back_order_stock == 0:
                         goods_qty_change.delete()
             if AsnDetailModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']),
-                                                      asn_status=4).exists():
+                                                      asn_status=4, is_delete=False).exists():
                 qs.asn_status = 4
             else:
                 qs.asn_status = 5
             qs.save()
             if qs.asn_status == 5:
                 release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, qs.asn_code)
-            return Response({"detail": "success"}, status=200)
+            result = {"detail": "success"}
+            complete_preview(command, result)
+            return Response(result, status=200)
 
 class MoveToBinViewSet(viewsets.ModelViewSet):
     """
@@ -1189,6 +1379,168 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    def _validate_putaway_request(self, asn_code, detail, requested_qty, bin_name, putaway_driver):
+        """Apply the same business gates to single and bulk putaway requests."""
+        if detail is None or detail.is_delete or detail.asn_status != 4:
+            raise APIException({"detail": "Only receiving-approved ASN details can be put away"})
+
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=self.request.auth.openid,
+            asn_code=asn_code,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({"detail": "ASN does not exist"})
+        if asn.asn_status != 4:
+            raise APIException({"detail": "ASN is not ready for putaway"})
+
+        putaway_driver = str(putaway_driver or '').strip()
+        if not putaway_driver:
+            raise APIException({"detail": "Please assign a putaway driver"})
+        if not driverlist.objects.filter(
+            openid=self.request.auth.openid,
+            driver_name=putaway_driver,
+            is_delete=False,
+        ).exists():
+            raise APIException({"detail": "Putaway driver does not exist"})
+        if asn.putaway_driver and asn.putaway_driver != putaway_driver:
+            raise APIException({
+                "detail": "This ASN is already assigned to putaway driver %s" % asn.putaway_driver,
+            })
+
+        bin_detail = binset.objects.select_for_update().filter(
+            openid=self.request.auth.openid,
+            bin_name=str(bin_name or '').strip(),
+            is_delete=False,
+        ).first()
+        if bin_detail is None:
+            raise APIException({"detail": "Bin does not exist"})
+        if bin_detail.location_role == 'STAGING':
+            raise APIException({"detail": "Staging locations cannot be used for final putaway"})
+
+        goods_qty_change = stocklist.objects.select_for_update().filter(
+            openid=self.request.auth.openid,
+            goods_code=str(detail.goods_code),
+        ).first()
+        if goods_qty_change is None:
+            raise APIException({"detail": "Stock record does not exist for %s" % detail.goods_code})
+        try:
+            requested_qty = int(requested_qty)
+        except (TypeError, ValueError):
+            raise APIException({"detail": "Putaway quantity must be an integer"})
+        if requested_qty <= 0:
+            raise APIException({"detail": "Move QTY Must > 0"})
+        remaining_qty = int(detail.goods_actual_qty or 0) - int(detail.sorted_qty or 0)
+        if requested_qty > remaining_qty:
+            raise APIException({"detail": "Move QTY exceeds the remaining received quantity"})
+
+        current_pack_list = PackListDocument.objects.filter(
+            openid=self.request.auth.openid,
+            asn_code=detail.asn_code,
+            is_current=True,
+            status=PackListDocument.CONFIRMED,
+        ).first()
+        if current_pack_list:
+            pack_qty = sum(
+                int(line.goods_qty or 0)
+                for line in current_pack_list.lines.filter(
+                    is_current=True,
+                    goods_code=detail.goods_code,
+                )
+            )
+            if pack_qty and pack_qty != int(detail.goods_actual_qty or 0) and not detail.exception_resolved:
+                raise APIException({
+                    "detail": "Customer Pack List quantity mismatch; resolve the receiving exception before putaway",
+                })
+
+        serial_records = AsnSerialRecord.objects.filter(
+            openid=self.request.auth.openid,
+            asn_code=detail.asn_code,
+            goods_code=detail.goods_code,
+        )
+        eligible_remaining = remaining_qty
+        if serial_records.exists():
+            strict_serial_check = serial_records.filter(is_expected=True).exists()
+            missing_serials = serial_records.filter(
+                is_expected=True,
+                is_received=False,
+                exception_resolved=False,
+            ).count()
+            exception_statuses = [
+                AsnSerialRecord.DUPLICATE,
+                AsnSerialRecord.WRONG_SKU,
+                AsnSerialRecord.DAMAGED,
+                AsnSerialRecord.REJECTED,
+            ]
+            if strict_serial_check:
+                exception_statuses.append(AsnSerialRecord.UNEXPECTED)
+            exception_serials = serial_records.filter(
+                status__in=exception_statuses,
+                exception_resolved=False,
+            ).count()
+            accepted_serials = serial_records.filter(status=AsnSerialRecord.ACCEPTED).count()
+            resolved_serials = serial_records.filter(
+                exception_resolved=True,
+                exception_resolution_action__in=PUTAWAY_APPROVED_RESOLUTIONS,
+            ).count()
+            expected_sn_count = serial_records.filter(is_expected=True).count()
+            scanned_sn_count = serial_records.filter(is_received=True).count()
+            eligible_serials = accepted_serials + resolved_serials
+            eligible_remaining = max(eligible_serials - int(detail.sorted_qty or 0), 0)
+            if strict_serial_check and requested_qty > eligible_remaining:
+                blocked_parts = []
+                if missing_serials:
+                    blocked_parts.append("%s expected SN missing" % missing_serials)
+                if exception_serials:
+                    blocked_parts.append("%s unresolved SN exception(s)" % exception_serials)
+                if not blocked_parts:
+                    blocked_parts.append("only %s eligible unit(s) remain" % eligible_remaining)
+                raise APIException({
+                    "detail": (
+                        "SN verification incomplete. Expected: %s; Scanned: %s; Accepted: %s; "
+                        "Hold/exception: %s; Requested: %s; Maximum allowed now: %s. %s. "
+                        "Reduce Putaway Qty or open Review QC."
+                    ) % (
+                        expected_sn_count,
+                        scanned_sn_count,
+                        eligible_serials,
+                        max(expected_sn_count - eligible_serials, 0),
+                        requested_qty,
+                        eligible_remaining,
+                        "; ".join(blocked_parts),
+                    ),
+                })
+
+        if detail.exception_resolved and detail.exception_resolution_action in {HOLD_QUARANTINE, REJECT_RETURN}:
+            raise APIException({"detail": "This quantity exception is held or rejected and is not eligible for putaway"})
+        if current_pack_list and current_pack_list.has_serials:
+            expected_serials = set(current_pack_list.serial_records.filter(
+                is_expected=True,
+            ).values_list('serial_number', flat=True))
+            received_serials = set(serial_records.filter(
+                is_received=True,
+            ).values_list('serial_number', flat=True))
+            if (
+                (expected_serials - received_serials or received_serials - expected_serials)
+                and requested_qty > eligible_remaining
+            ):
+                raise APIException({
+                    "detail": (
+                        "Customer Pack List serial mismatch. Expected: %s; Scanned: %s; "
+                        "Maximum allowed now: %s. Review QC before moving the remaining quantity."
+                    ) % (len(expected_serials), len(received_serials), eligible_remaining),
+                })
+        if (
+            not detail.exception_resolved
+            and (
+                int(detail.goods_shortage_qty or 0)
+                or int(detail.goods_more_qty or 0)
+                or int(detail.goods_damage_qty or 0)
+            )
+        ):
+            raise APIException({"detail": "Receiving quantity exception is unresolved; resolve it before putaway"})
+        return asn, bin_detail, goods_qty_change, putaway_driver
+
     @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
@@ -1200,6 +1552,25 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
             else:
                 data = self.request.data
                 putaway_driver = str(data.get('putaway_driver') or data.get('driver') or '').strip()
+                requested_asn_code = str(data.get('asn_code') or '').strip()
+                if requested_asn_code != str(qs.asn_code):
+                    raise APIException({"detail": "Putaway ASN code does not match the selected ASN detail"})
+                self._validate_putaway_request(
+                    requested_asn_code,
+                    qs,
+                    data.get('qty'),
+                    data.get('bin_name'),
+                    putaway_driver,
+                )
+                command, replay = consume_preview(
+                    request,
+                    'asn.putaway',
+                    request_payload(request),
+                    resource_id=str(pk),
+                    asn_code=requested_asn_code,
+                )
+                if replay is not None:
+                    return Response(replay)
                 if not putaway_driver:
                     raise APIException({"detail": "Please assign a putaway driver"})
                 driver_record = driverlist.objects.filter(
@@ -1221,7 +1592,7 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                         raise APIException({"detail": "Staging locations cannot be used for final putaway"})
                     asn_detail = AsnListModel.objects.select_for_update().filter(
                         openid=self.request.auth.openid,
-                        asn_code=str(data['asn_code']),
+                        asn_code=requested_asn_code,
                         is_delete=False,
                     ).first()
                     if asn_detail is None:
@@ -1230,7 +1601,7 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                         raise APIException({
                             "detail": "This ASN is already assigned to putaway driver %s" % asn_detail.putaway_driver
                         })
-                    goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
+                    goods_qty_change = stocklist.objects.select_for_update().filter(openid=self.request.auth.openid,
                                                                 goods_code=str(data['goods_code'])).first()
                     requested_qty = int(data['qty'])
                     if requested_qty <= 0:
@@ -1350,8 +1721,11 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             raise APIException({
                                 "detail": "Receiving quantity exception is unresolved; resolve it before putaway"
                             })
-                        staff_name = staff.objects.filter(openid=self.request.auth.openid,
-                                                          id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
+                        operator = staff.objects.filter(openid=self.request.auth.openid,
+                                                        id=self.request.META.get('HTTP_OPERATOR')).first()
+                        if operator is None:
+                            raise APIException({"detail": "Operator does not exist"})
+                        staff_name = operator.staff_name
                         move_qty = qs.goods_actual_qty - qs.sorted_qty - requested_qty
                         if move_qty > 0:
                             qs.sorted_qty = qs.sorted_qty + requested_qty
@@ -1455,8 +1829,9 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             qs.save()
                             goods_qty_change.save()
                             if AsnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                             asn_code=str(data['asn_code']),
-                                                             asn_status=4
+                                                             asn_code=requested_asn_code,
+                                                             asn_status=4,
+                                                             is_delete=False,
                                                              ).exists():
                                 pass
                             else:
@@ -1499,167 +1874,188 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                                 source='WAREHOUSE',
                                 note='Putaway driver assigned: %s' % putaway_driver,
                             )
-                        return Response({"detail": "success", "putaway_driver": asn_detail.putaway_driver}, status=200)
+                        result = {"detail": "success", "putaway_driver": asn_detail.putaway_driver}
+                        complete_preview(command, result)
+                        return Response(result, status=200)
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
-        data = self.request.data
-        qs_list = self.get_queryset().filter(asn_code=data['asn_code'])
-        if qs_list[0].openid != self.request.auth.openid:
-            raise APIException({"detail": "Cannot delete data which not yours"})
-        else:
-            if 'bin_name' not in data:
-                raise APIException({"detail": "Please Enter the Bin Name"})
+        """Bulk putaway with the same gates as the single-item endpoint."""
+        data = request.data
+        asn_code = str(data.get('asn_code') or '').strip()
+        bin_name = str(data.get('bin_name') or '').strip()
+        putaway_driver = str(data.get('putaway_driver') or data.get('driver') or '').strip()
+        items = data.get('res_data')
+        if not asn_code or not bin_name or not putaway_driver:
+            raise APIException({"detail": "ASN code, final bin, and putaway driver are required"})
+        if not isinstance(items, list) or not items:
+            raise APIException({"detail": "res_data must contain at least one putaway line"})
+
+        asn = AsnListModel.objects.select_for_update().filter(
+            openid=self.request.auth.openid,
+            asn_code=asn_code,
+            is_delete=False,
+        ).first()
+        if asn is None:
+            raise APIException({"detail": "ASN does not exist"})
+        if asn.asn_status != 4:
+            raise APIException({"detail": "ASN is not ready for putaway"})
+
+        details = {
+            detail.goods_code: detail
+            for detail in AsnDetailModel.objects.select_for_update().filter(
+                openid=self.request.auth.openid,
+                asn_code=asn_code,
+                asn_status=4,
+                is_delete=False,
+            )
+        }
+        if not details:
+            raise APIException({"detail": "No ASN detail is ready for putaway"})
+
+        normalized = []
+        seen = set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise APIException({"detail": "Each res_data item must be an object"})
+            goods_code = str(item.get('goods_code') or '').strip()
+            if not goods_code or goods_code not in details:
+                raise APIException({"detail": "SKU %s is not ready for putaway" % (goods_code or '<empty>')})
+            if goods_code in seen:
+                raise APIException({"detail": "Duplicate putaway SKU: %s" % goods_code})
+            try:
+                quantity = int(item.get('qty'))
+            except (TypeError, ValueError):
+                raise APIException({"detail": "Putaway quantity must be an integer for %s" % goods_code})
+            normalized.append((goods_code, quantity))
+            seen.add(goods_code)
+
+        operator = staff.objects.filter(
+            openid=self.request.auth.openid,
+            id=self.request.META.get('HTTP_OPERATOR'),
+            is_delete=False,
+        ).first()
+        if operator is None:
+            raise APIException({"detail": "Operator does not exist"})
+
+        bin_detail = None
+        for goods_code, quantity in normalized:
+            _, bin_detail, _, putaway_driver = self._validate_putaway_request(
+                asn_code,
+                details[goods_code],
+                quantity,
+                bin_name,
+                putaway_driver,
+            )
+
+        command, replay = consume_preview(
+            request,
+            'asn.putaway_bulk',
+            request_payload(request),
+            resource_id=asn_code,
+            asn_code=asn_code,
+        )
+        if replay is not None:
+            return Response(replay)
+
+        for goods_code, quantity in normalized:
+            detail = details[goods_code]
+            goods_qty_change = stocklist.objects.select_for_update().filter(
+                openid=self.request.auth.openid,
+                goods_code=goods_code,
+            ).first()
+            remaining_qty = int(detail.goods_actual_qty or 0) - int(detail.sorted_qty or 0)
+            move_qty = remaining_qty - quantity
+            detail.sorted_qty = int(detail.sorted_qty or 0) + quantity
+            if move_qty == 0:
+                detail.asn_status = 5
+
+            if bin_detail.bin_property == 'Damage':
+                goods_qty_change.damage_stock = goods_qty_change.damage_stock + quantity
+                detail.goods_damage_qty = detail.goods_damage_qty + quantity
+            elif bin_detail.bin_property == 'Inspection':
+                goods_qty_change.inspect_stock = goods_qty_change.inspect_stock + quantity
+            elif bin_detail.bin_property == 'Holding':
+                goods_qty_change.hold_stock = goods_qty_change.hold_stock + quantity
             else:
-                bin_detail = binset.objects.filter(openid=self.request.auth.openid,
-                                                   bin_name=str(data['bin_name']),
-                                                   is_delete=False).first()
-                asn_detail = AsnListModel.objects.filter(openid=self.request.auth.openid,
-                                                         asn_code=str(data['asn_code'])
-                                                         ).first()
-                staff_name = staff.objects.filter(openid=self.request.auth.openid,
-                                                  id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
-                for i in range(len(data['res_data'])):
-                    goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
-                                                                goods_code=str(data['res_data'][i]['goods_code'])).first()
-                    if int(data['res_data'][i]['qty']) <= 0:
-                        continue
-                    else:
-                        qs = qs_list.filter(goods_code=str(data['res_data'][i]['goods_code'])).first()
-                        move_qty = qs.goods_actual_qty - qs.sorted_qty - int(data['res_data'][i]['qty'])
-                        if move_qty > 0:
-                            qs.sorted_qty = qs.sorted_qty + int(data['res_data'][i]['qty'])
-                            goods_qty_change.sorted_stock = goods_qty_change.sorted_stock - int(data['res_data'][i]['qty'])
-                            goods_qty_change.onhand_stock = goods_qty_change.onhand_stock + int(data['res_data'][i]['qty'])
-                            if bin_detail.bin_property == 'Damage':
-                                goods_qty_change.damage_stock = goods_qty_change.damage_stock + int(data['res_data'][i]['qty'])
-                                qs.goods_damage_qty = qs.goods_damage_qty + int(data['res_data'][i]['qty'])
-                            elif bin_detail.bin_property == 'Inspection':
-                                goods_qty_change.inspect_stock = goods_qty_change.inspect_stock + int(data['res_data'][i]['qty'])
-                            elif bin_detail.bin_property == 'Holding':
-                                goods_qty_change.hold_stock = goods_qty_change.hold_stock + int(data['res_data'][i]['qty'])
-                            else:
-                                goods_qty_change.can_order_stock = goods_qty_change.can_order_stock + int(data['res_data'][i]['qty'])
-                            qs.save()
-                            goods_qty_change.save()
-                            store_code = Md5.md5(str(data['res_data'][i]['goods_code']))
-                            stockbin.objects.create(openid=self.request.auth.openid,
-                                                    bin_name=str(data['bin_name']),
-                                                    goods_code=str(data['res_data'][i]['goods_code']),
-                                                    goods_desc=goods_qty_change.goods_desc,
-                                                    goods_qty=int(data['res_data'][i]['qty']),
-                                                    bin_size=bin_detail.bin_size,
-                                                    bin_property=bin_detail.bin_property,
-                                                    t_code=store_code,
-                                                    create_time=qs.create_time
-                                                    )
-                            qtychangerecorder.objects.create(openid=self.request.auth.openid,
-                                                             mode_code=qs.asn_code,
-                                                             bin_name=str(data['bin_name']),
-                                                             goods_code=str(data['res_data'][i]['goods_code']),
-                                                             goods_desc=goods_qty_change.goods_desc,
-                                                             goods_qty=int(data['res_data'][i]['qty']),
-                                                             store_code=store_code,
-                                                             creater=str(staff_name)
-                                                             )
-                            cur_date = timezone.now().date()
-                            line_data = cyclecount.objects.filter(openid=self.request.auth.openid,
-                                                                  bin_name=str(data['bin_name']),
-                                                                  goods_code=str(data['res_data'][i]['goods_code']),
-                                                                  create_time__gte=cur_date)
-                            bin_check = stockbin.objects.filter(openid=self.request.auth.openid,
-                                                                bin_name=str(data['bin_name']),
-                                                                goods_code=str(data['res_data'][i]['goods_code']),
-                                                                )
-                            if bin_check.exists():
-                                bin_stock = bin_check.aggregate(sum=Sum('goods_qty'))["sum"]
-                            else:
-                                bin_stock = 0
-                            if line_data.exists():
-                                line_data.goods_qty = bin_stock + int(data['res_data'][i]['qty'])
-                                line_data.update(goods_qty=line_data.goods_qty)
-                            else:
-                                cyclecount.objects.create(openid=self.request.auth.openid,
-                                                          bin_name=str(data['bin_name']),
-                                                          goods_code=str(data['res_data'][i]['goods_code']),
-                                                          goods_qty=int(data['res_data'][i]['qty']),
-                                                          creater=str(staff_name)
-                                                          )
-                            if bin_detail.empty_label == True:
-                                bin_detail.empty_label = False
-                                bin_detail.save()
-                        elif move_qty == 0:
-                            qs.sorted_qty = qs.sorted_qty + int(data['res_data'][i]['qty'])
-                            qs.asn_status = 5
-                            goods_qty_change.sorted_stock = goods_qty_change.sorted_stock - int(data['res_data'][i]['qty'])
-                            goods_qty_change.onhand_stock = goods_qty_change.onhand_stock + int(data['res_data'][i]['qty'])
-                            if bin_detail.bin_property == 'Damage':
-                                goods_qty_change.damage_stock = goods_qty_change.damage_stock + int(data['res_data'][i]['qty'])
-                                qs.goods_damage_qty = qs.goods_damage_qty + int(data['res_data'][i]['qty'])
-                            elif bin_detail.bin_property == 'Inspection':
-                                goods_qty_change.inspect_stock = goods_qty_change.inspect_stock + int(data['res_data'][i]['qty'])
-                            elif bin_detail.bin_property == 'Holding':
-                                goods_qty_change.hold_stock = goods_qty_change.hold_stock + int(data['res_data'][i]['qty'])
-                            else:
-                                goods_qty_change.can_order_stock = goods_qty_change.can_order_stock + int(data['res_data'][i]['qty'])
-                            cur_date = timezone.now().date()
-                            line_data = cyclecount.objects.filter(openid=self.request.auth.openid,
-                                                                  bin_name=str(data['bin_name']),
-                                                                  goods_code=str(data['res_data'][i]['goods_code']),
-                                                                  create_time__gte=cur_date)
-                            bin_check = stockbin.objects.filter(openid=self.request.auth.openid,
-                                                                bin_name=str(data['bin_name']),
-                                                                goods_code=str(data['res_data'][i]['goods_code']),
-                                                                )
-                            if bin_check.exists():
-                                bin_stock = bin_check.aggregate(sum=Sum('goods_qty'))["sum"]
-                            else:
-                                bin_stock = 0
-                            if line_data.exists():
-                                line_data.goods_qty = bin_stock + int(data['res_data'][i]['qty'])
-                                line_data.update(goods_qty=line_data.goods_qty)
-                            else:
-                                cyclecount.objects.create(openid=self.request.auth.openid,
-                                                          bin_name=str(data['bin_name']),
-                                                          goods_code=str(data['res_data'][i]['goods_code']),
-                                                          goods_qty=int(data['res_data'][i]['qty']),
-                                                          creater=str(staff_name),
-                                                          t_code=Md5.md5(str(data['bin_name']))
-                                                          )
-                            qs.save()
-                            goods_qty_change.save()
-                            if AsnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                             asn_code=str(data['asn_code']),
-                                                             asn_status=4
-                                                             ).exists():
-                                pass
-                            else:
-                                asn_detail.asn_status = 5
-                                asn_detail.save()
-                            store_code = Md5.md5(str(data['res_data'][i]['goods_code']))
-                            stockbin.objects.create(openid=self.request.auth.openid,
-                                                    bin_name=str(data['bin_name']),
-                                                    goods_code=str(data['res_data'][i]['goods_code']),
-                                                    goods_desc=goods_qty_change.goods_desc,
-                                                    goods_qty=int(data['res_data'][i]['qty']),
-                                                    bin_size=bin_detail.bin_size,
-                                                    bin_property=bin_detail.bin_property,
-                                                    t_code=store_code,
-                                                    create_time=qs.create_time)
-                            qtychangerecorder.objects.create(openid=self.request.auth.openid,
-                                                             mode_code=qs.asn_code,
-                                                             bin_name=str(data['bin_name']),
-                                                             goods_code=str(data['res_data'][i]['goods_code']),
-                                                             goods_desc=goods_qty_change.goods_desc,
-                                                             goods_qty=int(data['res_data'][i]['qty']),
-                                                             store_code=store_code,
-                                                             creater=str(staff_name)
-                                                             )
-                            if bin_detail.empty_label == True:
-                                bin_detail.empty_label = False
-                                bin_detail.save()
-                            if asn_detail.asn_status == 5:
-                                release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, asn_detail.asn_code)
-                return Response({"detail": "success"}, status=200)
+                goods_qty_change.can_order_stock = goods_qty_change.can_order_stock + quantity
+            goods_qty_change.sorted_stock = goods_qty_change.sorted_stock - quantity
+            goods_qty_change.onhand_stock = goods_qty_change.onhand_stock + quantity
+            detail.save()
+            goods_qty_change.save()
+
+            store_code = Md5.md5(goods_code)
+            stockbin.objects.create(
+                openid=self.request.auth.openid,
+                bin_name=bin_name,
+                goods_code=goods_code,
+                goods_desc=goods_qty_change.goods_desc,
+                goods_qty=quantity,
+                bin_size=bin_detail.bin_size,
+                bin_property=bin_detail.bin_property,
+                t_code=store_code,
+                create_time=detail.create_time,
+            )
+            qtychangerecorder.objects.create(
+                openid=self.request.auth.openid,
+                mode_code=asn_code,
+                bin_name=bin_name,
+                goods_code=goods_code,
+                goods_desc=goods_qty_change.goods_desc,
+                goods_qty=quantity,
+                store_code=store_code,
+                creater=operator.staff_name,
+            )
+            current_date = timezone.now().date()
+            bin_stock = stockbin.objects.filter(
+                openid=self.request.auth.openid,
+                bin_name=bin_name,
+                goods_code=goods_code,
+            ).aggregate(sum=Sum('goods_qty'))['sum'] or 0
+            line_data = cyclecount.objects.filter(
+                openid=self.request.auth.openid,
+                bin_name=bin_name,
+                goods_code=goods_code,
+                create_time__gte=current_date,
+            )
+            if line_data.exists():
+                line_data.update(goods_qty=bin_stock)
+            else:
+                cyclecount.objects.create(
+                    openid=self.request.auth.openid,
+                    bin_name=bin_name,
+                    goods_code=goods_code,
+                    goods_qty=bin_stock,
+                    creater=operator.staff_name,
+                    t_code=Md5.md5(bin_name),
+                )
+            if bin_detail.empty_label:
+                bin_detail.empty_label = False
+                bin_detail.save(update_fields=['empty_label', 'update_time'])
+
+        if not AsnDetailModel.objects.filter(
+            openid=self.request.auth.openid,
+            asn_code=asn_code,
+            asn_status=4,
+            is_delete=False,
+        ).exists():
+            asn.asn_status = 5
+            asn.save(update_fields=['asn_status', 'update_time'])
+            release_staging_slot(self.request.auth.openid, StagingAssignment.INBOUND, asn_code)
+        if not asn.putaway_driver:
+            asn.putaway_driver = putaway_driver
+            asn.save(update_fields=['putaway_driver', 'update_time'])
+            AsnEventModel.objects.create(
+                openid=self.request.auth.openid,
+                asn_code=asn_code,
+                event_type=AsnEventModel.PUTAWAY_STARTED,
+                operator=_operator_name(request),
+                source='WAREHOUSE',
+                note='Putaway driver assigned: %s' % putaway_driver,
+            )
+        result = {"detail": "success", "putaway_driver": asn.putaway_driver}
+        complete_preview(command, result)
+        return Response(result, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileListRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

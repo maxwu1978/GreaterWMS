@@ -9,6 +9,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -187,7 +188,8 @@ function authHeaders () {
   return {
     token,
     operator: process.env.GREATERWMS_OPERATOR || session.operator || '',
-    language: process.env.GREATERWMS_LANGUAGE || 'en-US'
+    language: process.env.GREATERWMS_LANGUAGE || 'en-US',
+    'x-agent-client': 'greaterwms-cli'
   }
 }
 
@@ -295,7 +297,8 @@ async function request (path, options = {}) {
   const response = await fetch(`${baseUrl()}${path}`, {
     method: options.method || 'GET',
     headers,
-    body
+    body,
+    signal: AbortSignal.timeout(options.timeoutMs || 30000)
   })
   const text = await response.text()
   let payload
@@ -358,6 +361,45 @@ function requireConfirmation (options, label) {
   if (!options['dry-run'] && !options.confirm) {
     throw new Error(`${label} is write-capable. Run --dry-run first, then repeat with --confirm.`)
   }
+}
+
+function agentConfirmationHeaders (options, label) {
+  if (!options.confirm) throw new Error(`${label} requires --confirm after reviewing the server preview.`)
+  const token = options['confirmation-token'] || options['confirm-token']
+  if (!token) throw new Error(`${label} requires --confirmation-token from the server preview.`)
+  return {
+    'confirmation-token': String(token),
+    'idempotency-key': String(options['idempotency-key'] || randomUUID())
+  }
+}
+
+async function agentPreview (operation, payload, options = {}) {
+  return request('/asn/serial/agent/preview/', {
+    method: 'POST',
+    headers: { 'x-agent-preview': 'true' },
+    json: {
+      operation,
+      resource_id: options.resourceId ? String(options.resourceId) : '',
+      asn_code: options.asnCode ? String(options.asnCode) : '',
+      payload
+    }
+  })
+}
+
+function agentPayload (data) {
+  return data && typeof data === 'object' ? data : {}
+}
+
+async function runAgentJsonCommand ({ operation, endpoint, method = 'POST', data, options, json, resourceId = '', asnCode = '' }) {
+  if (options['dry-run']) {
+    print(await agentPreview(operation, agentPayload(data), { resourceId, asnCode }), json)
+    return
+  }
+  print(await request(endpoint, {
+    method,
+    headers: agentConfirmationHeaders(options, operation),
+    json: agentPayload(data)
+  }), json)
 }
 
 async function readResource (resource, action, options, json) {
@@ -482,13 +524,15 @@ function print (payload, json) {
 
 function help () {
   process.stdout.write('Authentication:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs auth status\n  node tools/greaterwms.mjs logout\n  Password is prompted without echo and is never saved.\n\n')
+  process.stdout.write('Inbound: asn eta|arrival|reserve-staging|unload-start|unload-finish|receive --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Exception review: serial exceptions --asn-code ASN; serial resolve --id ID --data JSON --dry-run|--confirm\n')
-  process.stdout.write('Putaway: asn putaway --id ASN_DETAIL_ID --data JSON --dry-run|--confirm\n')
+  process.stdout.write('Putaway: asn putaway|putaway-bulk --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('  serial exceptions --asn-code ASN [--json]\n  serial resolve --id ID --data {"action":"REPAIR_REWORK","note":"Needs repair and reinspection","resolution_location":"REPAIR-01"} --dry-run|--confirm\n  serial resolve --id ID --data {"action":"ACCEPT_FOR_PUTAWAY","note":"Passed reinspection"} --dry-run|--confirm\n  serial resolve-quantity --data {"asn_code":"ASN","goods_code":"SKU","action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  asn putaway --id ASN_DETAIL_ID --data {"asn_code":"ASN","goods_code":"SKU","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"} --dry-run|--confirm\n')
   process.stdout.write('AI Agent/CLI ingestion: Pack List and QC imports are not available in the web page.\n')
   process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE [--evidence-url URL] --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
+  process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
   process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated openid token from the current GreaterWMS session\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
 }
 
@@ -524,6 +568,82 @@ async function main () {
   }
 
   const operation = [resource, action].join(' ')
+
+  if (resource === 'asn' && action === 'create') {
+    const data = parseData(options)
+    if (!data.supplier && !data.container_tracking) throw new Error('ASN create requires at least supplier or container_tracking in --data')
+    requireConfirmation(options, 'asn create')
+    await runAgentJsonCommand({
+      operation: 'asn.create',
+      endpoint: '/asn/list/',
+      data,
+      options,
+      json
+    })
+    return
+  }
+
+  if (resource === 'asn-detail' && action === 'create') {
+    const data = parseData(options)
+    if (!data.asn_code) throw new Error('ASN detail create requires asn_code in --data')
+    requireConfirmation(options, 'asn-detail create')
+    await runAgentJsonCommand({
+      operation: 'asn.detail.create',
+      endpoint: '/asn/detail/',
+      data,
+      options,
+      json,
+      asnCode: data.asn_code
+    })
+    return
+  }
+
+  const inboundActions = {
+    eta: { operation: 'asn.eta', path: (id) => `/asn/eta/${encodeURIComponent(String(id))}/` },
+    arrival: { operation: 'asn.arrival', path: (id) => `/asn/arrival/${encodeURIComponent(String(id))}/` },
+    'reserve-staging': { operation: 'asn.reserve_staging', path: (id) => `/asn/reserve-staging/${encodeURIComponent(String(id))}/` },
+    'unload-start': { operation: 'asn.unload_start', path: (id) => `/asn/preload/${encodeURIComponent(String(id))}/` },
+    'unload-finish': { operation: 'asn.unload_finish', path: (id) => `/asn/presort/${encodeURIComponent(String(id))}/` },
+    receive: { operation: 'asn.receive', path: (id) => `/asn/sorted/${encodeURIComponent(String(id))}/` }
+  }
+  if (resource === 'asn' && inboundActions[action]) {
+    if (!options.id) throw new Error('--id is required')
+    const data = parseData(options)
+    const asnCode = options['asn-code'] || data.asn_code || ''
+    if (['receive', 'reserve-staging', 'unload-start', 'unload-finish'].includes(action) && !asnCode) {
+      throw new Error('--asn-code or asn_code in --data is required')
+    }
+    requireConfirmation(options, `asn ${action}`)
+    await runAgentJsonCommand({
+      operation: inboundActions[action].operation,
+      endpoint: inboundActions[action].path(options.id),
+      data,
+      options,
+      json,
+      resourceId: options.id,
+      asnCode
+    })
+    return
+  }
+
+  if (resource === 'asn' && action === 'putaway-bulk') {
+    const data = parseData(options)
+    const asnCode = options['asn-code'] || data.asn_code || ''
+    if (!asnCode) throw new Error('--asn-code or asn_code in --data is required')
+    requireConfirmation(options, 'asn putaway-bulk')
+    await runAgentJsonCommand({
+      operation: 'asn.putaway_bulk',
+      endpoint: '/asn/movetobin/',
+      method: 'PUT',
+      data,
+      options,
+      json,
+      resourceId: asnCode,
+      asnCode
+    })
+    return
+  }
+
   if (resource === 'serial' && action === 'exceptions') {
     if (!options['asn-code']) throw new Error('--asn-code is required')
     print(await request(`/asn/serial/exceptions/?asn_code=${encodeURIComponent(options['asn-code'])}`), json)
@@ -540,25 +660,63 @@ async function main () {
     if (!options.id) throw new Error('--id is required')
     requireConfirmation(options, 'serial resolve')
     const data = parseData(options)
-    if (options['dry-run']) {
-      print({ dry_run: true, method: 'POST', endpoint: '/asn/serial/exceptions/resolve/', resource, action, id: String(options.id), data }, json)
-      return
-    }
-    print(await request('/asn/serial/exceptions/resolve/', {
-      method: 'POST',
-      json: { ...data, id: Number(options.id) }
-    }), json)
+    const payload = { ...data, id: Number(options.id) }
+    await runAgentJsonCommand({
+      operation: 'serial.resolve',
+      endpoint: '/asn/serial/exceptions/resolve/',
+      data: payload,
+      options,
+      json,
+      resourceId: options.id,
+      asnCode: data.asn_code || ''
+    })
     return
   }
 
   if (resource === 'serial' && action === 'resolve-quantity') {
     requireConfirmation(options, 'serial resolve-quantity')
     const data = parseData(options)
-    if (options['dry-run']) {
-      print({ dry_run: true, method: 'POST', endpoint: '/asn/serial/exceptions/resolve-quantity/', resource, action, data }, json)
-      return
-    }
-    print(await request('/asn/serial/exceptions/resolve-quantity/', { method: 'POST', json: data }), json)
+    await runAgentJsonCommand({
+      operation: 'serial.resolve_quantity',
+      endpoint: '/asn/serial/exceptions/resolve-quantity/',
+      data,
+      options,
+      json,
+      resourceId: `${data.asn_code || ''}:${data.goods_code || ''}`,
+      asnCode: data.asn_code || ''
+    })
+    return
+  }
+
+  if (resource === 'serial' && action === 'exception-move') {
+    if (!options.id) throw new Error('--id is required')
+    requireConfirmation(options, 'serial exception-move')
+    const data = parseData(options)
+    const payload = { ...data, id: Number(options.id) }
+    await runAgentJsonCommand({
+      operation: 'serial.exception_move',
+      endpoint: '/asn/serial/exceptions/move/',
+      data: payload,
+      options,
+      json,
+      resourceId: options.id,
+      asnCode: options['asn-code'] || data.asn_code || ''
+    })
+    return
+  }
+
+  if (resource === 'serial' && action === 'exception-move-quantity') {
+    requireConfirmation(options, 'serial exception-move-quantity')
+    const data = parseData(options)
+    await runAgentJsonCommand({
+      operation: 'serial.exception_move_quantity',
+      endpoint: '/asn/serial/exceptions/move-quantity/',
+      data,
+      options,
+      json,
+      resourceId: `${data.asn_code || ''}:${data.goods_code || ''}`,
+      asnCode: data.asn_code || ''
+    })
     return
   }
 
@@ -567,11 +725,15 @@ async function main () {
     requireConfirmation(options, 'asn putaway')
     const data = parseData(options)
     const endpoint = `/asn/movetobin/${encodeURIComponent(String(options.id))}/`
-    if (options['dry-run']) {
-      print({ dry_run: true, method: 'POST', endpoint, resource, action, id: String(options.id), data }, json)
-      return
-    }
-    print(await request(endpoint, { method: 'POST', json: data }), json)
+    await runAgentJsonCommand({
+      operation: 'asn.putaway',
+      endpoint,
+      data,
+      options,
+      json,
+      resourceId: options.id,
+      asnCode: data.asn_code || ''
+    })
     return
   }
 
@@ -598,7 +760,8 @@ async function main () {
     }
     const form = packListForm(options.file, options)
     const endpoint = options['dry-run'] ? '/asn/serial/packlists/preview/' : '/asn/serial/packlists/import/'
-    print(await request(endpoint, { method: 'POST', body: form }), json)
+    const headers = options['dry-run'] ? {} : agentConfirmationHeaders(options, 'packlist import')
+    print(await request(endpoint, { method: 'POST', headers, body: form }), json)
     return
   }
 
@@ -610,23 +773,18 @@ async function main () {
     }
     requireConfirmation(options, 'serial import')
     if (options['dry-run']) {
-      print({
-        dry_run: true,
+      print(await request('/asn/serial/import/preview/', {
         method: 'POST',
-        endpoint: '/asn/serial/import/',
-        resource,
-        action,
-        asn_code: options['asn-code'],
-        file: resolve(String(options.file)),
-        mode: String(options.mode || 'receive').toLowerCase(),
-        inbound_po: options['inbound-po'] || '',
-        shipout_ref: options['shipout-ref'] || '',
-        allow_all: Boolean(options['allow-all']),
-        evidence_url: options['evidence-url'] || '',
-      }, json)
+        headers: { 'x-agent-preview': 'true' },
+        body: serialImportForm(options.file, options)
+      }), json)
       return
     }
-    print(await request('/asn/serial/import/', { method: 'POST', body: serialImportForm(options.file, options) }), json)
+    print(await request('/asn/serial/import/', {
+      method: 'POST',
+      headers: agentConfirmationHeaders(options, 'serial import'),
+      body: serialImportForm(options.file, options)
+    }), json)
     return
   }
 
@@ -636,24 +794,16 @@ async function main () {
     requireConfirmation(options, 'inspection import')
     const inspectionOptions = { ...options, mode: 'receive' }
     if (options['dry-run']) {
-      print({
-        dry_run: true,
+      print(await request('/asn/serial/inspections/preview/', {
         method: 'POST',
-        endpoint: '/asn/serial/inspections/import/',
-        resource,
-        action,
-        asn_code: options['asn-code'],
-        file: resolve(String(options.file)),
-        mode: 'receive',
-        source_type: options.source || 'UPLOAD',
-        note: options.note || '',
-        allow_all: Boolean(options['allow-all']),
-        evidence_url: options['evidence-url'] || '',
-      }, json)
+        headers: { 'x-agent-preview': 'true' },
+        body: serialImportForm(options.file, inspectionOptions)
+      }), json)
       return
     }
     print(await request('/asn/serial/inspections/import/', {
       method: 'POST',
+      headers: agentConfirmationHeaders(options, 'inspection import'),
       body: serialImportForm(options.file, inspectionOptions)
     }), json)
     return
@@ -661,8 +811,17 @@ async function main () {
 
   if (resource === 'packlist' && action === 'confirm') {
     if (!options.id) throw new Error('--id is required')
-    if (!options.confirm) throw new Error('Confirmation is a write operation. Repeat with --confirm.')
-    print(await request('/asn/serial/packlists/confirm/', { method: 'POST', json: { id: Number(options.id) } }), json)
+    requireConfirmation(options, 'packlist confirm')
+    const data = { id: Number(options.id) }
+    if (options['dry-run']) {
+      print(await agentPreview('packlist.confirm', data, { resourceId: options.id, asnCode: options['asn-code'] || '' }), json)
+    } else {
+      print(await request('/asn/serial/packlists/confirm/', {
+        method: 'POST',
+        headers: agentConfirmationHeaders(options, 'packlist confirm'),
+        json: data
+      }), json)
+    }
     return
   }
 

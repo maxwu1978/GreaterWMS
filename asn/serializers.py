@@ -4,6 +4,7 @@ from utils import datasolve
 from supplier.shortname import generated_supplier_short_name
 from asnserial.models import (
     HOLD_QUARANTINE,
+    PackListImportBatch,
     REPAIR_REWORK,
     REJECT_RETURN,
 )
@@ -99,7 +100,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         if cache_key in cache:
             return cache[cache_key]
 
-        from asnserial.models import PackListDocument
+        from asnserial.models import PackListDocument, PackListImportBatch
 
         documents = PackListDocument.objects.filter(
             openid=obj.openid,
@@ -207,6 +208,17 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             exception_resolved=True,
             exception_resolution_action=REJECT_RETURN,
         ).count()
+        latest_qc_batch = PackListImportBatch.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+        ).order_by('-created_at', '-id').first()
+        qc_import_incomplete = bool(
+            latest_qc_batch and latest_qc_batch.status in (
+                PackListImportBatch.IMPORTED,
+                PackListImportBatch.PARTIAL,
+            )
+        )
         extra_scan_count = max(received - actual_received_qty, 0)
         current_pack_list = PackListDocument.objects.filter(
             openid=obj.openid,
@@ -274,6 +286,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             and not records.exists()
             and not expected
             and not has_open_quantity_exception
+            and not qc_import_incomplete
         )
         if quantity_only_resolved:
             accepted_for_putaway = actual_received_qty
@@ -284,6 +297,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             and not missing
             and not quantity_exceptions
             and not pack_list_variance
+            and not qc_import_incomplete
         )
         if exceptions or quantity_exceptions or pack_list_variance:
             status = 'EXCEPTIONS'
@@ -316,6 +330,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'exceptions': exceptions,
             'quantity_exceptions': quantity_exceptions,
             'pack_list_variance': pack_list_variance,
+            'qc_import_incomplete': qc_import_incomplete,
             'qc_complete': qc_complete,
             'ready_for_putaway': bool(qc_complete and accepted_for_putaway > 0),
         }
