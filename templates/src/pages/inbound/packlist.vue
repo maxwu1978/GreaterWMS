@@ -267,14 +267,23 @@ export default {
       this.selectedReconciliation = row
       this.reconciliationOpen = true
     },
-    skuQtySummary (document) {
+    skuQtyLines (document) {
       const lines = document && Array.isArray(document.lines) ? document.lines : []
-      if (!lines.length) return (document && document.line_count ? document.line_count : 0) + ' SKUs / ' + (document && document.total_qty ? document.total_qty : 0) + ' units'
-      if (lines.length <= 3) return lines.map(line => line.goods_code + ' x ' + line.goods_qty).join(' | ')
-      return lines.length + ' SKUs / ' + (document.total_qty || 0) + ' units'
+      const totals = {}
+      lines.forEach(line => {
+        const goodsCode = line.goods_code || '-'
+        totals[goodsCode] = (totals[goodsCode] || 0) + Number(line.goods_qty || 0)
+      })
+      return Object.keys(totals).map(goodsCode => ({ goodsCode, qty: totals[goodsCode] }))
+    },
+    skuQtySummary (document) {
+      const skuLines = this.skuQtyLines(document)
+      if (!skuLines.length) return (document && document.line_count ? document.line_count : 0) + ' lines / ' + (document && document.total_qty ? document.total_qty : 0) + ' units'
+      if (skuLines.length <= 3) return skuLines.map(line => line.goodsCode + ' x ' + line.qty).join(' | ')
+      return skuLines.length + ' SKUs / ' + (document.total_qty || 0) + ' units'
     },
     skuQtyTooltip (document) {
-      return (document.lines || []).map(line => line.goods_code + ' x ' + line.goods_qty).join(' | ')
+      return this.skuQtyLines(document).map(line => line.goodsCode + ' x ' + line.qty).join(' | ')
     },
     statusLabel (status) {
       return {
