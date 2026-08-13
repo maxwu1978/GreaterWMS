@@ -261,6 +261,23 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(replay, {'detail': 'success'})
         self.assertEqual(replay_command.id, command.id)
 
+    def test_invalid_agent_token_is_a_client_error(self):
+        request = self.agent_request({
+            'id': 123,
+            'confirmation_token': 'invalid-token',
+            'idempotency_key': 'packlist-confirm-invalid-1',
+        })
+
+        with self.assertRaises(Exception) as raised:
+            consume_preview(
+                request,
+                'packlist.confirm',
+                request_payload(request),
+                resource_id='123',
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+
     def test_summary_exposes_pending_pack_list_reconciliation(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
         detail.goods_actual_qty = 2

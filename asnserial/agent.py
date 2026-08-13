@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.exceptions import APIException, PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from staff.models import ListModel as Staff
 
@@ -123,7 +123,7 @@ def consume_preview(request, operation, payload, resource_id='', asn_code=''):
     token = _control_value(request, 'confirmation_token')
     idempotency_key = _control_value(request, 'idempotency_key')
     if not token or not idempotency_key:
-        raise APIException({
+        raise ValidationError({
             'detail': 'A confirmation token and idempotency key are required. Run the command with --dry-run first.',
             'code': 'AGENT_CONFIRMATION_REQUIRED',
         })
@@ -134,19 +134,19 @@ def consume_preview(request, operation, payload, resource_id='', asn_code=''):
             confirmation_token_hash=token_hash,
         ).first()
         if command is None:
-            raise APIException({'detail': 'Confirmation token is invalid or belongs to another tenant', 'code': 'AGENT_TOKEN_INVALID'})
+            raise ValidationError({'detail': 'Confirmation token is invalid or belongs to another tenant', 'code': 'AGENT_TOKEN_INVALID'})
         if command.operation != operation or command.resource_id != str(resource_id or ''):
-            raise APIException({'detail': 'Confirmation token does not match this operation', 'code': 'AGENT_TOKEN_MISMATCH'})
+            raise ValidationError({'detail': 'Confirmation token does not match this operation', 'code': 'AGENT_TOKEN_MISMATCH'})
         if command.asn_code and command.asn_code != str(asn_code or ''):
-            raise APIException({'detail': 'Confirmation token does not match this ASN', 'code': 'AGENT_TOKEN_MISMATCH'})
+            raise ValidationError({'detail': 'Confirmation token does not match this ASN', 'code': 'AGENT_TOKEN_MISMATCH'})
         if command.payload_hash != payload_hash(payload):
-            raise APIException({'detail': 'Payload differs from the reviewed preview', 'code': 'AGENT_PAYLOAD_CHANGED'})
+            raise ValidationError({'detail': 'Payload differs from the reviewed preview', 'code': 'AGENT_PAYLOAD_CHANGED'})
         if command.idempotency_key and command.idempotency_key != str(idempotency_key):
-            raise APIException({'detail': 'Idempotency key differs from the reviewed command', 'code': 'AGENT_IDEMPOTENCY_CHANGED'})
+            raise ValidationError({'detail': 'Idempotency key differs from the reviewed command', 'code': 'AGENT_IDEMPOTENCY_CHANGED'})
         if command.status == AgentCommandPreview.EXECUTED:
             return command, command.result
         if command.expires_at <= timezone.now():
-            raise APIException({'detail': 'Confirmation token has expired; create a new preview', 'code': 'AGENT_TOKEN_EXPIRED'})
+            raise ValidationError({'detail': 'Confirmation token has expired; create a new preview', 'code': 'AGENT_TOKEN_EXPIRED'})
         command.idempotency_key = str(idempotency_key)
         command.save(update_fields=['idempotency_key'])
         return command, None
