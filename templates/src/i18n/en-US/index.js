@@ -390,6 +390,7 @@ export default {
       asn_code: 'ASN Code',
       owner_customer: 'Owner / Customer',
       asn_status: 'ASN Status',
+      operational_status: 'Status',
       all_status: 'All Statuses',
       precheck_status: 'Pre-receiving Check',
       sku_count: 'SKUs',

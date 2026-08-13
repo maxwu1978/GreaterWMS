@@ -30,6 +30,11 @@ class ASNListGetSerializer(serializers.ModelSerializer):
     staging_occupied_qty = serializers.SerializerMethodField()
     arrival_status = serializers.SerializerMethodField()
     serial_acceptance = serializers.SerializerMethodField()
+    putaway_qty = serializers.SerializerMethodField()
+    operational_status = serializers.SerializerMethodField()
+    operational_status_reason = serializers.SerializerMethodField()
+    next_action_code = serializers.SerializerMethodField()
+    next_action_label = serializers.SerializerMethodField()
     putaway_driver = serializers.CharField(read_only=True, required=False)
 
     def get_supplier_short_name(self, obj):
@@ -264,6 +269,124 @@ class ASNListGetSerializer(serializers.ModelSerializer):
 
     def get_serial_acceptance(self, obj):
         return self._get_serial_acceptance(obj)
+
+    def _get_putaway_summary(self, obj):
+        cache = self.context.setdefault('_asn_putaway_summary_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key not in cache:
+            details = list(AsnDetailModel.objects.filter(
+                openid=obj.openid,
+                asn_code=obj.asn_code,
+                is_delete=False,
+            ).values('goods_actual_qty', 'sorted_qty'))
+            actual_qty = sum(int(detail['goods_actual_qty'] or 0) for detail in details)
+            putaway_qty = sum(int(detail['sorted_qty'] or 0) for detail in details)
+            cache[cache_key] = {
+                'actual_qty': actual_qty,
+                'putaway_qty': putaway_qty,
+                'complete': bool(details) and putaway_qty >= actual_qty and actual_qty > 0,
+            }
+        return cache[cache_key]
+
+    def _get_operational_summary(self, obj):
+        cache = self.context.setdefault('_asn_operational_summary_cache', {})
+        cache_key = (obj.openid, obj.asn_code)
+        if cache_key in cache:
+            return cache[cache_key]
+
+        serial = self._get_serial_acceptance(obj)
+        putaway = self._get_putaway_summary(obj)
+        pack_list_status = self.get_pack_list_status(obj)
+        actual_qty = int(self._get_detail_aggregate(obj)['actual_qty'] or 0)
+        open_exceptions = int(serial.get('exceptions') or 0) + int(serial.get('quantity_exceptions') or 0)
+        has_scan_result = serial.get('status') != 'NOT_IMPORTED'
+        inspection_incomplete = not serial.get('ready_for_putaway', False)
+
+        if not obj.actual_arrival_at:
+            result = {
+                'status': 'PENDING_ARRIVAL',
+                'reason': 'Physical arrival is not confirmed.',
+                'action': 'SET_ETA',
+                'action_label': 'Set ETA',
+            }
+        elif int(obj.asn_status or 0) == 1:
+            result = {
+                'status': 'READY_TO_UNLOAD',
+                'reason': 'Arrival is confirmed; unloading has not started.',
+                'action': 'START_UNLOADING',
+                'action_label': 'Start Unloading',
+            }
+        elif int(obj.asn_status or 0) == 2:
+            result = {
+                'status': 'UNLOADING',
+                'reason': 'Unloading is in progress.',
+                'action': 'FINISH_UNLOADING',
+                'action_label': 'Finish Unloading',
+            }
+        elif open_exceptions > 0 or serial.get('status') == 'EXCEPTIONS':
+            result = {
+                'status': 'QC_REVIEW_REQUIRED',
+                'reason': (
+                    '%s open receiving exception(s) require QC resolution.' % open_exceptions
+                    if open_exceptions > 0 else
+                    'Receiving or Pack List reconciliation requires QC review.'
+                ),
+                'action': 'REVIEW_QC',
+                'action_label': 'Review QC',
+            }
+        elif actual_qty <= 0 or not has_scan_result or inspection_incomplete:
+            result = {
+                'status': 'RECEIVING_REVIEW',
+                'reason': 'Arrival is confirmed but receiving inspection is not complete.',
+                'action': 'REVIEW_RECEIVING',
+                'action_label': 'Review Receiving',
+            }
+        elif pack_list_status in ('PENDING', 'LATE_PENDING'):
+            result = {
+                'status': 'PACK_LIST_REVIEW',
+                'reason': 'Pack List is imported but not confirmed.',
+                'action': 'REVIEW_PACK_LIST',
+                'action_label': 'Review Pack List',
+            }
+        elif putaway['complete']:
+            result = {
+                'status': 'PUTAWAY_COMPLETE',
+                'reason': 'All received quantity has been put away.',
+                'action': 'VIEW',
+                'action_label': 'View',
+            }
+        elif putaway['putaway_qty'] < putaway['actual_qty']:
+            result = {
+                'status': 'READY_FOR_PUTAWAY',
+                'reason': 'Receiving is accepted and quantity remains to be put away.',
+                'action': 'ASSIGN_DRIVER_PUTAWAY',
+                'action_label': 'Assign & Putaway',
+            }
+        else:
+            result = {
+                'status': 'RECEIVING_REVIEW',
+                'reason': 'Receiving status requires review.',
+                'action': 'REVIEW_RECEIVING',
+                'action_label': 'Review Receiving',
+            }
+
+        cache[cache_key] = result
+        return result
+
+    def get_putaway_qty(self, obj):
+        return self._get_putaway_summary(obj)['putaway_qty']
+
+    def get_operational_status(self, obj):
+        return self._get_operational_summary(obj)['status']
+
+    def get_operational_status_reason(self, obj):
+        return self._get_operational_summary(obj)['reason']
+
+    def get_next_action_code(self, obj):
+        return self._get_operational_summary(obj)['action']
+
+    def get_next_action_label(self, obj):
+        return self._get_operational_summary(obj)['action_label']
 
     def get_actual_qty(self, obj):
         return self._get_detail_aggregate(obj)['actual_qty']

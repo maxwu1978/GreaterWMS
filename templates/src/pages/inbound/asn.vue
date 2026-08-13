@@ -57,10 +57,11 @@
               <q-chip
                 dense
                 square
-                :color="statusColor(props.row.asn_status_code)"
+                :color="operationalStatusColor(props.row)"
                 text-color="dark"
               >
-                {{ props.row.asn_status_label }}
+                {{ operationalStatusLabel(props.row) }}
+                <q-tooltip>{{ operationalStatusReason(props.row) }}</q-tooltip>
               </q-chip>
             </q-td>
             <q-td key="eta" :props="props" class="text-center asn-arrival-cell">
@@ -102,6 +103,9 @@
               <div class="asn-staging-line text-caption text-grey-6" :title="'Putaway driver: ' + (props.row.putaway_driver || 'Not assigned')">
                 PUT {{ props.row.putaway_driver || '-' }}
               </div>
+              <div class="asn-staging-line text-caption text-grey-6" :title="'Putaway progress: ' + (props.row.putaway_qty || 0) + ' / ' + (props.row.actual_qty || 0)">
+                PA {{ props.row.putaway_qty || 0 }} / {{ props.row.actual_qty || 0 }}
+              </div>
             </q-td>
             <q-td key="pack_list_status" :props="props" class="asn-pack-list-cell">
               <q-chip
@@ -122,8 +126,10 @@
                 :title="serialAcceptanceTitle(props.row.serial_acceptance)"
                 @click="openSerialPanel(props.row)"
               >
-                SN {{ props.row.serial_acceptance.accepted || 0 }}/{{ props.row.serial_acceptance.expected || 0 }}
-                {{ serialAcceptanceLabel(props.row.serial_acceptance) }} · Qty {{ props.row.actual_qty || 0 }}
+                {{ serialAcceptanceSummary(props.row) }}
+              </div>
+              <div v-else-if="props.row.actual_qty" class="asn-serial-summary text-caption text-grey-7">
+                QC Not Started · Received {{ props.row.actual_qty || 0 }}
               </div>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center asn-exception-cell">
@@ -150,13 +156,14 @@
               <div class="row no-wrap justify-center items-center">
                 <q-btn
                   dense
-                  round
                   flat
+                  no-caps
+                  class="asn-next-action"
                   :color="nextAction(props.row).color"
                   :icon="nextAction(props.row).icon"
                   @click="handleNextAction(props.row)"
                 >
-                  <q-tooltip>{{ nextAction(props.row).label }}</q-tooltip>
+                  {{ nextAction(props.row).label }}
                 </q-btn>
                 <q-btn
                   v-if="hasAdditionalActions(props.row)"
@@ -900,6 +907,21 @@
   min-height: 28px;
 }
 
+.asn-list-table .asn-next-action {
+  max-width: 100%;
+  min-width: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asn-list-table .asn-next-action .q-btn__content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .asn-list-table .asn-pack-list-cell .q-chip,
 .asn-list-table .asn-action-cell .q-chip {
   max-width: 100%;
@@ -1005,7 +1027,7 @@ export default {
       columns: [
         { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 11%;', headerStyle: 'width: 11%;' },
         { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 15%;', headerStyle: 'width: 15%;' },
-        { name: 'asn_status', label: this.$t('inbound.view_asn.asn_status'), field: 'asn_status_label', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
+        { name: 'asn_status', label: this.$t('inbound.view_asn.operational_status'), field: 'operational_status', align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
         { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 11%;', headerStyle: 'width: 11%;' },
         { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 9%;', headerStyle: 'width: 9%;' },
         { name: 'staging_bin', label: 'Staging / Driver', field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
@@ -1179,16 +1201,34 @@ export default {
       return Number((row.serial_acceptance && row.serial_acceptance.exceptions) || 0)
     },
     serialAcceptanceTitle (summary) {
-      return 'Serial acceptance: ' + (summary.accepted || 0) + '/' + (summary.expected || 0) +
-        ' accepted, actual received qty ' + (summary.actual_received_qty || 0) +
-        ', ' + (summary.scan_record_count || summary.received || 0) + ' SN records, ' +
-        (summary.exceptions || 0) + ' open exceptions'
+      const scanned = summary.scan_record_count || summary.received || 0
+      const extra = summary.extra_scan_count || 0
+      const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
+      return 'Expected SN: ' + (summary.expected || 0) +
+        ' | Received qty: ' + (summary.actual_received_qty || 0) +
+        ' | Scanned: ' + scanned +
+        ' | Accepted: ' + (summary.accepted_for_putaway || summary.accepted || 0) +
+        ' | Extra: ' + extra +
+        ' | Open exceptions: ' + open
+    },
+    serialAcceptanceSummary (row) {
+      const summary = row.serial_acceptance || {}
+      const expected = Number(summary.expected || row.planned_qty || 0)
+      const accepted = Number(summary.accepted_for_putaway || summary.accepted || 0)
+      const scanned = Number(summary.scan_record_count || summary.received || 0)
+      const extra = Number(summary.extra_scan_count || 0)
+      const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
+      const parts = ['SN ' + accepted + '/' + expected, 'Scanned ' + scanned]
+      if (extra > 0) parts.push('Extra ' + extra + (Number(summary.resolved || 0) >= extra ? ' Resolved' : ''))
+      if (open > 0) parts.push('Open ' + open)
+      return parts.join(' · ')
     },
     exceptionSignals (row) {
       const signals = []
       const serialExceptions = this.serialAcceptanceExceptions(row)
       const quantityExceptions = Number(row.exception_qty || 0)
       const precheckStatus = row.precheck_status
+      const qcNotStarted = !row.serial_acceptance || row.serial_acceptance.status === 'NOT_IMPORTED'
 
       if (serialExceptions > 0) {
         signals.push({
@@ -1233,7 +1273,7 @@ export default {
           color: 'negative',
           textColor: 'white'
         })
-      } else if (precheckStatus === 'NO_PACK_LIST' && !this.qcChecked(row)) {
+      } else if (precheckStatus === 'NO_PACK_LIST' && row.actual_arrival_at && qcNotStarted) {
         signals.push({
           key: 'no-pack-list',
           label: this.$t('inbound.view_asn.precheck_no_pack_list'),
@@ -1241,7 +1281,7 @@ export default {
           color: 'orange-3',
           textColor: 'dark'
         })
-      } else if (!this.qcChecked(row) && signals.length === 0) {
+      } else if (row.actual_arrival_at && qcNotStarted && signals.length === 0) {
         signals.push({
           key: 'not-checked',
           label: this.$t('inbound.view_asn.exception_not_checked'),
@@ -1276,9 +1316,6 @@ export default {
     },
     precheckNeedsAttention (row) {
       return ['PACK_LIST_PENDING', 'PACK_LIST_MISMATCH', 'SN_INCOMPLETE'].includes(row.precheck_status)
-    },
-    qcChecked (row) {
-      return Number(row.asn_status_code) >= 4
     },
     stagingLabel (row) {
       if (row.staging_bin) return row.staging_bin
@@ -1329,18 +1366,57 @@ export default {
       this.viewForm = false
       this.deleteData(row)
     },
+    operationalStatusLabel (row) {
+      const labels = {
+        PENDING_ARRIVAL: 'Pending Arrival',
+        READY_TO_UNLOAD: 'Ready to Unload',
+        UNLOADING: 'Unloading',
+        RECEIVING_REVIEW: 'Receiving Review',
+        QC_REVIEW_REQUIRED: 'QC Review Required',
+        PACK_LIST_REVIEW: 'Pack List Review',
+        READY_FOR_PUTAWAY: 'Ready for Putaway',
+        PUTAWAY_COMPLETE: 'Putaway Complete'
+      }
+      return labels[row.operational_status] || row.asn_status_label || 'Unknown'
+    },
+    operationalStatusReason (row) {
+      return row.operational_status_reason || 'Operational status'
+    },
+    operationalStatusColor (row) {
+      return {
+        PENDING_ARRIVAL: 'blue-2',
+        READY_TO_UNLOAD: 'primary',
+        UNLOADING: 'orange-3',
+        RECEIVING_REVIEW: 'amber-3',
+        QC_REVIEW_REQUIRED: 'negative',
+        PACK_LIST_REVIEW: 'orange-3',
+        READY_FOR_PUTAWAY: 'purple-3',
+        PUTAWAY_COMPLETE: 'positive'
+      }[row.operational_status] || this.statusColor(row.asn_status_code)
+    },
     nextAction (row) {
-      if (Number(row.asn_status_code) === 4 && row.serial_acceptance && row.serial_acceptance.ready_for_putaway === false) {
-        return { label: 'Review QC', icon: 'fact_check', color: 'negative', handler: 'openSerialPanel' }
-      }
       const actions = {
-        1: { label: row.actual_arrival_at ? 'Start Unloading' : 'Mark Arrived', icon: row.actual_arrival_at ? 'local_shipping' : 'schedule', color: 'primary', handler: row.actual_arrival_at ? 'preloadData' : 'markArrived' },
-        2: { label: this.$t('inbound.view_asn.finish_unloading'), icon: 'file_download', color: 'orange-8', handler: 'presortData' },
-        3: { label: this.$t('inbound.view_asn.record_receipt'), icon: 'fact_check', color: 'amber-9', handler: 'sortedData' },
-        4: { label: this.$t('inbound.view_asn.start_putaway'), icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
-        5: { label: this.$t('asn_actions.view'), icon: 'visibility', color: 'grey-7', handler: 'view' }
+        SET_ETA: { label: 'Set ETA', icon: 'schedule', color: 'primary', handler: 'updateEta' },
+        MARK_ARRIVED: { label: 'Mark Arrived', icon: 'local_shipping', color: 'positive', handler: 'markArrived' },
+        START_UNLOADING: { label: 'Start Unloading', icon: 'local_shipping', color: 'primary', handler: 'preloadData' },
+        FINISH_UNLOADING: { label: 'Finish Unloading', icon: 'file_download', color: 'orange-8', handler: 'presortData' },
+        REVIEW_RECEIVING: { label: 'Review Receiving', icon: 'fact_check', color: 'amber-9', handler: 'sortedData' },
+        REVIEW_QC: { label: 'Review QC', icon: 'fact_check', color: 'negative', handler: 'openSerialPanel' },
+        REVIEW_PACK_LIST: { label: 'Review Pack List', icon: 'description', color: 'orange-8', handler: 'openPackList' },
+        ASSIGN_DRIVER_PUTAWAY: { label: 'Assign & Putaway', icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
+        VIEW: { label: 'View', icon: 'visibility', color: 'grey-7', handler: 'view' }
       }
-      return actions[Number(row.asn_status_code)] || actions[5]
+      if (row.next_action_code && actions[row.next_action_code]) {
+        return actions[row.next_action_code]
+      }
+      const legacy = {
+        1: { label: row.actual_arrival_at ? 'Start Unloading' : 'Set ETA', icon: row.actual_arrival_at ? 'local_shipping' : 'schedule', color: 'primary', handler: row.actual_arrival_at ? 'preloadData' : 'updateEta' },
+        2: actions.FINISH_UNLOADING,
+        3: actions.REVIEW_RECEIVING,
+        4: actions.ASSIGN_DRIVER_PUTAWAY,
+        5: actions.VIEW
+      }
+      return legacy[Number(row.asn_status_code)] || actions.VIEW
     },
     hasAdditionalActions (row) {
       return Number(row.asn_status_code) === 1

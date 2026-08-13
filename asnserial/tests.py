@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from django.db import IntegrityError
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
@@ -140,6 +141,52 @@ class PackListWorkflowTests(TestCase):
 
         self.assertEqual(data['pack_list_status'], 'NOT_RECEIVED')
         self.assertEqual(data['serial_acceptance']['status'], 'NOT_IMPORTED')
+
+    def test_asn_serializer_exposes_operational_status_for_work_queue(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+
+        data = ASNListGetSerializer(asn, context={}).data
+        self.assertEqual(data['operational_status'], 'PENDING_ARRIVAL')
+        self.assertEqual(data['next_action_code'], 'SET_ETA')
+
+        asn.actual_arrival_at = timezone.now()
+        asn.asn_status = 4
+        asn.save(update_fields=['actual_arrival_at', 'asn_status'])
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        for serial_number in ('SN-STATUS-001', 'SN-STATUS-002'):
+            AsnSerialRecord.objects.create(
+                openid=self.openid,
+                asn_code=self.asn_code,
+                goods_code='702-S',
+                serial_number=serial_number,
+                status=AsnSerialRecord.ACCEPTED,
+                is_expected=True,
+                is_received=True,
+            )
+        _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            self.rows(),
+            content_hash='status-pending',
+            package_qty=2,
+        )
+
+        data = ASNListGetSerializer(asn, context={}).data
+        self.assertEqual(data['operational_status'], 'PACK_LIST_REVIEW')
+        self.assertEqual(data['next_action_code'], 'REVIEW_PACK_LIST')
+        self.assertEqual(data['putaway_qty'], 0)
+
+        damaged = AsnSerialRecord.objects.get(serial_number='SN-STATUS-002')
+        damaged.status = AsnSerialRecord.DAMAGED
+        damaged.damaged = True
+        damaged.note = 'Outer packaging damage'
+        damaged.save(update_fields=['status', 'damaged', 'note'])
+        data = ASNListGetSerializer(asn, context={}).data
+        self.assertEqual(data['operational_status'], 'QC_REVIEW_REQUIRED')
+        self.assertEqual(data['next_action_code'], 'REVIEW_QC')
 
     def test_extra_scan_record_does_not_increase_received_or_putaway_qty(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
