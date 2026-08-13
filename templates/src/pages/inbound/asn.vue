@@ -1217,6 +1217,8 @@ export default {
         ACCEPTED: 'Accepted',
         EXCEPTIONS: 'Exceptions',
         PARTIAL: 'Partial',
+        PARTIAL_HOLD: 'Partial Hold',
+        REPAIR_HOLD: 'Repair Hold',
         EXPECTED: 'Expected',
         UNVERIFIED: 'Unverified'
       }[summary.status] || summary.status
@@ -1226,6 +1228,8 @@ export default {
         ACCEPTED: 'positive',
         EXCEPTIONS: 'negative',
         PARTIAL: 'warning',
+        PARTIAL_HOLD: 'warning',
+        REPAIR_HOLD: 'orange-8',
         EXPECTED: 'grey-7',
         UNVERIFIED: 'orange-8'
       }[summary.status] || 'grey-7'
@@ -1236,12 +1240,14 @@ export default {
     serialAcceptanceTitle (summary) {
       const scanned = summary.scan_record_count || summary.received || 0
       const extra = summary.extra_scan_count || 0
+      const repair = summary.repair || 0
       const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
       return 'Expected SN: ' + (summary.expected || 0) +
         ' | Received qty: ' + (summary.actual_received_qty || 0) +
         ' | Scanned: ' + scanned +
         ' | Eligible: ' + (summary.eligible_for_putaway || summary.accepted_for_putaway || summary.accepted || 0) +
         ' | Held: ' + (summary.held || 0) +
+        ' | Repair: ' + repair +
         ' | Rejected: ' + (summary.rejected || 0) +
         ' | Extra: ' + extra +
         ' | Open exceptions: ' + open
@@ -1253,10 +1259,12 @@ export default {
       const scanned = Number(summary.scan_record_count || summary.received || 0)
       const extra = Number(summary.extra_scan_count || 0)
       const held = Number(summary.held || 0)
+      const repair = Number(summary.repair || 0)
       const rejected = Number(summary.rejected || 0)
       const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
       const parts = ['SN ' + accepted + '/' + expected, 'Scans ' + scanned]
       if (held > 0) parts.push('Hold ' + held)
+      if (repair > 0) parts.push('Repair ' + repair)
       if (rejected > 0) parts.push('Reject ' + rejected)
       if (extra > 0) parts.push('Extra ' + extra + (Number(summary.resolved || 0) >= extra ? ' OK' : ''))
       if (open > 0) parts.push('Open ' + open)
@@ -1289,6 +1297,7 @@ export default {
       }
 
       const held = Number((row.serial_acceptance && row.serial_acceptance.held) || 0)
+      const repair = Number((row.serial_acceptance && row.serial_acceptance.repair) || 0)
       const rejected = Number((row.serial_acceptance && row.serial_acceptance.rejected) || 0)
       if (held > 0) {
         signals.push({
@@ -1306,6 +1315,15 @@ export default {
           title: 'Rejected or returned serials: ' + rejected,
           color: 'negative',
           textColor: 'white'
+        })
+      }
+      if (repair > 0) {
+        signals.push({
+          key: 'repair',
+          label: 'Repair: ' + repair,
+          title: 'Units in repair / rework: ' + repair,
+          color: 'orange-3',
+          textColor: 'dark'
         })
       }
 
@@ -1433,8 +1451,11 @@ export default {
         UNLOADING: 'Unloading',
         RECEIVING_REVIEW: 'Receiving Review',
         QC_REVIEW_REQUIRED: 'QC Review Required',
+        QC_PARTIAL_HOLD: 'QC Hold',
+        REPAIR_HOLD: 'Repair Hold',
         PACK_LIST_REVIEW: 'Pack List Review',
         READY_FOR_PUTAWAY: 'Ready for Putaway',
+        READY_FOR_PUTAWAY_PARTIAL: 'Ready for Putaway',
         PUTAWAY_COMPLETE: 'Putaway Complete'
       }
       return labels[row.operational_status] || row.asn_status_label || 'Unknown'
@@ -1446,8 +1467,11 @@ export default {
         UNLOADING: 'Unloading',
         RECEIVING_REVIEW: 'Receiving Review',
         QC_REVIEW_REQUIRED: 'QC Review',
+        QC_PARTIAL_HOLD: 'QC Hold',
+        REPAIR_HOLD: 'Repair Hold',
         PACK_LIST_REVIEW: 'Pack Review',
         READY_FOR_PUTAWAY: 'Ready Putaway',
+        READY_FOR_PUTAWAY_PARTIAL: 'Ready Partial',
         PUTAWAY_COMPLETE: 'Putaway Done'
       }
       return labels[row.operational_status] || this.operationalStatusFullLabel(row)
@@ -1462,8 +1486,11 @@ export default {
         UNLOADING: 'orange-3',
         RECEIVING_REVIEW: 'amber-3',
         QC_REVIEW_REQUIRED: 'negative',
+        QC_PARTIAL_HOLD: 'amber-3',
+        REPAIR_HOLD: 'orange-3',
         PACK_LIST_REVIEW: 'orange-3',
         READY_FOR_PUTAWAY: 'purple-3',
+        READY_FOR_PUTAWAY_PARTIAL: 'purple-3',
         PUTAWAY_COMPLETE: 'positive'
       }[row.operational_status] || this.statusColor(row.asn_status_code)
     },
@@ -1475,6 +1502,7 @@ export default {
         FINISH_UNLOADING: { label: 'Finish Unloading', icon: 'file_download', color: 'orange-8', handler: 'presortData' },
         REVIEW_RECEIVING: { label: 'Review Receiving', icon: 'fact_check', color: 'amber-9', handler: 'sortedData' },
         REVIEW_QC: { label: 'Review QC', icon: 'fact_check', color: 'negative', handler: 'openSerialPanel' },
+        REVIEW_REPAIR: { label: 'Review Repair', icon: 'build', color: 'orange-8', handler: 'openSerialPanel' },
         REVIEW_PACK_LIST: { label: 'Review Pack List', icon: 'description', color: 'orange-8', handler: 'openPackList' },
         ASSIGN_DRIVER_PUTAWAY: { label: 'Assign & Putaway', icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
         VIEW: { label: 'View', icon: 'visibility', color: 'grey-7', handler: 'view' }

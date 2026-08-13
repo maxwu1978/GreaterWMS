@@ -30,7 +30,7 @@
         <div class="col-6 col-md-1 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
       </div>
       <div v-if="summary.receiving_summary" class="text-caption q-mt-xs">
-        Received: <strong>{{ summary.receiving_summary.received_qty || 0 }}</strong> · Accepted: <strong>{{ summary.receiving_summary.accepted || 0 }}</strong> · Accepted for Putaway: <strong>{{ summary.receiving_summary.accepted_for_putaway || 0 }}</strong> · Putaway: <strong>{{ summary.receiving_summary.putaway_qty || 0 }}</strong> · Exceptions: <strong>{{ summary.receiving_summary.open_exceptions || 0 }}</strong><span v-if="summary.receiving_summary.extra_scan_records"> · Extra scans: {{ summary.receiving_summary.extra_scan_records }}</span>
+        Received: <strong>{{ summary.receiving_summary.received_qty || 0 }}</strong> · Accepted: <strong>{{ summary.receiving_summary.accepted || 0 }}</strong> · Accepted for Putaway: <strong>{{ summary.receiving_summary.accepted_for_putaway || 0 }}</strong> · Repair: <strong>{{ summary.receiving_summary.repair_qty || 0 }}</strong> · Putaway: <strong>{{ summary.receiving_summary.putaway_qty || 0 }}</strong> · Exceptions: <strong>{{ summary.receiving_summary.open_exceptions || 0 }}</strong><span v-if="summary.receiving_summary.extra_scan_records"> · Extra scans: {{ summary.receiving_summary.extra_scan_records }}</span>
       </div>
       <div v-if="summary.pack_list_status === 'PENDING' || summary.pack_list_status === 'LATE_PENDING'" class="text-caption text-orange-10 q-mt-xs">Pack List pending confirmation.</div>
       <div v-else-if="summary.pack_list_timing === 'LATE_REFERENCE'" class="text-caption text-blue-10 q-mt-xs">Late reference revision.</div>

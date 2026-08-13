@@ -139,17 +139,35 @@ node tools/greaterwms.mjs serial exceptions \
 
 If the scan shows a wrong SKU, duplicate SN, damage, unexpected SN, or missing
 SN, the record is an open exception. QC must record a resolution action and
-note before putaway. A note is required for an approval:
+note before putaway. A note is required for an approval. A damaged unit that
+needs repair must be moved to a repair or quarantine location and kept out of
+putaway until reinspection:
 
 \`\`\`bash
 node tools/greaterwms.mjs serial resolve \
   --id 456 \
-  --data '{"action":"ACCEPT_EXCEPTION","note":"QC approved after photo review"}' \
+  --data '{"action":"REPAIR_REWORK","note":"Needs repair and reinspection","resolution_location":"REPAIR-01"}' \
   --dry-run \
   --json
 node tools/greaterwms.mjs serial resolve \
   --id 456 \
-  --data '{"action":"ACCEPT_EXCEPTION","note":"QC approved after photo review"}' \
+  --data '{"action":"REPAIR_REWORK","note":"Needs repair and reinspection","resolution_location":"REPAIR-01"}' \
+  --confirm \
+  --json
+\`\`\`
+
+After repair, reopen the same SN for reinspection, then accept it only if QC
+passes:
+
+\`\`\`bash
+node tools/greaterwms.mjs serial resolve \
+  --id 456 \
+  --data '{"action":"REOPEN","note":"Ready for reinspection"}' \
+  --confirm \
+  --json
+node tools/greaterwms.mjs serial resolve \
+  --id 456 \
+  --data '{"action":"ACCEPT_FOR_PUTAWAY","note":"Passed reinspection"}' \
   --confirm \
   --json
 \`\`\`

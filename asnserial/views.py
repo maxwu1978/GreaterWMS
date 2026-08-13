@@ -19,6 +19,7 @@ from .models import (
     HOLD_QUARANTINE,
     LEGACY_ACCEPT_EXCEPTION,
     NON_PUTAWAY_RESOLUTIONS,
+    REPAIR_REWORK,
     REJECT_RETURN,
     AsnSerialRecord,
     PackListDocument,
@@ -41,6 +42,7 @@ SERIAL_EXCEPTION_ACTIONS = {
     ACCEPT_FOR_PUTAWAY,
     LEGACY_ACCEPT_EXCEPTION,
     HOLD_QUARANTINE,
+    REPAIR_REWORK,
     REJECT_RETURN,
     'WAIVE_MISSING',
     'REOPEN',
@@ -65,6 +67,13 @@ def _resolved_reject_count(records):
     return records.filter(
         exception_resolved=True,
         exception_resolution_action=REJECT_RETURN,
+    ).count()
+
+
+def _resolved_repair_count(records):
+    return records.filter(
+        exception_resolved=True,
+        exception_resolution_action=REPAIR_REWORK,
     ).count()
 
 
@@ -377,6 +386,10 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             'goods_shortage_qty': int(detail.goods_shortage_qty or 0),
             'goods_more_qty': int(detail.goods_more_qty or 0),
             'goods_damage_qty': int(detail.goods_damage_qty or 0),
+            'repair_count': sum(
+                1 for record in line_records
+                if record.exception_resolved and record.exception_resolution_action == REPAIR_REWORK
+            ),
             'serial_mismatch_count': serial_mismatch_count,
             'result': result,
         })
@@ -442,6 +455,7 @@ def _summary(openid, asn_code):
             'eligible_for_putaway': accepted_for_putaway,
             'resolved_exception_count': resolved_count,
             'held_count': _resolved_hold_count(line_records),
+            'repair_count': _resolved_repair_count(line_records),
             'rejected_count': _resolved_reject_count(line_records),
             'missing_serial_count': missing_count,
             'exception_count': exception_count,
@@ -595,6 +609,7 @@ def _summary(openid, asn_code):
             'eligible_for_putaway': accepted_for_putaway_total,
             'putaway_qty': physical_putaway_qty,
             'held_qty': _resolved_hold_count(records),
+            'repair_qty': _resolved_repair_count(records),
             'rejected_qty': _resolved_reject_count(records),
             'extra_scan_records': extra_scan_record_count,
             'open_exceptions': open_reconciliation_exceptions,
@@ -613,6 +628,7 @@ def _summary(openid, asn_code):
         'total_accepted_for_putaway': accepted_for_putaway_total,
         'total_eligible_for_putaway': accepted_for_putaway_total,
         'total_held_serials': _resolved_hold_count(records),
+        'total_repair_serials': _resolved_repair_count(records),
         'total_rejected_serials': _resolved_reject_count(records),
         'total_putaway_qty': physical_putaway_qty,
         'total_extra_scan_records': extra_scan_record_count,
@@ -887,7 +903,7 @@ class SerialExceptionResolveView(APIView):
         action = str(data.get('action') or '').strip().upper()
         if action not in SERIAL_EXCEPTION_ACTIONS:
             raise APIException({
-                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REJECT_RETURN, WAIVE_MISSING, or REOPEN'
+                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REPAIR_REWORK, REJECT_RETURN, WAIVE_MISSING, or REOPEN'
             })
         record = AsnSerialRecord.objects.filter(id=record_id, openid=openid).first()
         if not record:
@@ -950,11 +966,12 @@ class QuantityExceptionResolveView(APIView):
             ACCEPT_FOR_PUTAWAY,
             LEGACY_ACCEPT_EXCEPTION,
             HOLD_QUARANTINE,
+            REPAIR_REWORK,
             REJECT_RETURN,
             'REOPEN',
         }:
             raise APIException({
-                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REJECT_RETURN, or REOPEN'
+                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REPAIR_REWORK, REJECT_RETURN, or REOPEN'
             })
         detail = AsnDetailModel.objects.filter(
             openid=openid,

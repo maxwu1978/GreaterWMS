@@ -4,6 +4,7 @@ from utils import datasolve
 from supplier.shortname import generated_supplier_short_name
 from asnserial.models import (
     HOLD_QUARANTINE,
+    REPAIR_REWORK,
     REJECT_RETURN,
 )
 
@@ -198,6 +199,10 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             exception_resolved=True,
             exception_resolution_action=HOLD_QUARANTINE,
         ).count()
+        repair = records.filter(
+            exception_resolved=True,
+            exception_resolution_action=REPAIR_REWORK,
+        ).count()
         rejected = records.filter(
             exception_resolved=True,
             exception_resolution_action=REJECT_RETURN,
@@ -277,6 +282,8 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             status = 'NOT_IMPORTED'
         elif expected and accepted_for_putaway >= expected and not missing:
             status = 'ACCEPTED'
+        elif repair or held or rejected:
+            status = 'PARTIAL_HOLD'
         elif received:
             status = 'PARTIAL'
         else:
@@ -295,6 +302,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'putaway_qty': accepted_for_putaway,
             'resolved': resolved,
             'held': held,
+            'repair': repair,
             'rejected': rejected,
             'exceptions': exceptions,
             'quantity_exceptions': quantity_exceptions,
@@ -336,6 +344,11 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         pack_list_status = self.get_pack_list_status(obj)
         actual_qty = int(self._get_detail_aggregate(obj)['actual_qty'] or 0)
         open_exceptions = int(serial.get('exceptions') or 0) + int(serial.get('quantity_exceptions') or 0)
+        non_putaway_units = (
+            int(serial.get('held') or 0)
+            + int(serial.get('repair') or 0)
+            + int(serial.get('rejected') or 0)
+        )
         has_scan_result = serial.get('status') != 'NOT_IMPORTED'
         inspection_incomplete = not serial.get('qc_complete', False)
 
@@ -392,12 +405,46 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 'action': 'VIEW',
                 'action_label': 'View',
             }
-        elif serial.get('qc_complete') and int(serial.get('eligible_for_putaway') or 0) <= 0:
+        elif serial.get('qc_complete') and int(serial.get('eligible_for_putaway') or 0) <= 0 and int(serial.get('repair') or 0) > 0:
             result = {
-                'status': 'QC_REVIEW_REQUIRED',
-                'reason': 'QC is complete, but no received units are eligible for putaway.',
+                'status': 'REPAIR_HOLD',
+                'reason': '%s unit(s) remain in repair/reinspection.' % int(serial.get('repair') or 0),
+                'action': 'REVIEW_REPAIR',
+                'action_label': 'Review Repair',
+            }
+        elif serial.get('qc_complete') and int(serial.get('eligible_for_putaway') or 0) <= 0 and non_putaway_units > 0:
+            result = {
+                'status': 'QC_PARTIAL_HOLD',
+                'reason': 'QC is complete, but held or rejected units remain.',
                 'action': 'REVIEW_QC',
                 'action_label': 'Review QC',
+            }
+        elif serial.get('qc_complete') and non_putaway_units > 0 and int(serial.get('eligible_for_putaway') or 0) <= putaway['putaway_qty']:
+            result = {
+                'status': 'REPAIR_HOLD' if int(serial.get('repair') or 0) > 0 else 'QC_PARTIAL_HOLD',
+                'reason': (
+                    '%s repair unit(s) remain for reinspection.' % int(serial.get('repair') or 0)
+                    if int(serial.get('repair') or 0) > 0 else
+                    'Held or rejected units remain after eligible units were put away.'
+                ),
+                'action': 'REVIEW_REPAIR' if int(serial.get('repair') or 0) > 0 else 'REVIEW_QC',
+                'action_label': 'Review Repair' if int(serial.get('repair') or 0) > 0 else 'Review QC',
+            }
+        elif serial.get('qc_complete') and non_putaway_units > 0 and int(serial.get('eligible_for_putaway') or 0) > putaway['putaway_qty']:
+            result = {
+                'status': 'READY_FOR_PUTAWAY_PARTIAL',
+                'reason': (
+                    '%s unit(s) eligible for putaway; %s unit(s) remain in repair/reinspection.' % (
+                        int(serial.get('eligible_for_putaway') or 0) - putaway['putaway_qty'],
+                        int(serial.get('repair') or 0),
+                    )
+                    if int(serial.get('repair') or 0) > 0 else
+                    '%s unit(s) eligible for putaway; held or rejected units remain.' % (
+                        int(serial.get('eligible_for_putaway') or 0) - putaway['putaway_qty'],
+                    )
+                ),
+                'action': 'ASSIGN_DRIVER_PUTAWAY',
+                'action_label': 'Assign & Putaway',
             }
         elif putaway['putaway_qty'] < putaway['actual_qty'] and int(serial.get('eligible_for_putaway') or 0) > 0:
             result = {

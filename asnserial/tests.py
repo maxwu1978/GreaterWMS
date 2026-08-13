@@ -10,6 +10,7 @@ from asn.serializers import ASNListGetSerializer
 
 from .models import (
     HOLD_QUARANTINE,
+    REPAIR_REWORK,
     REJECT_RETURN,
     AsnSerialRecord,
     PackListDocument,
@@ -543,3 +544,46 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(summary['total_rejected_serials'], 1)
         self.assertEqual(summary['total_eligible_for_putaway'], 0)
         self.assertFalse(summary['ready_for_putaway'])
+
+    def test_repair_serial_keeps_partial_putaway_available(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        asn.actual_arrival_at = timezone.now()
+        asn.asn_status = 4
+        asn.save(update_fields=['actual_arrival_at', 'asn_status'])
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-OK-REPAIR-001',
+            status=AsnSerialRecord.ACCEPTED,
+            is_expected=True,
+            is_received=True,
+        )
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-REPAIR-001',
+            status=AsnSerialRecord.DAMAGED,
+            is_expected=True,
+            is_received=True,
+            damaged=True,
+            exception_resolved=True,
+            exception_resolution_action=REPAIR_REWORK,
+            exception_resolution_note='Needs repair and reinspection.',
+            exception_resolution_location='REPAIR-01',
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+        self.assertTrue(summary['qc_complete'])
+        self.assertEqual(summary['total_eligible_for_putaway'], 1)
+        self.assertEqual(summary['total_repair_serials'], 1)
+        self.assertTrue(summary['ready_for_putaway'])
+
+        data = ASNListGetSerializer(asn, context={}).data
+        self.assertEqual(data['serial_acceptance']['repair'], 1)
+        self.assertEqual(data['operational_status'], 'READY_FOR_PUTAWAY_PARTIAL')
+        self.assertEqual(data['next_action_code'], 'ASSIGN_DRIVER_PUTAWAY')

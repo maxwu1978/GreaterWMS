@@ -42,6 +42,7 @@
           <div class="col-6 col-sm-3"><q-chip color="green-2">Accepted: {{ selectedLine.accepted_serial_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="purple-2">Eligible: {{ eligibleForPutaway }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="amber-2">Held: {{ selectedLine.held_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="orange-2">Repair: {{ selectedLine.repair_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="orange-2">Rejected: {{ selectedLine.rejected_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Open: {{ selectedLine.exception_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="grey-3">Putaway done: {{ (summary && summary.total_putaway_qty) || 0 }}</q-chip></div>
@@ -99,9 +100,19 @@
           </template>
           <template v-slot:body-cell-disposition="props">
             <q-td :props="props">
-              <q-chip v-if="props.row.exception_resolved" dense square :color="dispositionColor(props.row.exception_resolution_action)">
-                {{ dispositionLabel(props.row.exception_resolution_action) }}
-              </q-chip>
+              <template v-if="props.row.exception_resolved">
+                <q-chip dense square :color="dispositionColor(props.row.exception_resolution_action)">
+                  {{ dispositionLabel(props.row.exception_resolution_action) }}
+                </q-chip>
+                <q-btn
+                  v-if="props.row.exception_resolution_action === 'REPAIR_REWORK'"
+                  dense
+                  flat
+                  color="primary"
+                  label="Reinspect"
+                  @click="openSerialResolution(props.row)"
+                />
+              </template>
               <q-btn
                 v-else-if="canResolve(props.row)"
                 dense
@@ -116,7 +127,7 @@
         </q-table>
 
         <div class="text-caption text-grey-7">
-          QC completion controls putaway eligibility. Assign the putaway driver and final storage bin from the ASN putaway action after this review.
+          QC completion controls putaway eligibility. Repair units remain in the repair location until reinspection; assign the putaway driver and final storage bin for eligible units from the ASN putaway action.
         </div>
       </q-card-section>
     </q-card>
@@ -250,6 +261,7 @@ export default {
       if (!this.summary) return 'Loading QC result.'
       if (this.openExceptionCount > 0) return 'QC action required. Resolve every open exception before putaway.'
       if (!this.summary.qc_complete) return 'QC result is incomplete. Review the imported acceptance result.'
+      if (this.selectedLine.repair_count > 0 && this.eligibleForPutaway < Number(this.selectedLine.received_qty || 0)) return 'QC complete. Put away eligible units only; repair units require reinspection.'
       if (this.eligibleForPutaway < Number(this.selectedLine.received_qty || 0)) return 'QC complete with held or rejected units. Put away eligible quantity only.'
       return 'QC complete. Assign the putaway driver and final storage bin.'
     },
@@ -261,13 +273,14 @@ export default {
       return this.resolutionType === 'quantity' ? 'Quantity disposition' : 'SN disposition'
     },
     requiresLocation () {
-      return this.resolutionAction === 'HOLD_QUARANTINE' || this.resolutionAction === 'REJECT_RETURN'
+      return this.resolutionAction === 'HOLD_QUARANTINE' || this.resolutionAction === 'REPAIR_REWORK' || this.resolutionAction === 'REJECT_RETURN'
     },
     resolutionActionOptions () {
       if (this.resolutionType === 'quantity') {
         return [
           { label: 'Accept for putaway', value: 'ACCEPT_FOR_PUTAWAY' },
           { label: 'Hold / quarantine', value: 'HOLD_QUARANTINE' },
+          { label: 'Repair / rework', value: 'REPAIR_REWORK' },
           { label: 'Reject / return', value: 'REJECT_RETURN' },
           { label: 'Reopen', value: 'REOPEN' }
         ]
@@ -281,6 +294,7 @@ export default {
       return [
         { label: 'Accept for putaway', value: 'ACCEPT_FOR_PUTAWAY' },
         { label: 'Hold / quarantine', value: 'HOLD_QUARANTINE' },
+        { label: 'Repair / rework', value: 'REPAIR_REWORK' },
         { label: 'Reject / return', value: 'REJECT_RETURN' },
         { label: 'Reopen', value: 'REOPEN' }
       ]
@@ -408,6 +422,7 @@ export default {
         ACCEPT_EXCEPTION: 'Accepted for Putaway',
         ACCEPT_FOR_PUTAWAY: 'Accepted for Putaway',
         HOLD_QUARANTINE: 'Held / Quarantine',
+        REPAIR_REWORK: 'Repair / Rework',
         REJECT_RETURN: 'Rejected / Return',
         WAIVE_MISSING: 'Missing SN Waived',
         REOPEN: 'Open'
@@ -418,6 +433,7 @@ export default {
         ACCEPT_EXCEPTION: 'positive',
         ACCEPT_FOR_PUTAWAY: 'positive',
         HOLD_QUARANTINE: 'amber-3',
+        REPAIR_REWORK: 'orange-3',
         REJECT_RETURN: 'negative',
         WAIVE_MISSING: 'orange-3',
         REOPEN: 'grey-4'
