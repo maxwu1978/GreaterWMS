@@ -854,9 +854,6 @@ export default {
                   localStorage.removeItem('menulink')
                   _this.link = ''
                   _this.$router.push({ name: 'web_index' })
-                  window.setTimeout(() => {
-                    location.reload()
-                  }, 1)
                 }
               })
               .catch((err) => {
@@ -909,9 +906,6 @@ export default {
                 localStorage.removeItem('menulink')
                 _this.link = ''
                 _this.$router.push({ name: 'web_index' })
-                window.setTimeout(() => {
-                  location.reload()
-                }, 1)
               } else {
                 _this.$q.notify({
                   message: res.msg,
@@ -980,9 +974,6 @@ export default {
             localStorage.removeItem('menulink')
             _this.link = ''
             _this.$router.push({ name: 'web_index' })
-            window.setTimeout(() => {
-              location.reload()
-            }, 1)
           } else {
             _this.$q.notify({
               message: res.msg,
@@ -1057,7 +1048,9 @@ export default {
       if (this.$q.localStorage.getItem('openid')) {
         this.login = true
       } else {
-        this.register = true
+        // A fresh browser needs to log in; registration is an explicit action.
+        this.register = false
+        this.login = true
       }
     }
   },
@@ -1086,6 +1079,9 @@ export default {
       LocalStorage.set('staff_type', 'Admin')
       _this.authin = '0'
       _this.isLoggedIn()
+    }
+    if (_this.$route.name === 'login') {
+      _this.login = true
     }
   },
   mounted () {
