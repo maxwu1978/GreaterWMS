@@ -44,7 +44,7 @@
           <div class="col-6 col-sm-3"><q-chip color="amber-2">Held: {{ selectedLine.held_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="orange-2">Rejected: {{ selectedLine.rejected_count || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Open: {{ selectedLine.exception_count || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="grey-3">Putaway done: {{ summary.total_putaway_qty || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="grey-3">Putaway done: {{ (summary && summary.total_putaway_qty) || 0 }}</q-chip></div>
         </div>
 
         <div v-if="quantityExceptionQty" class="row items-center q-gutter-sm">
