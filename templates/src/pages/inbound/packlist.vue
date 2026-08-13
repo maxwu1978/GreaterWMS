@@ -1,11 +1,10 @@
 <template>
-  <div class="q-pa-sm">
+  <div class="q-pa-sm packlist-page">
     <div class="row q-col-gutter-sm">
       <div class="col-12 col-lg-7">
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pb-xs">
             <div class="text-subtitle2">Customer Pack List</div>
-            <div class="text-caption text-grey-7">Reference data. It may arrive before or after the goods.</div>
           </q-card-section>
           <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
             <div class="col-12 col-md-5">
@@ -42,7 +41,6 @@
         <q-card flat bordered class="full-height">
           <q-card-section class="q-pb-xs">
             <div class="text-subtitle2">QC Inspection</div>
-            <div class="text-caption text-grey-7">Import the operator's inspection workbook. Each import is a separate QC round.</div>
           </q-card-section>
           <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
             <div class="col-12">
@@ -62,23 +60,22 @@
       </div>
     </div>
 
-    <q-banner v-if="summary" class="q-mt-sm" :class="summary.reconciliation_status === 'EXCEPTION' ? 'bg-red-1' : (summary.reconciliation_status === 'PASSED' ? 'bg-green-1' : 'bg-orange-1')">
-      <div class="row items-center q-col-gutter-md">
-        <div class="col-12 col-md-4">
-          <div class="text-subtitle2">Receiving Reconciliation</div>
-          <div class="text-caption">{{ summary.customer_short_name || summary.customer || '-' }} · {{ asnCode }}</div>
+    <q-banner v-if="summary" dense class="q-mt-sm q-pa-sm" :class="summary.reconciliation_status === 'EXCEPTION' ? 'bg-red-1' : (summary.reconciliation_status === 'PASSED' ? 'bg-green-1' : 'bg-orange-1')">
+      <div class="row items-center q-col-gutter-sm">
+        <div class="col-12 col-md-3">
+          <div class="text-subtitle2">{{ summary.customer_short_name || summary.customer || '-' }} · {{ asnCode }}</div>
         </div>
         <div class="col-6 col-md-2"><q-chip dense :color="statusColor(summary.reconciliation_status)">{{ statusLabel(summary.reconciliation_status) }}</q-chip></div>
         <div class="col-6 col-md-2 text-caption">Pack List: <strong>{{ packListLabel(summary.pack_list_status) }}</strong></div>
         <div class="col-6 col-md-2 text-caption">QC: <strong>{{ summary.qc_status || 'NOT_STARTED' }}</strong></div>
         <div class="col-6 col-md-2 text-caption">Customer SN: <strong>{{ summary.customer_sn_status || 'NOT_PROVIDED' }}</strong></div>
-        <div class="col-6 col-md-2 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
+        <div class="col-6 col-md-1 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
       </div>
       <div v-if="summary.receiving_summary" class="text-caption q-mt-xs">
-        Received Qty: <strong>{{ summary.receiving_summary.received_qty || 0 }}</strong> · SN Records: <strong>{{ summary.receiving_summary.scan_record_count || 0 }}</strong> · Accepted SN: <strong>{{ summary.receiving_summary.accepted || 0 }}</strong> · Putaway Qty: <strong>{{ summary.receiving_summary.accepted_for_putaway || 0 }}</strong> · Open exceptions: {{ summary.receiving_summary.open_exceptions || 0 }} · Resolved: {{ summary.receiving_summary.resolved_exceptions || 0 }}<span v-if="summary.receiving_summary.extra_scan_records"> · Extra scan records: {{ summary.receiving_summary.extra_scan_records }}</span>
+        Received: <strong>{{ summary.receiving_summary.received_qty || 0 }}</strong> · Accepted: <strong>{{ summary.receiving_summary.accepted || 0 }}</strong> · Putaway: <strong>{{ summary.receiving_summary.accepted_for_putaway || 0 }}</strong> · Exceptions: <strong>{{ summary.receiving_summary.open_exceptions || 0 }}</strong><span v-if="summary.receiving_summary.extra_scan_records"> · Extra scans: {{ summary.receiving_summary.extra_scan_records }}</span>
       </div>
-      <div v-if="summary.pack_list_status === 'PENDING' || summary.pack_list_status === 'LATE_PENDING'" class="text-caption text-orange-10 q-mt-xs">Confirm the customer Pack List before using it as the receiving baseline.</div>
-      <div v-if="summary.pack_list_timing === 'LATE_REFERENCE'" class="text-caption text-blue-10 q-mt-xs">This Pack List was received after physical receiving started and is stored as a late reference revision.</div>
+      <div v-if="summary.pack_list_status === 'PENDING' || summary.pack_list_status === 'LATE_PENDING'" class="text-caption text-orange-10 q-mt-xs">Pack List pending confirmation.</div>
+      <div v-else-if="summary.pack_list_timing === 'LATE_REFERENCE'" class="text-caption text-blue-10 q-mt-xs">Late reference revision.</div>
     </q-banner>
 
     <q-table
@@ -138,8 +135,12 @@
       </template>
       <template v-slot:body-cell-action="props">
         <q-td :props="props">
-          <q-btn v-if="props.row.is_current && props.row.status !== 'CONFIRMED'" dense flat color="positive" icon="check" label="Confirm" @click="confirmDocument(props.row)" />
-          <q-btn dense flat color="info" icon="visibility" @click="showDocument(props.row)" />
+          <q-btn v-if="props.row.is_current && props.row.status !== 'CONFIRMED'" dense flat round color="positive" icon="check" @click="confirmDocument(props.row)">
+            <q-tooltip>Confirm Pack List</q-tooltip>
+          </q-btn>
+          <q-btn dense flat round color="info" icon="visibility" @click="showDocument(props.row)">
+            <q-tooltip>View Pack List</q-tooltip>
+          </q-btn>
         </q-td>
       </template>
     </q-table>
@@ -155,6 +156,9 @@
       no-data-label="No QC inspection imported"
     >
       <template v-slot:top-left><div class="text-subtitle2">QC Inspection History</div></template>
+      <template v-slot:body-cell-created_at="props">
+        <q-td :props="props">{{ formatDate(props.value) }}</q-td>
+      </template>
       <template v-slot:body-cell-status="props">
         <q-td :props="props"><q-chip dense :color="inspectionColor(props.value)">{{ props.value }}</q-chip></q-td>
       </template>
@@ -284,10 +288,8 @@ export default {
       ],
       columns: [
         { name: 'version', label: 'Revision', field: 'version', align: 'center' },
-        { name: 'asn_code', label: 'ASN', field: 'asn_code', align: 'left' },
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
         { name: 'timing', label: 'Timing', field: 'late_reference', align: 'center' },
-        { name: 'line_count', label: 'Lines', field: 'line_count', align: 'center' },
         { name: 'total_qty', label: 'Qty', field: 'total_qty', align: 'center' },
         { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
@@ -297,10 +299,9 @@ export default {
         { name: 'id', label: 'Round', field: 'id', align: 'center' },
         { name: 'created_at', label: 'Imported', field: 'created_at', align: 'left' },
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
-        { name: 'matched_count', label: 'Rows', field: 'matched_count', align: 'center' },
+        { name: 'matched_count', label: 'Scanned', field: 'matched_count', align: 'center' },
         { name: 'accepted_count', label: 'Accepted', field: 'accepted_count', align: 'center' },
-        { name: 'exception_count', label: 'Exceptions', field: 'exception_count', align: 'center' },
-        { name: 'source_type', label: 'Source', field: 'source_type', align: 'center' }
+        { name: 'exception_count', label: 'Exceptions', field: 'exception_count', align: 'center' }
       ],
       reconciliationColumns: [
         { name: 'goods_code', label: 'SKU', field: 'goods_code', align: 'left', style: 'width: 13%;', headerStyle: 'width: 13%;' },
@@ -455,6 +456,13 @@ export default {
 </script>
 
 <style scoped>
+.packlist-page {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 24px;
+}
+
 .reconciliation-table .ellipsis-cell {
   max-width: 180px;
   overflow: hidden;
