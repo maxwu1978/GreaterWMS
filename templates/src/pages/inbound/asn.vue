@@ -129,7 +129,7 @@
                 {{ serialAcceptanceSummary(props.row) }}
               </div>
               <div v-else-if="props.row.actual_qty" class="asn-serial-summary text-caption text-grey-7">
-                QC Not Started · Received {{ props.row.actual_qty || 0 }}
+                {{ props.row.serial_acceptance && props.row.serial_acceptance.qc_complete ? 'Qty Accepted' : 'QC Not Started' }} · Received {{ props.row.actual_qty || 0 }}
               </div>
             </q-td>
             <q-td key="exception_qty" :props="props" class="text-center asn-exception-cell">
@@ -230,7 +230,11 @@
             <q-tooltip content-class="bg-amber text-black shadow-4">{{ $t('index.close') }}</q-tooltip>
           </q-btn>
         </q-bar>
-        <q-card-section style="max-height: 325px; width: 400px" class="scroll">
+        <q-card-section v-if="sortedLoading" style="width: 400px" class="row items-center justify-center q-pa-xl">
+          <q-spinner color="primary" size="2em" />
+          <span class="q-ml-sm">Loading receiving details...</span>
+        </q-card-section>
+        <q-card-section v-else style="max-height: 325px; width: 400px" class="scroll">
           <q-select
             filled
             use-input
@@ -826,7 +830,7 @@
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="sortedDataCancel()">{{ $t('cancel') }}</q-btn>
-          <q-btn color="primary" @click="sortedDataSubmit()">{{ $t('submit') }}</q-btn>
+          <q-btn color="primary" :disable="sortedLoading || !sorted_list.goodsData.length" @click="sortedDataSubmit()">{{ $t('submit') }}</q-btn>
         </div>
       </q-card>
     </q-dialog>
@@ -1098,6 +1102,7 @@ export default {
       editid: 0,
       editFormData: {},
       sortedForm: false,
+      sortedLoading: false,
       sortedid: 0,
       sorted_list: {
         asn_code: '',
@@ -2184,10 +2189,28 @@ export default {
       } else {
         _this.sorted_list.asn_code = e.asn_code
         _this.sorted_list.supplier = e.supplier
-        getauth(_this.pathname + 'detail/?asn_code=' + e.asn_code).then(res => {
-          _this.sortedForm = true
+        _this.sortedLoading = true
+        _this.sortedForm = true
+        getauth(_this.pathname + 'detail/?asn_code=' + encodeURIComponent(e.asn_code)).then(res => {
+          const goodsData = Array.isArray(res.results) ? res.results : []
+          if (!goodsData.length) {
+            throw new Error('No receiving details were found for ' + e.asn_code)
+          }
           _this.sortedid = e.id
-          _this.sorted_list.goodsData = res.results
+          _this.sorted_list.goodsData = goodsData
+        }).catch(err => {
+          const responseDetail = err && err.response && err.response.data && err.response.data.detail
+          const message = typeof responseDetail === 'string'
+            ? responseDetail
+            : (err && err.message) || 'Unable to load receiving details'
+          _this.sortedForm = false
+          _this.$q.notify({
+            message: message,
+            icon: 'close',
+            color: 'negative'
+          })
+        }).then(() => {
+          _this.sortedLoading = false
         })
       }
     },
@@ -2208,8 +2231,9 @@ export default {
           }
         })
         .catch(err => {
+          const responseDetail = err && err.response && err.response.data && err.response.data.detail
           _this.$q.notify({
-            message: err.detail,
+            message: typeof responseDetail === 'string' ? responseDetail : (err.detail || 'Unable to submit receiving details'),
             icon: 'close',
             color: 'negative'
           })
@@ -2218,6 +2242,7 @@ export default {
     sortedDataCancel () {
       var _this = this
       _this.sortedForm = false
+      _this.sortedLoading = false
       _this.sortedid = 0
       _this.sorted_list = {
         asn_code: '',

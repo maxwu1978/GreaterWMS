@@ -428,21 +428,22 @@ def _summary(openid, asn_code):
         exception_count = line_records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing_count = line_records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
         actual_received_qty = int(detail.goods_actual_qty or 0)
+        quantity_exception_qty = (
+            int(detail.goods_shortage_qty or 0)
+            + int(detail.goods_more_qty or 0)
+            + int(detail.goods_damage_qty or 0)
+        )
         quantity_only_resolved = (
             actual_received_qty > 0
             and not line_records.exists()
             and not strict_serial_check
-            and bool(detail.exception_resolved)
+            and (bool(detail.exception_resolved) or quantity_exception_qty == 0)
         )
         accepted_for_putaway = actual_received_qty if quantity_only_resolved else min(
             accepted_count + resolved_putaway_count,
             actual_received_qty,
         )
-        quantity_exception_qty = 0 if detail.exception_resolved else (
-            int(detail.goods_shortage_qty or 0)
-            + int(detail.goods_more_qty or 0)
-            + int(detail.goods_damage_qty or 0)
-        )
+        quantity_exception_qty = 0 if detail.exception_resolved else quantity_exception_qty
         lines.append({
             'goods_code': detail.goods_code,
             'planned_qty': detail.goods_qty,
@@ -485,7 +486,14 @@ def _summary(openid, asn_code):
         actual_received_qty > 0
         and not records.exists()
         and not has_expected_serials
-        and not details.filter(exception_resolved=False).exists()
+        and not any(
+            not detail.exception_resolved and (
+                int(detail.goods_shortage_qty or 0)
+                + int(detail.goods_more_qty or 0)
+                + int(detail.goods_damage_qty or 0)
+            ) > 0
+            for detail in details
+        )
     )
     accepted_for_putaway_total = actual_received_qty if quantity_only_resolved else min(
         accepted_total + resolved_putaway_total,

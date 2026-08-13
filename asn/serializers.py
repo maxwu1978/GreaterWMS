@@ -253,18 +253,27 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 if expected_serials[serial_number] != received_serials[serial_number]
             )
 
-        # Quantity-only receiving has no SN rows by design. It is complete
-        # here only after all quantity exceptions have been explicitly resolved.
+        # Quantity-only receiving has no SN rows by design. A normal quantity
+        # receipt has no exception to resolve; only open quantity exceptions
+        # must block completion.
+        details = AsnDetailModel.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+            is_delete=False,
+        )
+        has_open_quantity_exception = any(
+            not detail.exception_resolved and (
+                int(detail.goods_shortage_qty or 0)
+                + int(detail.goods_more_qty or 0)
+                + int(detail.goods_damage_qty or 0)
+            ) > 0
+            for detail in details
+        )
         quantity_only_resolved = (
             actual_received_qty > 0
             and not records.exists()
             and not expected
-            and not AsnDetailModel.objects.filter(
-                openid=obj.openid,
-                asn_code=obj.asn_code,
-                is_delete=False,
-                exception_resolved=False,
-            ).exists()
+            and not has_open_quantity_exception
         )
         if quantity_only_resolved:
             accepted_for_putaway = actual_received_qty
@@ -349,7 +358,12 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             + int(serial.get('repair') or 0)
             + int(serial.get('rejected') or 0)
         )
-        has_scan_result = serial.get('status') != 'NOT_IMPORTED'
+        # An ASN-only receipt is valid without SN rows. Use the computed
+        # receiving result instead of treating missing SN data as incomplete.
+        has_receiving_result = (
+            serial.get('status') != 'NOT_IMPORTED'
+            or serial.get('qc_complete', False)
+        )
         inspection_incomplete = not serial.get('qc_complete', False)
 
         if not obj.actual_arrival_at:
@@ -384,7 +398,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 'action': 'REVIEW_QC',
                 'action_label': 'Review QC',
             }
-        elif actual_qty <= 0 or not has_scan_result or inspection_incomplete:
+        elif int(obj.asn_status or 0) == 3 or actual_qty <= 0 or not has_receiving_result or inspection_incomplete:
             result = {
                 'status': 'RECEIVING_REVIEW',
                 'reason': 'Arrival is confirmed but receiving inspection is not complete.',

@@ -150,6 +150,32 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(data['pack_list_status'], 'NOT_RECEIVED')
         self.assertEqual(data['serial_acceptance']['status'], 'NOT_IMPORTED')
 
+    def test_quantity_only_receipt_without_pack_list_is_ready_for_putaway(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        asn.actual_arrival_at = timezone.now()
+        asn.asn_status = 3
+        asn.save(update_fields=['actual_arrival_at', 'asn_status'])
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+
+        receiving_review = ASNListGetSerializer(asn, context={}).data
+        self.assertEqual(receiving_review['operational_status'], 'RECEIVING_REVIEW')
+        self.assertEqual(receiving_review['next_action_code'], 'REVIEW_RECEIVING')
+
+        asn.asn_status = 4
+        asn.save(update_fields=['asn_status'])
+
+        data = ASNListGetSerializer(asn, context={}).data
+        summary = _summary(self.openid, self.asn_code)
+
+        self.assertEqual(data['serial_acceptance']['status'], 'NOT_IMPORTED')
+        self.assertTrue(data['serial_acceptance']['qc_complete'])
+        self.assertEqual(data['operational_status'], 'READY_FOR_PUTAWAY')
+        self.assertEqual(data['next_action_code'], 'ASSIGN_DRIVER_PUTAWAY')
+        self.assertTrue(summary['qc_complete'])
+        self.assertTrue(summary['ready_for_putaway'])
+
     def test_asn_serializer_exposes_operational_status_for_work_queue(self):
         asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
 
