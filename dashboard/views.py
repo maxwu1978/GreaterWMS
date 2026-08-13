@@ -25,6 +25,7 @@ from django.db.models import Sum
 import re
 from django.utils import timezone
 from staging.models import StagingAssignment
+from asnserial.views import _summary as receiving_summary
 
 class ReceiptsViewSet(viewsets.ModelViewSet):
     """
@@ -329,6 +330,18 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 row.goods_damage_qty,
             ])
             current['timestamp'] = max(current['timestamp'], self._timestamp(row))
+
+        for item in grouped.values():
+            if item['status'] == 4:
+                summary = receiving_summary(openid, item['reference'])
+                if not summary.get('ready_for_putaway', False):
+                    item.update({
+                        'operation': 'Review QC',
+                        'location': 'Stage',
+                        'action_route': 'asn',
+                        'planned': False,
+                        'blocked': True,
+                    })
 
         return [self._format_item(item, now) for item in grouped.values()]
 
