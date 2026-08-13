@@ -471,6 +471,7 @@ export default {
       const summary = context.serial_acceptance || {}
       const hasSerialResult = Boolean(summary.status && summary.status !== 'NOT_IMPORTED')
       const actual = Number(context.goods_actual_qty || context.actual_qty || 0)
+      const quantityOnlyAccepted = !hasSerialResult && Boolean(summary.qc_complete) && actual > 0
       const alreadyPutaway = Number(context.sorted_qty || context.putaway_qty || 0)
       const remaining = Math.max(actual - alreadyPutaway, 0)
       const expected = hasSerialResult ? Number(summary.expected || actual) : actual
@@ -487,6 +488,7 @@ export default {
         : remaining
       return {
         hasSerialResult,
+        quantityOnlyAccepted,
         actual,
         alreadyPutaway,
         remaining,
@@ -511,6 +513,9 @@ export default {
     },
     putawayBlockMessage (row) {
       const stats = this.putawayStats(row)
+      if (stats.quantityOnlyAccepted) {
+        return ''
+      }
       if (!stats.hasSerialResult) {
         return 'SN result not imported. Putaway is limited by received quantity.'
       }
