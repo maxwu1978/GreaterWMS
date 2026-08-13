@@ -36,6 +36,12 @@
           <div class="text-caption q-mt-xs">{{ summary.verification_note || 'QC result is recorded in GreaterWMS.' }}</div>
         </q-banner>
 
+        <div v-if="summary" class="qc-next-step q-pa-sm" :class="nextStepClass">
+          <div class="text-weight-medium">Next step</div>
+          <div>{{ nextStepLabel }}</div>
+          <div class="text-caption q-mt-xs">{{ nextStepDetail }}</div>
+        </div>
+
         <div class="row q-col-gutter-sm qc-metrics">
           <div class="col-6 col-sm-3"><q-chip color="blue-1">Planned: {{ selectedLine.planned_qty || 0 }}</q-chip></div>
           <div class="col-6 col-sm-3"><q-chip color="blue-1">Received: {{ selectedLine.received_qty || 0 }}</q-chip></div>
@@ -110,6 +116,14 @@
                   flat
                   color="primary"
                   label="Reinspect"
+                  @click="openSerialResolution(props.row)"
+                />
+                <q-btn
+                  v-if="canReopen(props.row)"
+                  dense
+                  flat
+                  color="primary"
+                  label="Reopen"
                   @click="openSerialResolution(props.row)"
                 />
               </template>
@@ -265,6 +279,37 @@ export default {
       if (this.eligibleForPutaway < Number(this.selectedLine.received_qty || 0)) return 'QC complete with held or rejected units. Put away eligible quantity only.'
       return 'QC complete. Assign the putaway driver and final storage bin.'
     },
+    remainingEligibleQty () {
+      return Math.max(
+        this.eligibleForPutaway - Number((this.summary && this.summary.total_putaway_qty) || 0),
+        0
+      )
+    },
+    blockedQty () {
+      return Number(this.selectedLine.held_count || 0) +
+        Number(this.selectedLine.repair_count || 0) +
+        Number(this.selectedLine.rejected_count || 0)
+    },
+    nextStepLabel () {
+      if (this.openExceptionCount > 0) return 'Resolve open QC exceptions before putaway.'
+      if (this.remainingEligibleQty > 0) return 'Assign the putaway driver and move the eligible quantity.'
+      if (this.blockedQty > 0) {
+        if (Number(this.selectedLine.repair_count || 0) > 0) return 'Process the repair / rework unit and complete reinspection.'
+        return 'Process the held / rejected unit.'
+      }
+      return 'No further receiving action is required.'
+    },
+    nextStepDetail () {
+      if (this.openExceptionCount > 0) return 'Resolve each exception, then return to Putaway for the eligible quantity.'
+      if (this.remainingEligibleQty > 0) return `${this.remainingEligibleQty} eligible unit(s) remain to be put away.`
+      if (this.blockedQty > 0) return `${this.blockedQty} unit(s) remain outside inventory. Keep them in the hold / return location, or reopen QC if the disposition must change.`
+      return 'The received quantity is either in inventory or has a recorded final disposition.'
+    },
+    nextStepClass () {
+      if (this.openExceptionCount > 0 || this.blockedQty > 0) return 'bg-orange-1'
+      if (this.remainingEligibleQty > 0) return 'bg-purple-1'
+      return 'bg-green-1'
+    },
     bannerClass () {
       if (this.openExceptionCount > 0) return 'bg-orange-1'
       return this.summary && this.summary.qc_complete ? 'bg-green-1' : 'bg-orange-1'
@@ -330,6 +375,12 @@ export default {
     },
     canResolve (record) {
       return Boolean(record.exception_resolved || record.status === 'UNEXPECTED' || record.status === 'DUPLICATE' || record.status === 'WRONG_SKU' || record.status === 'DAMAGED' || record.status === 'REJECTED' || (record.is_expected && !record.is_received))
+    },
+    canReopen (record) {
+      return Boolean(
+        record.exception_resolved &&
+        ['HOLD_QUARANTINE', 'REJECT_RETURN'].includes(record.exception_resolution_action)
+      )
     },
     openSerialResolution (record) {
       this.resolutionType = 'serial'
@@ -484,6 +535,10 @@ export default {
 
 .qc-decision-banner {
   border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.qc-next-step {
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .qc-metrics .q-chip {

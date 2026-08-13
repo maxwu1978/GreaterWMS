@@ -1474,6 +1474,9 @@ export default {
         READY_FOR_PUTAWAY_PARTIAL: 'Ready Partial',
         PUTAWAY_COMPLETE: 'Putaway Done'
       }
+      if (row.operational_status === 'QC_PARTIAL_HOLD' && this.qcBlockedQty(row) > 0) {
+        return 'QC Hold ' + this.qcBlockedQty(row)
+      }
       return labels[row.operational_status] || this.operationalStatusFullLabel(row)
     },
     operationalStatusReason (row) {
@@ -1494,6 +1497,10 @@ export default {
         PUTAWAY_COMPLETE: 'positive'
       }[row.operational_status] || this.statusColor(row.asn_status_code)
     },
+    qcBlockedQty (row) {
+      const summary = row.serial_acceptance || {}
+      return Number(summary.held || 0) + Number(summary.repair || 0) + Number(summary.rejected || 0)
+    },
     nextAction (row) {
       const actions = {
         SET_ETA: { label: 'Set ETA', icon: 'schedule', color: 'primary', handler: 'updateEta' },
@@ -1506,6 +1513,13 @@ export default {
         REVIEW_PACK_LIST: { label: 'Review Pack List', icon: 'description', color: 'orange-8', handler: 'openPackList' },
         ASSIGN_DRIVER_PUTAWAY: { label: 'Assign & Putaway', icon: 'move_to_inbox', color: 'purple', handler: 'putaway' },
         VIEW: { label: 'View', icon: 'visibility', color: 'grey-7', handler: 'view' }
+      }
+      if (row.next_action_code === 'REVIEW_QC' && this.qcBlockedQty(row) > 0) {
+        const eligible = Number((row.serial_acceptance && (row.serial_acceptance.eligible_for_putaway || row.serial_acceptance.accepted_for_putaway || row.serial_acceptance.accepted)) || 0)
+        const putaway = Number(row.putaway_qty || 0)
+        if (putaway >= eligible) {
+          return { label: 'Process Hold (' + this.qcBlockedQty(row) + ')', icon: 'fact_check', color: 'negative', handler: 'openSerialPanel' }
+        }
       }
       if (row.next_action_code && actions[row.next_action_code]) {
         return actions[row.next_action_code]

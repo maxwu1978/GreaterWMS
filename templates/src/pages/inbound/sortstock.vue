@@ -211,6 +211,7 @@
        v-model="serialPanelOpen"
        :asn-code="serialAsnCode"
        :goods-code="serialGoodsCode"
+       :asn-context="serialAsnContext"
      />
     </div>
 </template>
@@ -270,13 +271,15 @@ export default {
       paginationIpt: 1,
       serialPanelOpen: false,
       serialAsnCode: '',
-      serialGoodsCode: ''
+      serialGoodsCode: '',
+      serialAsnContext: {}
     }
   },
   methods: {
     openSerialPanel (e) {
       this.serialAsnCode = e.asn_code
       this.serialGoodsCode = e.goods_code
+      this.serialAsnContext = e || {}
       this.serialPanelOpen = true
     },
     getList () {
