@@ -61,7 +61,7 @@
                 text-color="dark"
               >
                 {{ operationalStatusLabel(props.row) }}
-                <q-tooltip>{{ operationalStatusReason(props.row) }}</q-tooltip>
+                <q-tooltip>{{ operationalStatusFullLabel(props.row) }} · {{ operationalStatusReason(props.row) }}</q-tooltip>
               </q-chip>
             </q-td>
             <q-td key="eta" :props="props" class="text-center asn-arrival-cell">
@@ -953,6 +953,13 @@
   white-space: nowrap;
 }
 
+.asn-list-table .asn-pack-list-cell .asn-serial-summary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .asn-list-table .asn-exception-cell {
   white-space: normal;
 }
@@ -1048,15 +1055,15 @@ export default {
       supplier_list1: [],
       supplier_detail: {},
       columns: [
-        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 9%;', headerStyle: 'width: 9%;' },
-        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 10%;', headerStyle: 'width: 10%;' },
-        { name: 'asn_status', label: this.$t('inbound.view_asn.operational_status'), field: 'operational_status', align: 'center', style: 'width: 16%;', headerStyle: 'width: 16%;' },
+        { name: 'asn_code', required: true, label: this.$t('inbound.view_asn.asn_code'), align: 'left', field: 'asn_code', style: 'width: 12%;', headerStyle: 'width: 12%;' },
+        { name: 'supplier', label: this.$t('inbound.view_asn.owner_customer'), field: 'supplier', align: 'left', style: 'width: 8%;', headerStyle: 'width: 8%;' },
+        { name: 'asn_status', label: this.$t('inbound.view_asn.operational_status'), field: 'operational_status', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
         { name: 'eta', label: 'ETA / Arrival', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
-        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 8%;', headerStyle: 'width: 8%;' },
-        { name: 'staging_bin', label: 'Staging / Driver', field: 'staging_bin', align: 'left', style: 'width: 12%;', headerStyle: 'width: 12%;' },
-        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
-        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 10%;', headerStyle: 'width: 10%;' },
-        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 15%;', headerStyle: 'width: 15%;' }
+        { name: 'sku_quantity', label: this.$t('inbound.view_asn.sku_quantity'), align: 'center', style: 'width: 7%;', headerStyle: 'width: 7%;' },
+        { name: 'staging_bin', label: 'Staging / Driver', field: 'staging_bin', align: 'left', style: 'width: 11%;', headerStyle: 'width: 11%;' },
+        { name: 'pack_list_status', label: this.$t('inbound.view_asn.pack_list_status'), field: 'pack_list_status', align: 'center', style: 'width: 15%;', headerStyle: 'width: 15%;' },
+        { name: 'exception_qty', label: this.$t('inbound.view_asn.exception_qty'), field: 'exception_qty', align: 'center', style: 'width: 14%;', headerStyle: 'width: 14%;' },
+        { name: 'next_action', label: this.$t('inbound.view_asn.next_action'), align: 'center', style: 'width: 13%;', headerStyle: 'width: 13%;' }
       ],
       filter: '',
       statusFilter: '',
@@ -1241,8 +1248,8 @@ export default {
       const scanned = Number(summary.scan_record_count || summary.received || 0)
       const extra = Number(summary.extra_scan_count || 0)
       const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
-      const parts = ['SN ' + accepted + '/' + expected, 'Scanned ' + scanned]
-      if (extra > 0) parts.push('Extra ' + extra + (Number(summary.resolved || 0) >= extra ? ' Resolved' : ''))
+      const parts = ['SN ' + accepted + '/' + expected, 'Scans ' + scanned]
+      if (extra > 0) parts.push('Extra ' + extra + (Number(summary.resolved || 0) >= extra ? ' OK' : ''))
       if (open > 0) parts.push('Open ' + open)
       return parts.join(' · ')
     },
@@ -1256,7 +1263,7 @@ export default {
       if (serialExceptions > 0) {
         signals.push({
           key: 'serial',
-          label: this.$t('inbound.view_asn.exception_sn') + ': ' + serialExceptions,
+          label: 'SN: ' + serialExceptions,
           title: 'Serial exceptions: ' + serialExceptions,
           color: 'negative',
           textColor: 'white'
@@ -1265,7 +1272,7 @@ export default {
       if (quantityExceptions > 0) {
         signals.push({
           key: 'quantity',
-          label: this.$t('inbound.view_asn.exception_quantity') + ': ' + quantityExceptions,
+          label: 'Qty: ' + quantityExceptions,
           title: 'Quantity exceptions: ' + quantityExceptions,
           color: 'negative',
           textColor: 'white'
@@ -1275,7 +1282,7 @@ export default {
       if (precheckStatus === 'PACK_LIST_PENDING') {
         signals.push({
           key: 'pack-list-review',
-          label: this.$t('inbound.view_asn.exception_pack_list_review'),
+          label: 'PL Review',
           title: 'Pack List is imported but not confirmed.',
           color: 'orange-3',
           textColor: 'dark'
@@ -1283,7 +1290,7 @@ export default {
       } else if (precheckStatus === 'PACK_LIST_MISMATCH') {
         signals.push({
           key: 'pack-list-mismatch',
-          label: this.$t('inbound.view_asn.precheck_pack_list_mismatch'),
+          label: 'PL Mismatch',
           title: 'ASN and Pack List quantities or SKUs do not match.',
           color: 'negative',
           textColor: 'white'
@@ -1291,7 +1298,7 @@ export default {
       } else if (precheckStatus === 'SN_INCOMPLETE') {
         signals.push({
           key: 'sn-pending',
-          label: this.$t('inbound.view_asn.precheck_sn_incomplete'),
+          label: 'SN Pending',
           title: 'SN verification is incomplete.',
           color: 'negative',
           textColor: 'white'
@@ -1299,7 +1306,7 @@ export default {
       } else if (precheckStatus === 'NO_PACK_LIST' && row.actual_arrival_at && qcNotStarted) {
         signals.push({
           key: 'no-pack-list',
-          label: this.$t('inbound.view_asn.precheck_no_pack_list'),
+          label: 'No Pack List',
           title: 'No customer Pack List is attached.',
           color: 'orange-3',
           textColor: 'dark'
@@ -1307,7 +1314,7 @@ export default {
       } else if (row.actual_arrival_at && qcNotStarted && signals.length === 0) {
         signals.push({
           key: 'not-checked',
-          label: this.$t('inbound.view_asn.exception_not_checked'),
+          label: 'QC Pending',
           title: 'Receiving inspection has not been completed.',
           color: 'grey-4',
           textColor: 'dark'
@@ -1389,7 +1396,7 @@ export default {
       this.viewForm = false
       this.deleteData(row)
     },
-    operationalStatusLabel (row) {
+    operationalStatusFullLabel (row) {
       const labels = {
         PENDING_ARRIVAL: 'Pending Arrival',
         READY_TO_UNLOAD: 'Ready to Unload',
@@ -1401,6 +1408,19 @@ export default {
         PUTAWAY_COMPLETE: 'Putaway Complete'
       }
       return labels[row.operational_status] || row.asn_status_label || 'Unknown'
+    },
+    operationalStatusLabel (row) {
+      const labels = {
+        PENDING_ARRIVAL: 'Await Arrival',
+        READY_TO_UNLOAD: 'Ready Unload',
+        UNLOADING: 'Unloading',
+        RECEIVING_REVIEW: 'Receiving Review',
+        QC_REVIEW_REQUIRED: 'QC Review',
+        PACK_LIST_REVIEW: 'Pack Review',
+        READY_FOR_PUTAWAY: 'Ready Putaway',
+        PUTAWAY_COMPLETE: 'Putaway Done'
+      }
+      return labels[row.operational_status] || this.operationalStatusFullLabel(row)
     },
     operationalStatusReason (row) {
       return row.operational_status_reason || 'Operational status'
