@@ -441,13 +441,11 @@ export default {
         postauth('asn/movetobin/' + _this.movedata.id + '/', payload).then(res => {
           _this.getList()
           _this.MoveToBinCancel()
-          if (!res.detail) {
-            _this.$q.notify({
-              message: 'Success Move To Bin',
-              icon: 'check',
-              color: 'green'
-            })
-          }
+          _this.$q.notify({
+            message: res.detail || 'Putaway completed',
+            icon: 'check',
+            color: 'green'
+          })
         }).catch(err => {
           _this.$q.notify({
             message: err.detail,
