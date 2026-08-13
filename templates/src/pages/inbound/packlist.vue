@@ -91,6 +91,12 @@
       <template v-slot:body-cell-timing="props">
         <q-td :props="props">{{ props.row.late_reference ? 'Late reference' : 'Before receipt' }}</q-td>
       </template>
+      <template v-slot:body-cell-sku_qty_summary="props">
+        <q-td :props="props" class="sku-summary-cell">
+          <span>{{ skuQtySummary(props.row) }}</span>
+          <q-tooltip v-if="props.row.lines && props.row.lines.length > 3">{{ skuQtyTooltip(props.row) }}</q-tooltip>
+        </q-td>
+      </template>
       <template v-slot:body-cell-action="props">
         <q-td :props="props">
           <q-btn dense flat round color="info" icon="visibility" @click="showDocument(props.row)">
@@ -191,10 +197,9 @@ export default {
       reconciliationOpen: false,
       selectedReconciliation: null,
       columns: [
-        { name: 'version', label: 'Revision', field: 'version', align: 'center' },
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
         { name: 'timing', label: 'Timing', field: 'late_reference', align: 'center' },
-        { name: 'total_qty', label: 'Qty', field: 'total_qty', align: 'center' },
+        { name: 'sku_qty_summary', label: 'SKU / Qty', align: 'left' },
         { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
         { name: 'action', label: 'View', align: 'right' }
@@ -262,6 +267,15 @@ export default {
       this.selectedReconciliation = row
       this.reconciliationOpen = true
     },
+    skuQtySummary (document) {
+      const lines = document && Array.isArray(document.lines) ? document.lines : []
+      if (!lines.length) return (document && document.line_count ? document.line_count : 0) + ' SKUs / ' + (document && document.total_qty ? document.total_qty : 0) + ' units'
+      if (lines.length <= 3) return lines.map(line => line.goods_code + ' x ' + line.goods_qty).join(' | ')
+      return lines.length + ' SKUs / ' + (document.total_qty || 0) + ' units'
+    },
+    skuQtyTooltip (document) {
+      return (document.lines || []).map(line => line.goods_code + ' x ' + line.goods_qty).join(' | ')
+    },
     statusLabel (status) {
       return {
         REVIEW: 'Review Required',
@@ -312,6 +326,13 @@ export default {
 
 .reconciliation-table .ellipsis-cell {
   max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sku-summary-cell {
+  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
