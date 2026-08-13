@@ -387,6 +387,7 @@ def _summary(openid, asn_code):
     resolved_total = records.filter(exception_resolved=True).count()
     accepted_total = records.filter(status=AsnSerialRecord.ACCEPTED).count()
     actual_received_qty = sum(int(detail.goods_actual_qty or 0) for detail in details)
+    physical_putaway_qty = sum(int(detail.sorted_qty or 0) for detail in details)
     scanned_record_count = records.filter(is_received=True).count()
     accepted_for_putaway_total = min(accepted_total + resolved_total, actual_received_qty)
     extra_scan_record_count = max(scanned_record_count - actual_received_qty, 0)
@@ -493,6 +494,7 @@ def _summary(openid, asn_code):
             'scan_record_count': scanned_record_count,
             'accepted': accepted_total,
             'accepted_for_putaway': accepted_for_putaway_total,
+            'putaway_qty': physical_putaway_qty,
             'extra_scan_records': extra_scan_record_count,
             'open_exceptions': open_reconciliation_exceptions,
             'resolved_exceptions': resolved_reconciliation_exceptions,
@@ -508,6 +510,7 @@ def _summary(openid, asn_code):
         'total_accepted_serials': accepted_total,
         'total_resolved_exceptions': resolved_total,
         'total_accepted_for_putaway': accepted_for_putaway_total,
+        'total_putaway_qty': physical_putaway_qty,
         'total_extra_scan_records': extra_scan_record_count,
         'total_exception_serials': exception_total,
         'total_missing_serials': missing_total,

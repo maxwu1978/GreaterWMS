@@ -225,7 +225,9 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(summary['receiving_summary']['received_qty'], 2)
         self.assertEqual(summary['receiving_summary']['scan_record_count'], 3)
         self.assertEqual(summary['receiving_summary']['extra_scan_records'], 1)
+        self.assertEqual(summary['receiving_summary']['putaway_qty'], 0)
         self.assertEqual(summary['total_accepted_for_putaway'], 2)
+        self.assertEqual(summary['total_putaway_qty'], 0)
         self.assertEqual(summary['reconciliation_rows'][0]['received_qty'], 2)
 
     def test_summary_marks_reconciliation_exception_for_quantity_variance(self):
