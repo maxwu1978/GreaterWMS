@@ -147,6 +147,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             return cache[cache_key]
 
         from asnserial.models import AsnSerialRecord
+        from asnserial.models import PackListDocument
 
         records = AsnSerialRecord.objects.filter(
             openid=obj.openid,
@@ -179,8 +180,52 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         exceptions = records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
         accepted_for_putaway = accepted + resolved
+        current_pack_list = PackListDocument.objects.filter(
+            openid=obj.openid,
+            asn_code=obj.asn_code,
+            is_current=True,
+            status=PackListDocument.CONFIRMED,
+        ).first()
+        pack_list_variance = 0
+        actual_by_sku = {}
+        pack_by_sku = {}
+        if current_pack_list:
+            actual_by_sku = {
+                detail.goods_code: int(detail.goods_actual_qty or 0)
+                for detail in AsnDetailModel.objects.filter(
+                    openid=obj.openid,
+                    asn_code=obj.asn_code,
+                    is_delete=False,
+                )
+            }
+            pack_by_sku = {}
+            for line in current_pack_list.lines.filter(is_current=True):
+                pack_by_sku[line.goods_code] = pack_by_sku.get(line.goods_code, 0) + int(line.goods_qty or 0)
+            pack_list_variance = sum(
+                abs(actual_by_sku.get(goods_code, 0) - quantity)
+                for goods_code, quantity in pack_by_sku.items()
+            )
+        pack_list_variance += sum(
+            quantity for goods_code, quantity in actual_by_sku.items()
+            if goods_code not in pack_by_sku
+        )
+        if current_pack_list.has_serials:
+            expected_serials = {
+                record.serial_number: record.goods_code
+                for record in current_pack_list.serial_records.filter(is_expected=True)
+            }
+            received_serials = {
+                record.serial_number: record.goods_code
+                for record in records.filter(is_received=True)
+            }
+            pack_list_variance += len(set(expected_serials) - set(received_serials))
+            pack_list_variance += len(set(received_serials) - set(expected_serials))
+            pack_list_variance += sum(
+                1 for serial_number in set(expected_serials).intersection(received_serials)
+                if expected_serials[serial_number] != received_serials[serial_number]
+            )
 
-        if exceptions or quantity_exceptions:
+        if exceptions or quantity_exceptions or pack_list_variance:
             status = 'EXCEPTIONS'
         elif not records.exists():
             status = 'NOT_IMPORTED'
@@ -200,9 +245,11 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'resolved': resolved,
             'exceptions': exceptions,
             'quantity_exceptions': quantity_exceptions,
+            'pack_list_variance': pack_list_variance,
             'ready_for_putaway': (
                 quantity_exceptions == 0
                 and exceptions == 0
+                and pack_list_variance == 0
                 and missing == 0
                 and (not expected or accepted_for_putaway >= expected)
             ),
@@ -223,7 +270,11 @@ class ASNListGetSerializer(serializers.ModelSerializer):
 
     def get_pack_list_status(self, obj):
         document = self._get_pack_list(obj)
-        return document.status if document else 'NOT_RECEIVED'
+        if not document:
+            return 'NOT_RECEIVED'
+        if document.late_reference:
+            return 'LATE' if document.status == 'CONFIRMED' else 'LATE_PENDING'
+        return document.status
 
     def get_pack_list_has_serials(self, obj):
         document = self._get_pack_list(obj)

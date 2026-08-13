@@ -6,7 +6,7 @@ from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
 
-from .models import AsnSerialRecord, PackListDocument, PackListLine
+from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
 from .views import _create_pack_list, _scan, _summary
 
 
@@ -189,7 +189,7 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(PackListLine.objects.filter(pack_list=document, is_current=True).count(), 1)
         self.assertEqual(PackListLine.objects.filter(pack_list=document, is_current=False).count(), 1)
 
-    def test_pack_list_cannot_be_replaced_after_physical_receiving_started(self):
+    def test_late_pack_list_is_a_new_reference_revision_after_receiving_started(self):
         rows = self.rows()
         rows[0]['serial_number'] = 'SN-702-001'
         _create_pack_list(
@@ -212,7 +212,102 @@ class PackListWorkflowTests(TestCase):
                 package_qty=2,
                 replace=True,
             )
-        self.assertIn('cannot be replaced', str(error.exception.detail['detail']))
+        self.assertEqual(error.exception.detail['code'], 'PACK_LIST_LATE_REFERENCE_REQUIRED')
+        late, _, created = _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            self.rows(),
+            content_hash='b' * 64,
+            package_qty=2,
+            replace=True,
+            late_reference=True,
+        )
+        self.assertTrue(created)
+        self.assertTrue(late.late_reference)
+        self.assertTrue(late.is_current)
+        self.assertEqual(PackListDocument.objects.filter(is_current=True).count(), 1)
+        self.assertEqual(PackListDocument.objects.filter(status=PackListDocument.ARCHIVED).count(), 1)
+
+    def test_qc_recheck_does_not_create_duplicate_scan(self):
+        rows = self.rows()
+        rows[0]['serial_number'] = 'SN-702-003'
+        document, _, _ = _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            rows,
+            content_hash='a' * 64,
+            package_qty=2,
+        )
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        first_batch = PackListImportBatch.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            source_type='UPLOAD',
+        )
+        record, _ = _scan(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            '702-S',
+            'SN-702-003',
+            damaged=True,
+            source='inspection',
+            import_batch=first_batch,
+        )
+        self.assertEqual(record.status, AsnSerialRecord.DAMAGED)
+        second_batch = PackListImportBatch.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            source_type='UPLOAD',
+        )
+        record, _ = _scan(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            '702-S',
+            'SN-702-003',
+            damaged=False,
+            source='inspection',
+            import_batch=second_batch,
+        )
+        self.assertEqual(record.status, AsnSerialRecord.ACCEPTED)
+        self.assertEqual(record.scan_count, 0)
+        self.assertEqual(_summary(self.openid, self.asn_code)['qc_status'], 'PASSED')
+
+    def test_late_pack_list_sn_mismatch_is_an_open_reconciliation_exception(self):
+        original_rows = self.rows()
+        original_rows[0]['serial_number'] = 'SN-702-ORIGINAL'
+        _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            original_rows,
+            content_hash='a' * 64,
+            package_qty=2,
+        )
+        _scan(self.openid, self.request(), self.asn_code, '702-S', 'SN-702-ORIGINAL', source='inspection')
+        late_rows = self.rows()
+        late_rows[0]['serial_number'] = 'SN-702-LATE'
+        _create_pack_list(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            late_rows,
+            content_hash='b' * 64,
+            package_qty=2,
+            replace=True,
+            late_reference=True,
+        )
+        summary = _summary(self.openid, self.asn_code)
+        self.assertEqual(summary['pack_list_serial_mismatch_count'], 2)
+        self.assertEqual(summary['reconciliation_status'], 'EXCEPTION')
+        self.assertFalse(summary['ready_for_putaway'])
 
     def test_damaged_receiving_scan_is_open_exception_until_resolved(self):
         rows = self.rows()

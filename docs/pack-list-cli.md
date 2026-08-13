@@ -1,8 +1,10 @@
 # Pack List CLI
 
-The CLI uses the same GreaterWMS Pack List endpoints as the web page. It does
-not write to the database directly. Each ASN has one current Pack List; an
-import never creates a second current Pack List record.
+The CLI uses the same GreaterWMS Pack List and QC endpoints as the web page. It
+does not write to the database directly. Each ASN has one current customer Pack
+List; older revisions remain as history. A Pack List received after physical
+receiving must be imported as a late reference and never overwrites the prior
+receiving or QC history.
 
 ## Authentication
 
@@ -63,24 +65,35 @@ node tools/greaterwms.mjs packlist import \
   --json
 ```
 
-Replacement is blocked after physical receiving scans have started. The
-uploaded workbook is parsed and discarded; only normalized Pack List rows and
-serial records are stored. Confirmation remains a separate step because a
-confirmed Pack List becomes the receiving verification baseline; it does not
+After physical receiving starts, a different file must use the late-reference
+flow. The uploaded workbook is parsed and discarded; only normalized Pack List
+rows and serial records are stored. Confirmation remains a separate step because
+a confirmed Pack List becomes the receiving verification baseline; it does not
 mean that the goods have arrived.
+
+```bash
+node tools/greaterwms.mjs packlist import \
+  --asn-code ASN202608123 --file ./late-pack-list.xlsx \
+  --replace --late-reference --dry-run
+node tools/greaterwms.mjs packlist import \
+  --asn-code ASN202608123 --file ./late-pack-list.xlsx \
+  --replace --late-reference --confirm
+```
 
 ## Receiving acceptance scan
 
 Customer acceptance workbooks can use the operational headers `PART NUMBER`,
 `SERIAL NUMBER`, and `DATE`. The receiving importer records physical scans and
-does not create a Pack List document. Use `receive` mode for an acceptance
-file. If the workbook is tied to an ASN but has no inbound PO or shipout
-reference, `--allow-all` records that explicit scope choice.
+does not create a Pack List document. Use `inspection import` for a QC result
+file. Each import is a separate QC round; re-importing a later round does not
+count the same SN as a duplicate physical scan. If the workbook is tied to an
+ASN but has no inbound PO or shipout reference, `--allow-all` records that
+explicit scope choice.
 
 Preview the write plan locally:
 
 ```bash
-node tools/greaterwms.mjs serial import \
+node tools/greaterwms.mjs inspection import \
   --asn-code ASN202608123 \
   --file ./acceptance-scan.xlsx \
   --mode receive \
@@ -92,7 +105,7 @@ node tools/greaterwms.mjs serial import \
 After review, submit the scan rows:
 
 ```bash
-node tools/greaterwms.mjs serial import \
+node tools/greaterwms.mjs inspection import \
   --asn-code ASN202608123 \
   --file ./acceptance-scan.xlsx \
   --mode receive \

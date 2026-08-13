@@ -103,12 +103,15 @@ def _current_pack_list(openid, asn_code):
 
 def _pack_list_json(document):
     serials = document.serial_records.all()
+    lines = document.lines.filter(is_current=True) if document.is_current else document.lines.all()
     return {
         'id': document.id,
         'asn_code': document.asn_code,
         'version': document.version,
         'source_type': document.source_type,
         'status': document.status,
+        'is_current': document.is_current,
+        'late_reference': document.late_reference,
         'has_serials': document.has_serials,
         'package_qty': document.package_qty,
         'note': document.note,
@@ -116,8 +119,8 @@ def _pack_list_json(document):
         'confirmed_by': document.confirmed_by,
         'confirmed_at': document.confirmed_at.isoformat() if document.confirmed_at else None,
         'create_time': document.create_time.isoformat() if document.create_time else None,
-        'line_count': document.lines.filter(is_current=True).count(),
-        'total_qty': sum(line.goods_qty for line in document.lines.filter(is_current=True)),
+        'line_count': lines.count(),
+        'total_qty': sum(line.goods_qty for line in lines),
         'lines': [
             {
                 'goods_code': line.goods_code,
@@ -129,10 +132,75 @@ def _pack_list_json(document):
                 'goods_desc': line.goods_desc,
                 'source_row': line.source_row,
             }
-            for line in document.lines.filter(is_current=True)
+            for line in lines
         ],
         'expected_serial_count': serials.filter(is_expected=True).count(),
         'received_serial_count': serials.filter(is_received=True).count(),
+    }
+
+
+def _inspection_batch_json(batch):
+    return {
+        'id': batch.id,
+        'asn_code': batch.asn_code,
+        'import_type': batch.import_type,
+        'status': batch.status,
+        'source_type': batch.source_type,
+        'row_count': batch.row_count,
+        'matched_count': batch.matched_count,
+        'accepted_count': batch.accepted_count,
+        'exception_count': batch.exception_count,
+        'note': batch.note,
+        'imported_by': batch.imported_by,
+        'created_at': batch.created_at.isoformat() if batch.created_at else None,
+    }
+
+
+def _receiving_started(openid, asn_code):
+    if AsnSerialRecord.objects.filter(openid=openid, asn_code=asn_code, is_received=True).exists():
+        return True
+    return AsnDetailModel.objects.filter(
+        openid=openid,
+        asn_code=asn_code,
+        is_delete=False,
+        goods_actual_qty__gt=0,
+    ).exists()
+
+
+def _pack_list_serial_mismatch(document, records):
+    if not document or not document.has_serials:
+        return {'total': 0, 'missing': [], 'unexpected': [], 'wrong_sku': [], 'by_goods': {}}
+    expected = {
+        record.serial_number: record.goods_code
+        for record in document.serial_records.filter(is_expected=True)
+    }
+    received = {
+        record.serial_number: record.goods_code
+        for record in records
+        if record.is_received
+    }
+    missing = sorted(set(expected) - set(received))
+    unexpected = sorted(set(received) - set(expected))
+    wrong_sku = sorted(
+        serial_number for serial_number in set(expected).intersection(received)
+        if _clean(expected[serial_number]) != _clean(received[serial_number])
+    )
+    by_goods = {}
+    for serial_number in missing:
+        goods_code = expected[serial_number]
+        by_goods[goods_code] = by_goods.get(goods_code, 0) + 1
+    for serial_number in unexpected:
+        goods_code = received[serial_number]
+        by_goods[goods_code] = by_goods.get(goods_code, 0) + 1
+    for serial_number in wrong_sku:
+        goods_code = expected[serial_number]
+        by_goods[goods_code] = by_goods.get(goods_code, 0) + 1
+    return {
+        'total': len(missing) + len(unexpected) + len(wrong_sku),
+        'missing': missing,
+        'unexpected': unexpected,
+        'wrong_sku': wrong_sku,
+        'by_goods': by_goods,
     }
 
 
@@ -169,7 +237,7 @@ def _record_json(record):
     }
 
 
-def _reconciliation_rows(document, details, records, strict_serial_check, exception_statuses):
+def _reconciliation_rows(document, details, records, strict_serial_check, exception_statuses, serial_mismatch=None):
     """Join the customer Pack List, ASN receipt quantities, and QC scan results by SKU."""
     pack_lines = {}
     if document:
@@ -206,6 +274,7 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             1 for record in line_records
             if record.status in exception_statuses and not record.exception_resolved
         )
+        serial_mismatch_count = int((serial_mismatch or {}).get('by_goods', {}).get(key, 0))
         received_qty = int(detail.goods_actual_qty or 0) if detail else 0
         planned_qty = int(detail.goods_qty or 0) if detail else 0
         pack_list_qty = int(line.get('pack_list_qty') or 0)
@@ -220,7 +289,7 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             )
             quantity_exception_resolved = bool(detail.exception_resolved)
 
-        open_exception_count = exception_count + int(quantity_exception_qty > 0)
+        open_exception_count = exception_count + serial_mismatch_count + int(quantity_exception_qty > 0)
         resolved_exception_total = resolved_count + int(quantity_exception_resolved)
         variance = received_qty - baseline_qty
         accepted_qty = accepted_count if (strict_serial_check or (document and document.has_serials)) else received_qty
@@ -248,6 +317,7 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             'open_exception_count': open_exception_count,
             'resolved_exception_count': resolved_exception_total,
             'quantity_exception_qty': quantity_exception_qty,
+            'serial_mismatch_count': serial_mismatch_count,
             'result': result,
         })
     return rows
@@ -326,10 +396,16 @@ def _summary(openid, asn_code):
         records,
         strict_serial_check,
         exception_statuses,
+        serial_mismatch=_pack_list_serial_mismatch(active_pack_list, records),
     )
     open_reconciliation_exceptions = sum(row['open_exception_count'] for row in reconciliation_rows)
     resolved_reconciliation_exceptions = sum(row['resolved_exception_count'] for row in reconciliation_rows)
-    if open_reconciliation_exceptions or any(row['variance'] for row in reconciliation_rows):
+    pack_list_variance = sum(
+        abs(int(row['variance'] or 0))
+        for row in reconciliation_rows
+    ) if active_pack_list else 0
+    pack_list_serial_mismatch = _pack_list_serial_mismatch(active_pack_list, records)
+    if open_reconciliation_exceptions or pack_list_variance:
         reconciliation_status = 'EXCEPTION'
     elif not active_pack_list or active_pack_list.status == PackListDocument.PENDING:
         reconciliation_status = 'REVIEW'
@@ -337,9 +413,36 @@ def _summary(openid, asn_code):
         reconciliation_status = 'RESOLVED'
     else:
         reconciliation_status = 'PASSED'
-    receiving_status = 'EXCEPTION' if open_reconciliation_exceptions else (
+    receiving_status = 'EXCEPTION' if (open_reconciliation_exceptions or pack_list_variance) else (
         'RESOLVED' if resolved_reconciliation_exceptions else 'PASSED'
     )
+    inspection_batches = list(PackListImportBatch.objects.filter(
+        openid=openid,
+        asn_code=asn_code,
+        import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+    )[:10])
+    latest_inspection = inspection_batches[0] if inspection_batches else None
+    if open_reconciliation_exceptions or pack_list_variance or (inspection_batches and missing_total):
+        qc_status = 'EXCEPTION'
+        reconciliation_status = 'EXCEPTION'
+        receiving_status = 'EXCEPTION'
+    elif not inspection_batches:
+        qc_status = 'NOT_STARTED'
+    elif latest_inspection.status == PackListImportBatch.PARTIAL:
+        qc_status = 'PARTIAL'
+    else:
+        qc_status = 'PASSED'
+    all_pack_lists = PackListDocument.objects.filter(
+        openid=openid,
+        asn_code=asn_code,
+    ).order_by('-version', '-id')
+    pack_list_status = (
+        PackListDocument.CONFIRMED if current_pack_list else
+        PackListDocument.PENDING if pending_pack_list else
+        'NOT_RECEIVED'
+    )
+    if active_pack_list and active_pack_list.late_reference:
+        pack_list_status = 'LATE' if active_pack_list.status == PackListDocument.CONFIRMED else 'LATE_PENDING'
     return {
         'asn_code': asn_code,
         'customer': asn.supplier if asn else '',
@@ -347,16 +450,19 @@ def _summary(openid, asn_code):
         'expected_arrival_at': asn.expected_arrival_at.isoformat() if asn and asn.expected_arrival_at else None,
         'actual_arrival_at': asn.actual_arrival_at.isoformat() if asn and asn.actual_arrival_at else None,
         'pack_list_present': pack_lists.exists(),
-        'pack_list_status': (
-            PackListDocument.CONFIRMED if current_pack_list else
-            PackListDocument.PENDING if pending_pack_list else
-            'NOT_RECEIVED'
+        'pack_list_status': pack_list_status,
+        'pack_list_timing': 'LATE_REFERENCE' if active_pack_list and active_pack_list.late_reference else (
+            'BEFORE_RECEIPT' if active_pack_list else 'NOT_RECEIVED'
         ),
         'pack_list_confirmed': bool(current_pack_list),
         'pack_list_has_serials': bool(current_pack_list and current_pack_list.has_serials),
         'active_pack_list': _pack_list_json(active_pack_list) if active_pack_list else None,
         'customer_sn_status': 'PROVIDED' if active_pack_list and active_pack_list.has_serials else 'NOT_PROVIDED',
         'current_pack_list': _pack_list_json(current_pack_list) if current_pack_list else None,
+        'pack_list_history': [_pack_list_json(document) for document in all_pack_lists],
+        'inspection_batches': [_inspection_batch_json(batch) for batch in inspection_batches],
+        'latest_inspection_batch': _inspection_batch_json(latest_inspection) if latest_inspection else None,
+        'qc_status': qc_status,
         'verification_mode': verification_mode,
         'verification_note': (
             'Receiving scans are not checked against a Pack List yet.'
@@ -379,6 +485,9 @@ def _summary(openid, asn_code):
             'open_exceptions': open_reconciliation_exceptions,
             'resolved_exceptions': resolved_reconciliation_exceptions,
             'status': receiving_status,
+            'qc_status': qc_status,
+            'latest_batch_id': latest_inspection.id if latest_inspection else None,
+            'pack_list_variance': pack_list_variance,
         },
         'total_expected_serials': records.filter(is_expected=True).count(),
         'total_received_serials': records.filter(is_received=True).count(),
@@ -388,12 +497,15 @@ def _summary(openid, asn_code):
         'total_exception_serials': exception_total,
         'total_missing_serials': missing_total,
         'total_quantity_exceptions': quantity_exception_total,
+        'pack_list_variance': pack_list_variance,
+        'pack_list_serial_mismatch': pack_list_serial_mismatch,
+        'pack_list_serial_mismatch_count': pack_list_serial_mismatch['total'],
         'ready_for_putaway': (
             quantity_exception_total == 0 and (
                 records.count() == 0
                 or (not strict_serial_check and exception_total == 0)
                 or (strict_serial_check and exception_total == 0 and missing_total == 0 and accepted_total + resolved_total >= records.filter(is_expected=True).count())
-            )
+            ) and pack_list_variance == 0 and open_reconciliation_exceptions == 0
         ),
     }
 
@@ -484,8 +596,12 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
     ).first()
     now = timezone.now()
     metadata = row or {}
+    inspection = source in ('inspection', 'qc')
     if record:
-        record.scan_count += 1
+        # An inspection workbook is a result snapshot, not another physical scan.
+        # Re-importing a later QC round must not turn a valid SN into a duplicate.
+        if not inspection:
+            record.scan_count += 1
         record.is_received = True
         record.received_at = now
         record.received_by = _operator_name(request, openid)
@@ -498,8 +614,8 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
         record.import_batch = import_batch or record.import_batch
         record.note = str(metadata.get('note') or record.note or '').strip()
-        record.damaged = record.damaged or bool(damaged)
-        if record.scan_count > 1:
+        record.damaged = bool(damaged) if inspection else record.damaged or bool(damaged)
+        if not inspection and record.scan_count > 1:
             record.status = AsnSerialRecord.DUPLICATE
         elif record.goods_code != goods_code:
             record.status = AsnSerialRecord.WRONG_SKU
@@ -510,6 +626,12 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         else:
             record.status = _scan_status_without_pack_list(openid, asn_code)
         if record.status in EXCEPTION_STATUSES:
+            record.exception_resolved = False
+            record.exception_resolution_action = ''
+            record.exception_resolution_note = ''
+            record.exception_resolved_by = ''
+            record.exception_resolved_at = None
+        elif inspection:
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
@@ -915,7 +1037,7 @@ def _validate_pack_list_rows(openid, asn_code, rows):
     }
 
 
-def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, duplicate_document=None, current_document=None):
+def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, duplicate_document=None, current_document=None, receiving_started=False):
     return {
         'asn_code': asn_code,
         'status': 'DUPLICATE' if duplicate_document else 'PREVIEW',
@@ -928,6 +1050,8 @@ def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, dup
         'duplicate_document': _pack_list_json(duplicate_document) if duplicate_document else None,
         'current_document': _pack_list_json(current_document) if current_document else None,
         'replace_required': bool(current_document and not duplicate_document),
+        'receiving_started': receiving_started,
+        'late_reference_required': bool(receiving_started and not duplicate_document),
         'lines': [
             {
                 'goods_code': row['goods_code'],
@@ -945,7 +1069,7 @@ def _pack_list_preview_json(asn_code, validation, package_qty, content_hash, dup
     }
 
 
-def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', content_hash='', note='', package_qty=0, replace=False):
+def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', content_hash='', note='', package_qty=0, replace=False, late_reference=False):
     validation = _validate_pack_list_rows(openid, asn_code, rows)
     asn = validation['asn']
     normalized_rows = validation['rows']
@@ -957,6 +1081,8 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', con
         asn_code=asn_code,
         is_current=True,
     ).first()
+    receiving_started = _receiving_started(openid, asn_code)
+    next_version = 1
     if document:
         if document.content_hash == str(content_hash or ''):
             return document, None, False
@@ -966,40 +1092,53 @@ def _create_pack_list(openid, request, asn_code, rows, source_type='MANUAL', con
                 'code': 'PACK_LIST_REPLACE_REQUIRED',
                 'document_id': document.id,
             })
-        if document.serial_records.filter(is_received=True).exists():
-            raise APIException({'detail': 'Receiving has started; the Pack List cannot be replaced after physical scans'})
-        document.serial_records.filter(is_expected=True, is_received=False).update(
-            pack_list=None,
-            is_expected=False,
-            expected_goods_code='',
-            status=AsnSerialRecord.UNVERIFIED,
-        )
-        document.lines.filter(is_current=True).update(is_current=False)
-        document.version = int(document.version or 0) + 1
-        document.has_serials = has_serials
-        document.package_qty = package_qty
-        document.note = str(note or '')
-        document.source_type = source_type
-        document.content_hash = str(content_hash or '')[:64]
-        document.confirmed_by = ''
-        document.confirmed_at = None
-        document.status = PackListDocument.PENDING
-        document.save(update_fields=[
-            'version', 'source_type', 'content_hash', 'status', 'has_serials',
-            'package_qty', 'note', 'confirmed_by', 'confirmed_at', 'update_time',
-        ])
+        if receiving_started and not late_reference:
+            raise APIException({
+                'detail': 'Receiving has started; import this Pack List as a late reference revision.',
+                'code': 'PACK_LIST_LATE_REFERENCE_REQUIRED',
+            })
+        if receiving_started:
+            next_version = int(document.version or 0) + 1
+            document.is_current = False
+            document.status = PackListDocument.ARCHIVED
+            document.save(update_fields=['is_current', 'status', 'update_time'])
+            document = None
+            late_reference = True
+        else:
+            document.serial_records.filter(is_expected=True, is_received=False).update(
+                pack_list=None,
+                is_expected=False,
+                expected_goods_code='',
+                status=AsnSerialRecord.UNVERIFIED,
+            )
+            document.lines.filter(is_current=True).update(is_current=False)
+            document.version = int(document.version or 0) + 1
+            document.has_serials = has_serials
+            document.package_qty = package_qty
+            document.note = str(note or '')
+            document.source_type = source_type
+            document.content_hash = str(content_hash or '')[:64]
+            document.confirmed_by = ''
+            document.confirmed_at = None
+            document.status = PackListDocument.PENDING
+            document.late_reference = False
+            document.save(update_fields=[
+                'version', 'source_type', 'content_hash', 'status', 'has_serials',
+                'package_qty', 'note', 'late_reference', 'confirmed_by', 'confirmed_at', 'update_time',
+            ])
     created_document = document is None
     if created_document:
         document = PackListDocument.objects.create(
             openid=openid,
             asn_code=asn_code,
-            version=1,
+            version=next_version,
             source_type=source_type,
             content_hash=str(content_hash or '')[:64],
             is_current=True,
             has_serials=has_serials,
             package_qty=package_qty,
             note=str(note or ''),
+            late_reference=bool(late_reference or receiving_started),
             created_by=_operator_name(request, openid),
         )
     import_batch = None
@@ -1077,13 +1216,21 @@ class PackListListView(APIView):
     def get(self, request):
         openid = _openid(request)
         asn_code = _clean(request.query_params.get('asn_code'))
-        documents = PackListDocument.objects.filter(openid=openid, is_current=True)
+        documents = PackListDocument.objects.filter(openid=openid)
         if asn_code:
             documents = documents.filter(asn_code=asn_code)
         return Response({
             'count': documents.count(),
             'results': [_pack_list_json(document) for document in documents],
             'summary': _summary(openid, asn_code) if asn_code else None,
+            'inspection_batches': [
+                _inspection_batch_json(batch)
+                for batch in PackListImportBatch.objects.filter(
+                    openid=openid,
+                    asn_code=asn_code,
+                    import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+                )[:50]
+            ] if asn_code else [],
         })
 
 
@@ -1104,6 +1251,8 @@ class PackListCreateView(APIView):
                 source_type=str(data.get('source_type') or 'MANUAL').upper(),
                 note=data.get('note'),
                 package_qty=data.get('package_qty'),
+                replace=str(data.get('replace', '')).lower() == 'true',
+                late_reference=str(data.get('late_reference', '')).lower() == 'true',
             )
         return Response({'detail': 'success', 'document': _pack_list_json(document), 'summary': _summary(openid, asn_code)})
 
@@ -1127,6 +1276,7 @@ class PackListPreviewView(APIView):
             is_current=True,
         ).first()
         duplicate_document = current_document if current_document and current_document.content_hash == content_hash else None
+        receiving_started = _receiving_started(openid, asn_code)
         return Response({
             'detail': 'preview',
             'preview': _pack_list_preview_json(
@@ -1136,6 +1286,7 @@ class PackListPreviewView(APIView):
                 content_hash,
                 duplicate_document=duplicate_document,
                 current_document=current_document,
+                receiving_started=receiving_started,
             ),
         })
 
@@ -1166,6 +1317,8 @@ class PackListImportView(APIView):
                 'summary': _summary(openid, asn_code),
             })
         replaced = bool(existing_document)
+        receiving_started = _receiving_started(openid, asn_code)
+        late_reference = str(request.data.get('late_reference', '')).lower() == 'true'
         with transaction.atomic():
             document, _, created = _create_pack_list(
                 openid,
@@ -1177,11 +1330,13 @@ class PackListImportView(APIView):
                 note=request.data.get('note'),
                 package_qty=request.data.get('package_qty'),
                 replace=str(request.data.get('replace', '')).lower() == 'true',
+                late_reference=late_reference,
             )
         return Response({
             'detail': 'success' if created else 'already_exists',
             'duplicate': not created,
             'replaced': replaced,
+            'late_reference': late_reference or receiving_started,
             'document': _pack_list_json(document),
             'summary': _summary(openid, asn_code),
         })
@@ -1207,14 +1362,14 @@ class PackListConfirmView(APIView):
 
 
 class SerialImportView(APIView):
-    def post(self, request):
+    def post(self, request, inspection=False):
         openid = _openid(request)
         upload = request.FILES.get('file')
         if not upload:
             raise APIException({'detail': 'Excel file is required'})
         if upload.size > 10 * 1024 * 1024:
             raise APIException({'detail': 'Excel file is too large'})
-        mode = str(request.data.get('mode') or 'expected').lower()
+        mode = 'receive' if inspection else str(request.data.get('mode') or 'expected').lower()
         if mode not in ('expected', 'receive'):
             raise APIException({'detail': 'Mode must be expected or receive'})
         asn_code = _clean(request.data.get('asn_code'))
@@ -1242,7 +1397,10 @@ class SerialImportView(APIView):
         existing_batch = PackListImportBatch.objects.filter(
             openid=openid,
             asn_code=asn_code,
-            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            import_type=(
+                PackListImportBatch.RECEIVING_ACCEPTANCE
+                if mode == 'receive' else PackListImportBatch.EXPECTED_SERIALS
+            ),
             content_hash=content_hash,
         ).first()
         if existing_batch:
@@ -1256,15 +1414,20 @@ class SerialImportView(APIView):
                 'updated': 0,
                 'skipped': 0,
                 'errors': [],
+                'batch': _inspection_batch_json(existing_batch),
                 'summary': _summary(openid, asn_code),
             })
         import_batch = PackListImportBatch.objects.create(
             openid=openid,
             asn_code=asn_code,
-            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+            import_type=(
+                PackListImportBatch.RECEIVING_ACCEPTANCE
+                if mode == 'receive' else PackListImportBatch.EXPECTED_SERIALS
+            ),
             content_hash=content_hash,
             imported_by=_operator_name(request, openid),
-            note='Serial import mode: ' + mode,
+            note=str(request.data.get('note') or ('QC inspection import' if mode == 'receive' else 'Expected serial import')),
+            source_type=str(request.data.get('source_type') or 'UPLOAD').upper(),
         )
         matched = 0
         created = 0
@@ -1313,7 +1476,7 @@ class SerialImportView(APIView):
                         serial_number,
                         damaged=row_data['damaged'],
                         row=row_data,
-                        source='excel',
+                        source='inspection' if mode == 'receive' else 'excel',
                         import_batch=import_batch,
                     )
                 created += int(was_created)
@@ -1323,7 +1486,21 @@ class SerialImportView(APIView):
                 if len(errors) < 50:
                     errors.append({'row': row_number, 'sku': goods_code, 'sn': serial_number, 'detail': str(exc)})
         import_batch.row_count = matched
-        import_batch.save(update_fields=['row_count'])
+        import_batch.matched_count = matched
+        touched_records = AsnSerialRecord.objects.filter(import_batch=import_batch)
+        import_batch.accepted_count = touched_records.filter(status=AsnSerialRecord.ACCEPTED).count()
+        import_batch.exception_count = touched_records.filter(
+            status__in=EXCEPTION_STATUSES,
+            exception_resolved=False,
+        ).count()
+        import_batch.status = (
+            PackListImportBatch.PARTIAL if errors else
+            PackListImportBatch.EXCEPTION if import_batch.exception_count else
+            PackListImportBatch.PASSED
+        )
+        import_batch.save(update_fields=[
+            'row_count', 'matched_count', 'accepted_count', 'exception_count', 'status',
+        ])
         return Response({
             'detail': 'success' if not errors else 'partial_success',
             'mode': mode,
@@ -1333,5 +1510,25 @@ class SerialImportView(APIView):
             'updated': updated,
             'skipped': skipped,
             'errors': errors,
+            'batch': _inspection_batch_json(import_batch),
             'summary': _summary(openid, asn_code),
+        })
+
+
+class InspectionBatchListView(APIView):
+    """Return QC inspection import history without exposing uploaded files."""
+
+    def get(self, request):
+        openid = _openid(request)
+        asn_code = _clean(request.query_params.get('asn_code'))
+        if not asn_code:
+            raise APIException({'detail': 'ASN Code is required'})
+        batches = PackListImportBatch.objects.filter(
+            openid=openid,
+            asn_code=asn_code,
+            import_type=PackListImportBatch.RECEIVING_ACCEPTANCE,
+        )[:50]
+        return Response({
+            'count': batches.count(),
+            'results': [_inspection_batch_json(batch) for batch in batches],
         })

@@ -1,44 +1,66 @@
 <template>
   <div class="q-pa-sm">
-    <q-card flat bordered>
-      <q-card-section class="row q-col-gutter-sm items-center">
-        <div class="col-12 col-md-4">
-          <q-select
-            v-model="asnCode"
-            outlined
-            dense
-            emit-value
-            map-options
-            :options="asnOptions"
-            label="ASN"
-            @input="loadDocuments"
-          />
-        </div>
-        <div class="col-12 col-md-3">
-          <q-file v-model="selectedFile" outlined dense accept=".xlsx" label="Pack List (.xlsx)" />
-        </div>
-        <div class="col-12 col-md-2">
-          <q-select
-            v-model="sourceType"
-            outlined
-            dense
-            emit-value
-            map-options
-            :options="sourceTypes"
-            label="Source"
-          />
-        </div>
-        <div class="col-12 col-md-2">
-          <q-input v-model.number="packageQty" outlined dense type="number" min="0" label="Packages / load units" />
-        </div>
-        <div class="col-12 col-md-7">
-          <q-input v-model="note" outlined dense label="Note" />
-        </div>
-        <div class="col-12 col-md-3 text-right">
-          <q-btn color="primary" icon="preview" label="Preview Pack List" :disable="!asnCode || !selectedFile" @click="previewFile" />
-        </div>
-      </q-card-section>
-    </q-card>
+    <div class="row q-col-gutter-sm">
+      <div class="col-12 col-lg-7">
+        <q-card flat bordered class="full-height">
+          <q-card-section class="q-pb-xs">
+            <div class="text-subtitle2">Customer Pack List</div>
+            <div class="text-caption text-grey-7">Reference data. It may arrive before or after the goods.</div>
+          </q-card-section>
+          <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
+            <div class="col-12 col-md-5">
+              <q-select
+                v-model="asnCode"
+                outlined
+                dense
+                emit-value
+                map-options
+                :options="asnOptions"
+                label="ASN"
+                @input="loadDocuments"
+              />
+            </div>
+            <div class="col-12 col-md-7">
+              <q-file v-model="selectedFile" outlined dense accept=".xlsx" label="Customer Pack List (.xlsx)" />
+            </div>
+            <div class="col-12 col-md-4">
+              <q-select v-model="sourceType" outlined dense emit-value map-options :options="sourceTypes" label="Source" />
+            </div>
+            <div class="col-12 col-md-4">
+              <q-input v-model.number="packageQty" outlined dense type="number" min="0" label="Load units" />
+            </div>
+            <div class="col-12 col-md-4 text-right">
+              <q-btn color="primary" icon="preview" label="Preview" :disable="!asnCode || !selectedFile" @click="previewFile" />
+            </div>
+            <div class="col-12">
+              <q-input v-model="note" outlined dense label="Note" />
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
+      <div class="col-12 col-lg-5">
+        <q-card flat bordered class="full-height">
+          <q-card-section class="q-pb-xs">
+            <div class="text-subtitle2">QC Inspection</div>
+            <div class="text-caption text-grey-7">Import the operator's inspection workbook. Each import is a separate QC round.</div>
+          </q-card-section>
+          <q-card-section class="row q-col-gutter-sm items-center q-pt-xs">
+            <div class="col-12">
+              <q-file v-model="inspectionFile" outlined dense accept=".xlsx" label="QC Inspection Workbook (.xlsx)" />
+            </div>
+            <div class="col-12 col-md-5">
+              <q-select v-model="inspectionSourceType" outlined dense emit-value map-options :options="sourceTypes" label="Source" />
+            </div>
+            <div class="col-12 col-md-7 text-right">
+              <q-btn color="secondary" icon="fact_check" label="Import QC Results" :disable="!asnCode || !inspectionFile" @click="importInspection" />
+            </div>
+            <div class="col-12">
+              <q-input v-model="inspectionNote" outlined dense label="QC note" />
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
+    </div>
 
     <q-banner v-if="summary" class="q-mt-sm" :class="summary.reconciliation_status === 'EXCEPTION' ? 'bg-red-1' : (summary.reconciliation_status === 'PASSED' ? 'bg-green-1' : 'bg-orange-1')">
       <div class="row items-center q-col-gutter-md">
@@ -48,13 +70,15 @@
         </div>
         <div class="col-6 col-md-2"><q-chip dense :color="statusColor(summary.reconciliation_status)">{{ statusLabel(summary.reconciliation_status) }}</q-chip></div>
         <div class="col-6 col-md-2 text-caption">Pack List: <strong>{{ packListLabel(summary.pack_list_status) }}</strong></div>
+        <div class="col-6 col-md-2 text-caption">QC: <strong>{{ summary.qc_status || 'NOT_STARTED' }}</strong></div>
         <div class="col-6 col-md-2 text-caption">Customer SN: <strong>{{ summary.customer_sn_status || 'NOT_PROVIDED' }}</strong></div>
         <div class="col-6 col-md-2 text-caption">ETA: <strong>{{ etaLabel }}</strong></div>
       </div>
       <div v-if="summary.receiving_summary" class="text-caption q-mt-xs">
         Receiving: {{ summary.receiving_summary.scanned || 0 }} scanned / {{ summary.receiving_summary.accepted || 0 }} accepted · Open exceptions: {{ summary.receiving_summary.open_exceptions || 0 }} · Resolved: {{ summary.receiving_summary.resolved_exceptions || 0 }}
       </div>
-      <div v-if="summary.pack_list_status === 'PENDING'" class="text-caption text-orange-10 q-mt-xs">Confirm the Pack List before using customer SN data as the receiving baseline.</div>
+      <div v-if="summary.pack_list_status === 'PENDING' || summary.pack_list_status === 'LATE_PENDING'" class="text-caption text-orange-10 q-mt-xs">Confirm the customer Pack List before using it as the receiving baseline.</div>
+      <div v-if="summary.pack_list_timing === 'LATE_REFERENCE'" class="text-caption text-blue-10 q-mt-xs">This Pack List was received after physical receiving started and is stored as a late reference revision.</div>
     </q-banner>
 
     <q-table
@@ -102,18 +126,37 @@
       :data="documents"
       :columns="columns"
       :loading="loading"
-      no-data-label="No Pack List"
+      no-data-label="No Customer Pack List"
     >
       <template v-slot:body-cell-status="props">
         <q-td :props="props">
           <q-chip dense :color="props.value === 'CONFIRMED' ? 'positive' : 'orange-3'">{{ props.value }}</q-chip>
         </q-td>
       </template>
+      <template v-slot:body-cell-timing="props">
+        <q-td :props="props">{{ props.row.late_reference ? 'Late reference' : 'Before receipt' }}</q-td>
+      </template>
       <template v-slot:body-cell-action="props">
         <q-td :props="props">
-          <q-btn v-if="props.row.status !== 'CONFIRMED'" dense flat color="positive" icon="check" label="Confirm" @click="confirmDocument(props.row)" />
+          <q-btn v-if="props.row.is_current && props.row.status !== 'CONFIRMED'" dense flat color="positive" icon="check" label="Confirm" @click="confirmDocument(props.row)" />
           <q-btn dense flat color="info" icon="visibility" @click="showDocument(props.row)" />
         </q-td>
+      </template>
+    </q-table>
+
+    <q-table
+      class="q-mt-sm"
+      flat
+      bordered
+      dense
+      row-key="id"
+      :data="inspectionBatches"
+      :columns="inspectionColumns"
+      no-data-label="No QC inspection imported"
+    >
+      <template v-slot:top-left><div class="text-subtitle2">QC Inspection History</div></template>
+      <template v-slot:body-cell-status="props">
+        <q-td :props="props"><q-chip dense :color="inspectionColor(props.value)">{{ props.value }}</q-chip></q-td>
       </template>
     </q-table>
 
@@ -140,6 +183,9 @@
           <q-banner v-else-if="previewData.replace_required" class="bg-orange-1 q-mb-sm">
             A different Pack List is already current for this ASN. Importing will explicitly replace its current content and keep the old rows as history.
           </q-banner>
+          <q-banner v-if="previewData.late_reference_required" class="bg-blue-1 q-mb-sm">
+            Receiving has already started. This import will be stored as a late reference revision and will not overwrite the prior receiving history.
+          </q-banner>
           <q-list bordered separator style="max-height: 420px; overflow-y: auto">
             <q-item v-for="(line, index) in previewData.lines" :key="index">
                 <q-item-section>
@@ -163,7 +209,7 @@
     <q-dialog v-model="detailOpen">
       <q-card style="width: 900px; max-width: 95vw">
         <q-bar class="bg-light-blue-10 text-white">
-          <div>{{ selectedDocument ? selectedDocument.asn_code + ' / Pack List revision ' + selectedDocument.version : 'Pack List' }}</div>
+          <div>{{ selectedDocument ? selectedDocument.asn_code + ' / Customer Pack List revision ' + selectedDocument.version : 'Customer Pack List' }}</div>
           <q-space />
           <q-btn dense flat icon="close" v-close-popup />
         </q-bar>
@@ -175,6 +221,7 @@
             <div class="col-6 col-md-3">SN: {{ selectedDocument.expected_serial_count }}</div>
             <div class="col-6 col-md-3">Load units: {{ selectedDocument.package_qty || 'Not provided' }}</div>
             <div class="col-6 col-md-3">Customer SN: {{ selectedDocument.has_serials ? 'PROVIDED' : 'NOT_PROVIDED' }}</div>
+            <div class="col-6 col-md-3">Timing: {{ selectedDocument.late_reference ? 'LATE_REFERENCE' : 'BEFORE_RECEIPT' }}</div>
           </div>
           <q-list bordered separator>
             <q-item v-for="(line, index) in selectedDocument.lines" :key="index">
@@ -213,10 +260,14 @@ export default {
       asnCode: this.$route.query.asn_code || '',
       asnOptions: [],
       documents: [],
+      inspectionBatches: [],
       summary: null,
       selectedFile: null,
+      inspectionFile: null,
       sourceType: 'UPLOAD',
+      inspectionSourceType: 'UPLOAD',
       note: '',
+      inspectionNote: '',
       packageQty: 0,
       previewOpen: false,
       previewData: null,
@@ -235,11 +286,21 @@ export default {
         { name: 'version', label: 'Revision', field: 'version', align: 'center' },
         { name: 'asn_code', label: 'ASN', field: 'asn_code', align: 'left' },
         { name: 'status', label: 'Status', field: 'status', align: 'center' },
+        { name: 'timing', label: 'Timing', field: 'late_reference', align: 'center' },
         { name: 'line_count', label: 'Lines', field: 'line_count', align: 'center' },
         { name: 'total_qty', label: 'Qty', field: 'total_qty', align: 'center' },
         { name: 'package_qty', label: 'Load Units', field: 'package_qty', align: 'center' },
         { name: 'expected_serial_count', label: 'SN', field: 'expected_serial_count', align: 'center' },
         { name: 'action', label: 'Action', align: 'right' }
+      ],
+      inspectionColumns: [
+        { name: 'id', label: 'Round', field: 'id', align: 'center' },
+        { name: 'created_at', label: 'Imported', field: 'created_at', align: 'left' },
+        { name: 'status', label: 'Status', field: 'status', align: 'center' },
+        { name: 'matched_count', label: 'Rows', field: 'matched_count', align: 'center' },
+        { name: 'accepted_count', label: 'Accepted', field: 'accepted_count', align: 'center' },
+        { name: 'exception_count', label: 'Exceptions', field: 'exception_count', align: 'center' },
+        { name: 'source_type', label: 'Source', field: 'source_type', align: 'center' }
       ],
       reconciliationColumns: [
         { name: 'goods_code', label: 'SKU', field: 'goods_code', align: 'left', style: 'width: 13%;', headerStyle: 'width: 13%;' },
@@ -281,6 +342,7 @@ export default {
       getauth('asn/serial/packlists/?asn_code=' + encodeURIComponent(this.asnCode)).then(res => {
         this.documents = res.results || []
         this.summary = res.summary
+        this.inspectionBatches = res.inspection_batches || (res.summary && res.summary.inspection_batches) || []
       }).catch(err => {
         this.$q.notify({ message: err.detail || 'Unable to load Pack List', color: 'negative' })
       }).then(() => {
@@ -295,6 +357,7 @@ export default {
       form.append('note', this.note)
       form.append('package_qty', this.packageQty || 0)
       if (this.previewData && this.previewData.replace_required) form.append('replace', 'true')
+      if (this.previewData && this.previewData.late_reference_required) form.append('late_reference', 'true')
       return form
     },
     previewFile () {
@@ -314,6 +377,23 @@ export default {
         this.$q.notify({ message: res.duplicate ? 'Existing Pack List reused.' : (res.replaced ? 'Pack List replaced. Confirm it before receiving.' : 'Pack List imported. Confirm it before receiving.'), color: 'positive' })
       }).catch(err => {
         this.$q.notify({ message: err.detail || 'Unable to import Pack List', color: 'negative' })
+      })
+    },
+    importInspection () {
+      const form = new FormData()
+      form.append('file', this.inspectionFile)
+      form.append('asn_code', this.asnCode)
+      form.append('mode', 'receive')
+      form.append('allow_all', 'true')
+      form.append('source_type', this.inspectionSourceType)
+      form.append('note', this.inspectionNote)
+      postauthfile('asn/serial/inspections/import/', form).then(res => {
+        this.inspectionFile = null
+        this.inspectionNote = ''
+        this.loadDocuments()
+        this.$q.notify({ message: res.duplicate ? 'This QC workbook was already imported.' : 'QC inspection imported.', color: res.summary && res.summary.qc_status === 'EXCEPTION' ? 'warning' : 'positive' })
+      }).catch(err => {
+        this.$q.notify({ message: err.detail || 'Unable to import QC inspection', color: 'negative' })
       })
     },
     confirmDocument (document) {
@@ -354,8 +434,18 @@ export default {
       return {
         PENDING: 'Pending',
         CONFIRMED: 'Confirmed',
+        LATE: 'Late reference',
+        LATE_PENDING: 'Late / pending',
         NOT_RECEIVED: 'Not Received'
       }[status] || status || 'Not Received'
+    },
+    inspectionColor (status) {
+      return {
+        PASSED: 'positive',
+        EXCEPTION: 'negative',
+        PARTIAL: 'warning',
+        IMPORTED: 'grey-6'
+      }[status] || 'grey-6'
     },
     formatDate (value) {
       return String(value || '').replace('T', ' ').slice(0, 16) || 'Not provided'

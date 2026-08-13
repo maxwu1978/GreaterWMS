@@ -4,11 +4,25 @@ from django.db.models import Q
 
 class PackListImportBatch(models.Model):
     PACK_LIST = 'PACK_LIST'
+    EXPECTED_SERIALS = 'EXPECTED_SERIALS'
     RECEIVING_ACCEPTANCE = 'RECEIVING_ACCEPTANCE'
 
     IMPORT_TYPES = (
         (PACK_LIST, 'Pack List'),
+        (EXPECTED_SERIALS, 'Expected serials'),
         (RECEIVING_ACCEPTANCE, 'Receiving acceptance'),
+    )
+
+    IMPORTED = 'IMPORTED'
+    PASSED = 'PASSED'
+    EXCEPTION = 'EXCEPTION'
+    PARTIAL = 'PARTIAL'
+
+    STATUS_CHOICES = (
+        (IMPORTED, 'Imported'),
+        (PASSED, 'Passed'),
+        (EXCEPTION, 'Exception'),
+        (PARTIAL, 'Partial'),
     )
 
     openid = models.CharField(max_length=255)
@@ -16,6 +30,11 @@ class PackListImportBatch(models.Model):
     import_type = models.CharField(max_length=32, choices=IMPORT_TYPES)
     content_hash = models.CharField(max_length=64, blank=True, default='')
     row_count = models.PositiveIntegerField(default=0)
+    matched_count = models.PositiveIntegerField(default=0)
+    accepted_count = models.PositiveIntegerField(default=0)
+    exception_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=IMPORTED)
+    source_type = models.CharField(max_length=32, blank=True, default='UPLOAD')
     imported_by = models.CharField(max_length=255, blank=True, default='')
     note = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -61,6 +80,7 @@ class PackListDocument(models.Model):
         related_name='pack_lists',
     )
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=PENDING)
+    late_reference = models.BooleanField(default=False)
     has_serials = models.BooleanField(default=False)
     package_qty = models.PositiveIntegerField(default=0)
     note = models.TextField(blank=True, default='')

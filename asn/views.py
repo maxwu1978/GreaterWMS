@@ -34,7 +34,7 @@ from rest_framework.settings import api_settings
 from dateutil.relativedelta import relativedelta
 from staff.models import ListModel as staff
 from driver.models import ListModel as driverlist
-from asnserial.models import AsnSerialRecord
+from asnserial.models import AsnSerialRecord, PackListDocument
 from staging.models import StagingAssignment
 from staging.services import (
     StagingError,
@@ -1225,6 +1225,24 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                     if int(data['qty']) <= 0:
                         raise APIException({"detail": "Move QTY Must > 0"})
                     else:
+                        current_pack_list = PackListDocument.objects.filter(
+                            openid=self.request.auth.openid,
+                            asn_code=qs.asn_code,
+                            is_current=True,
+                            status=PackListDocument.CONFIRMED,
+                        ).first()
+                        if current_pack_list:
+                            pack_qty = sum(
+                                int(line.goods_qty or 0)
+                                for line in current_pack_list.lines.filter(
+                                    is_current=True,
+                                    goods_code=qs.goods_code,
+                                )
+                            )
+                            if pack_qty and pack_qty != int(qs.goods_actual_qty or 0) and not qs.exception_resolved:
+                                raise APIException({
+                                    "detail": "Customer Pack List quantity mismatch; resolve the receiving exception before putaway"
+                                })
                         serial_records = AsnSerialRecord.objects.filter(
                             openid=self.request.auth.openid,
                             asn_code=qs.asn_code,
@@ -1254,6 +1272,17 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             if exception_serials or (strict_serial_check and (missing_serials or accepted_serials + resolved_serials < int(data['qty']))):
                                 raise APIException({
                                     "detail": "SN verification is incomplete; resolve missing or exception serials before putaway"
+                                })
+                        if current_pack_list and current_pack_list.has_serials:
+                            expected_serials = set(current_pack_list.serial_records.filter(
+                                is_expected=True,
+                            ).values_list('serial_number', flat=True))
+                            received_serials = set(serial_records.filter(
+                                is_received=True,
+                            ).values_list('serial_number', flat=True))
+                            if expected_serials - received_serials or received_serials - expected_serials:
+                                raise APIException({
+                                    "detail": "Customer Pack List serial mismatch; resolve the QC exception before putaway"
                                 })
                         if (
                             not qs.exception_resolved

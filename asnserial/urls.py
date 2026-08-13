@@ -17,4 +17,6 @@ urlpatterns = [
     path('packlists/import/', views.PackListImportView.as_view(), name='asn-pack-list-import'),
     path('packlists/confirm/', views.PackListConfirmView.as_view(), name='asn-pack-list-confirm'),
     path('import/', views.SerialImportView.as_view(), name='asn-serial-import'),
+    path('inspections/import/', views.SerialImportView.as_view(), {'inspection': True}, name='asn-serial-inspection-import'),
+    path('inspections/', views.InspectionBatchListView.as_view(), name='asn-serial-inspection-list'),
 ]

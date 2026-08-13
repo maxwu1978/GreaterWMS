@@ -1328,6 +1328,9 @@ export default {
       this.deleteData(row)
     },
     nextAction (row) {
+      if (Number(row.asn_status_code) === 4 && row.serial_acceptance && row.serial_acceptance.ready_for_putaway === false) {
+        return { label: 'Review QC', icon: 'fact_check', color: 'negative', handler: 'openSerialPanel' }
+      }
       const actions = {
         1: { label: row.actual_arrival_at ? 'Start Unloading' : 'Mark Arrived', icon: row.actual_arrival_at ? 'local_shipping' : 'schedule', color: 'primary', handler: row.actual_arrival_at ? 'preloadData' : 'markArrived' },
         2: { label: this.$t('inbound.view_asn.finish_unloading'), icon: 'file_download', color: 'orange-8', handler: 'presortData' },
