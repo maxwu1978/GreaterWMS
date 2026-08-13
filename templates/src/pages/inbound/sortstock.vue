@@ -119,6 +119,7 @@
              fill-input
              label="Putaway driver"
              :options="driver_options"
+             @focus="loadPutawayDriverOptions()"
              @filter="filterFnDriver"
              style="margin-bottom: 10px"
            >
@@ -148,6 +149,7 @@
                          v-model="movedata.bin_name"
                          :label="$t('warehouse.view_binset.bin_name')"
                          :options="options"
+                         @focus="loadBinOptions()"
                          @filter="filterFn"
                          @keyup.enter="MoveToBinSubmit()">
                  <template v-slot:no-option>
@@ -358,6 +360,7 @@ export default {
       _this.moveForm = true
       _this.movedata = { ...e, putaway_driver: '' }
       _this.loadPutawayDriverOptions()
+      _this.loadBinOptions()
       getauth('asn/list/?asn_code=' + encodeURIComponent(e.asn_code)).then(res => {
         const row = (res.results || [])[0]
         if (row && row.putaway_driver) _this.movedata.putaway_driver = row.putaway_driver
@@ -402,28 +405,32 @@ export default {
       _this.moveForm = false
       _this.movedata = {}
     },
-    filterFn (val, update, abort) {
+    loadBinOptions (needle = '') {
       var _this = this
-      if (val.length < 1) {
-        abort()
-        return
-      }
-      update(() => {
-        const needle = val.toLowerCase()
-        getauth('binset/?bin_name__icontains=' + needle).then(res => {
-          var binlist = []
-          res.results.forEach(detail => {
-            binlist.push(detail.bin_name)
+      const query = encodeURIComponent(String(needle || '').trim().toLowerCase())
+      getauth('binset/?bin_name__icontains=' + query).then(res => {
+        const rows = Array.isArray(res) ? res : (res.results || [])
+        const binlist = rows
+          .filter(detail => {
+            const name = String(detail.bin_name || '').toUpperCase()
+            const role = String(detail.location_role || '').toUpperCase()
+            return role !== 'STAGING' && !name.startsWith('STAGE-')
           })
-          SessionStorage.set('bin_name', binlist)
-          _this.options = SessionStorage.getItem('bin_name')
-        }).catch(err => {
-          _this.$q.notify({
-            message: err.detail,
-            icon: 'close',
-            color: 'negative'
-          })
+          .map(detail => detail.bin_name)
+          .filter(Boolean)
+        SessionStorage.set('bin_name', binlist)
+        _this.options = binlist
+      }).catch(err => {
+        _this.$q.notify({
+          message: err.detail,
+          icon: 'close',
+          color: 'negative'
         })
+      })
+    },
+    filterFn (val, update) {
+      update(() => {
+        this.loadBinOptions(val)
       })
     },
     loadPutawayDriverOptions (needle = '') {
@@ -434,11 +441,7 @@ export default {
         LocalStorage.set('putaway_driver_name_list', options)
       }).catch(() => {})
     },
-    filterFnDriver (val, update, abort) {
-      if (val.length < 1) {
-        abort()
-        return
-      }
+    filterFnDriver (val, update) {
       update(() => {
         this.loadPutawayDriverOptions(val)
       })
