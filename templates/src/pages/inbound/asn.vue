@@ -1280,7 +1280,10 @@ export default {
       const serialExceptions = this.serialAcceptanceExceptions(row)
       const quantityExceptions = Number(row.exception_qty || 0)
       const precheckStatus = row.precheck_status
-      const qcNotStarted = !row.serial_acceptance || row.serial_acceptance.status === 'NOT_IMPORTED'
+      const qcNotStarted = !row.serial_acceptance || (
+        Number(row.actual_qty || 0) <= 0 ||
+        (row.serial_acceptance.status === 'NOT_IMPORTED' && !row.serial_acceptance.qc_complete)
+      )
 
       if (serialExceptions > 0) {
         signals.push({
