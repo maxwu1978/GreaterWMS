@@ -399,7 +399,14 @@ export default {
       _this.loadBinOptions()
       getauth('asn/list/?asn_code=' + encodeURIComponent(e.asn_code)).then(res => {
         const row = (res.results || [])[0]
-        if (row && row.putaway_driver) _this.movedata.putaway_driver = row.putaway_driver
+        if (row) {
+          _this.movedata.putaway_context = { ...e, ...row }
+          _this.movedata.serial_acceptance = row.serial_acceptance
+          _this.movedata.actual_qty = row.actual_qty
+          _this.movedata.putaway_qty = row.putaway_qty
+          if (row.putaway_driver) _this.movedata.putaway_driver = row.putaway_driver
+          _this.movedata.qty = _this.putawayMaxQty(_this.movedata)
+        }
       }).catch(() => {})
     },
     MoveToBinSubmit () {
