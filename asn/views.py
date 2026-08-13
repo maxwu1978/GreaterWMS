@@ -1262,6 +1262,7 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             asn_code=qs.asn_code,
                             goods_code=qs.goods_code,
                         )
+                        eligible_remaining = remaining_qty
                         if serial_records.exists():
                             strict_serial_check = serial_records.filter(is_expected=True).exists()
                             missing_serials = serial_records.filter(
@@ -1286,9 +1287,32 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                                 exception_resolved=True,
                                 exception_resolution_action__in=PUTAWAY_APPROVED_RESOLUTIONS,
                             ).count()
-                            if exception_serials or (strict_serial_check and (missing_serials or accepted_serials + resolved_serials < requested_qty)):
+                            expected_sn_count = serial_records.filter(is_expected=True).count()
+                            scanned_sn_count = serial_records.filter(is_received=True).count()
+                            eligible_serials = accepted_serials + resolved_serials
+                            eligible_remaining = max(eligible_serials - int(qs.sorted_qty or 0), 0)
+                            if strict_serial_check and requested_qty > eligible_remaining:
+                                blocked_parts = []
+                                if missing_serials:
+                                    blocked_parts.append("%s expected SN missing" % missing_serials)
+                                if exception_serials:
+                                    blocked_parts.append("%s unresolved SN exception(s)" % exception_serials)
+                                if not blocked_parts:
+                                    blocked_parts.append("only %s eligible unit(s) remain" % eligible_remaining)
                                 raise APIException({
-                                    "detail": "SN verification is incomplete; resolve missing or exception serials before putaway"
+                                    "detail": (
+                                        "SN verification incomplete. Expected: %s; Scanned: %s; "
+                                        "Accepted: %s; Hold/exception: %s; Requested: %s; "
+                                        "Maximum allowed now: %s. %s. Reduce Putaway Qty or open Review QC."
+                                    ) % (
+                                        expected_sn_count,
+                                        scanned_sn_count,
+                                        eligible_serials,
+                                        max(expected_sn_count - eligible_serials, 0),
+                                        requested_qty,
+                                        eligible_remaining,
+                                        "; ".join(blocked_parts),
+                                    )
                                 })
                         if qs.exception_resolved and qs.exception_resolution_action in {HOLD_QUARANTINE, REJECT_RETURN}:
                             raise APIException({
@@ -1301,9 +1325,19 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
                             received_serials = set(serial_records.filter(
                                 is_received=True,
                             ).values_list('serial_number', flat=True))
-                            if expected_serials - received_serials or received_serials - expected_serials:
+                            if (
+                                (expected_serials - received_serials or received_serials - expected_serials)
+                                and requested_qty > eligible_remaining
+                            ):
                                 raise APIException({
-                                    "detail": "Customer Pack List serial mismatch; resolve the QC exception before putaway"
+                                    "detail": (
+                                        "Customer Pack List serial mismatch. Expected: %s; Scanned: %s; "
+                                        "Maximum allowed now: %s. Review QC before moving the remaining quantity."
+                                    ) % (
+                                        len(expected_serials),
+                                        len(received_serials),
+                                        eligible_remaining,
+                                    )
                                 })
                         if (
                             not qs.exception_resolved

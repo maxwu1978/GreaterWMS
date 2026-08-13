@@ -108,7 +108,40 @@
              <q-tooltip>{{ $t('index.close') }}</q-tooltip>
            </q-btn>
          </q-bar>
-         <q-card-section style="max-height: 325px; width: 400px" class="scroll">
+         <q-card-section style="max-height: 430px; width: 400px" class="scroll">
+           <div v-if="movedata.goods_code" class="q-pa-sm bg-grey-2 text-dark q-mb-sm">
+             <div class="text-weight-bold">Putaway readiness</div>
+             <div class="text-caption">
+               Expected {{ putawayStats(movedata).expected }} ·
+               Scanned {{ putawayStats(movedata).scanned }} ·
+               Accepted {{ putawayStats(movedata).accepted }} ·
+               Hold {{ putawayStats(movedata).held }}
+             </div>
+             <div class="text-caption text-weight-medium">
+               Maximum allowed: {{ putawayMaxQty(movedata) }}
+             </div>
+             <div v-if="putawayBlockMessage(movedata)" class="text-caption text-negative q-mt-xs">
+               {{ putawayBlockMessage(movedata) }}
+             </div>
+             <div class="q-mt-sm">
+               <q-btn
+                 v-if="putawayMaxQty(movedata) > 0"
+                 flat
+                 dense
+                 color="primary"
+                 :label="'Use ' + putawayMaxQty(movedata) + ' for putaway'"
+                 @click="useEligiblePutawayQty()"
+               />
+               <q-btn
+                 v-if="putawayNeedsQcReview(movedata)"
+                 flat
+                 dense
+                 color="negative"
+                 label="Review QC"
+                 @click="reviewPutawayQc()"
+               />
+             </div>
+           </div>
            <q-select
              v-model="movedata.putaway_driver"
              dense
@@ -135,9 +168,11 @@
                     debounce="500"
                     v-model.number="movedata.qty"
                     type="number"
-                    :label="$t('stock.view_stocklist.goods_qty')"
+                    :label="'Putaway Qty (max ' + putawayMaxQty(movedata) + ')'"
+                    min="1"
+                    :max="putawayMaxQty(movedata)"
                     style="margin-bottom: 5px"
-                    :rules="[ val => val && val > 0 || error1]"
+                    :rules="[putawayQuantityRequired, putawayQuantityWithinLimit]"
                     @keyup.enter="MoveToBinSubmit()">
              <template v-slot:before>
                <q-select dense
@@ -358,7 +393,8 @@ export default {
     MoveToBin (e) {
       var _this = this
       _this.moveForm = true
-      _this.movedata = { ...e, putaway_driver: '' }
+      _this.movedata = { ...e, putaway_driver: '', qty: 0, putaway_context: e }
+      _this.movedata.qty = _this.putawayMaxQty(_this.movedata)
       _this.loadPutawayDriverOptions()
       _this.loadBinOptions()
       getauth('asn/list/?asn_code=' + encodeURIComponent(e.asn_code)).then(res => {
@@ -380,8 +416,22 @@ export default {
           icon: 'close',
           color: 'negative'
         })
+      } else if (Number(_this.movedata.qty) <= 0) {
+        _this.$q.notify({
+          message: 'Enter a putaway quantity',
+          icon: 'close',
+          color: 'negative'
+        })
+      } else if (Number(_this.movedata.qty) > _this.putawayMaxQty(_this.movedata)) {
+        _this.$q.notify({
+          message: _this.putawayQuantityError(_this.movedata.qty),
+          icon: 'close',
+          color: 'negative'
+        })
       } else {
-        postauth('asn/movetobin/' + _this.movedata.id + '/', _this.movedata).then(res => {
+        const payload = { ..._this.movedata }
+        delete payload.putaway_context
+        postauth('asn/movetobin/' + _this.movedata.id + '/', payload).then(res => {
           _this.getList()
           _this.MoveToBinCancel()
           if (!res.detail) {
@@ -404,6 +454,80 @@ export default {
       var _this = this
       _this.moveForm = false
       _this.movedata = {}
+    },
+    putawayContext (row) {
+      return (row && row.putaway_context) || row || {}
+    },
+    putawayStats (row) {
+      const context = this.putawayContext(row)
+      const summary = context.serial_acceptance || {}
+      const hasSerialResult = Boolean(summary.status && summary.status !== 'NOT_IMPORTED')
+      const actual = Number(context.goods_actual_qty || context.actual_qty || 0)
+      const alreadyPutaway = Number(context.sorted_qty || context.putaway_qty || 0)
+      const remaining = Math.max(actual - alreadyPutaway, 0)
+      const expected = hasSerialResult ? Number(summary.expected || actual) : actual
+      const scanned = hasSerialResult ? Number(summary.scan_record_count || summary.received || 0) : 0
+      const accepted = hasSerialResult
+        ? Number(summary.eligible_for_putaway || summary.accepted_for_putaway || summary.accepted || 0)
+        : remaining
+      const held = hasSerialResult ? Number(summary.held || 0) : 0
+      const repair = hasSerialResult ? Number(summary.repair || 0) : 0
+      const rejected = hasSerialResult ? Number(summary.rejected || 0) : 0
+      const openExceptions = hasSerialResult ? Number(summary.open_exception_count || 0) : 0
+      const maximum = hasSerialResult
+        ? Math.max(0, Math.min(remaining, accepted - alreadyPutaway))
+        : remaining
+      return {
+        hasSerialResult,
+        actual,
+        alreadyPutaway,
+        remaining,
+        expected,
+        scanned,
+        accepted,
+        held,
+        repair,
+        rejected,
+        openExceptions,
+        maximum
+      }
+    },
+    putawayMaxQty (row) {
+      return this.putawayStats(row).maximum
+    },
+    putawayNeedsQcReview (row) {
+      const stats = this.putawayStats(row)
+      return stats.hasSerialResult && (
+        stats.held > 0 || stats.repair > 0 || stats.rejected > 0 || stats.openExceptions > 0
+      )
+    },
+    putawayBlockMessage (row) {
+      const stats = this.putawayStats(row)
+      if (!stats.hasSerialResult) {
+        return 'SN result not imported. Putaway is limited by received quantity.'
+      }
+      if (stats.maximum < stats.remaining) {
+        const blocked = Math.max(stats.remaining - stats.maximum, 0)
+        return `${blocked} unit(s) are not eligible for putaway. Review QC before moving them.`
+      }
+      return ''
+    },
+    putawayQuantityRequired (value) {
+      return Number(value) > 0 || 'Enter a putaway quantity'
+    },
+    putawayQuantityError (value) {
+      return `Quantity exceeds the eligible quantity. Maximum allowed is ${this.putawayMaxQty(this.movedata)}.`
+    },
+    putawayQuantityWithinLimit (value) {
+      return Number(value) <= this.putawayMaxQty(this.movedata) || this.putawayQuantityError(value)
+    },
+    useEligiblePutawayQty () {
+      this.movedata.qty = this.putawayMaxQty(this.movedata)
+    },
+    reviewPutawayQc () {
+      const row = this.putawayContext(this.movedata)
+      this.moveForm = false
+      this.openSerialPanel(row)
     },
     loadBinOptions (needle = '') {
       var _this = this
