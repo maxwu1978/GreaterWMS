@@ -209,7 +209,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             quantity for goods_code, quantity in actual_by_sku.items()
             if goods_code not in pack_by_sku
         )
-        if current_pack_list.has_serials:
+        if current_pack_list and current_pack_list.has_serials:
             expected_serials = {
                 record.serial_number: record.goods_code
                 for record in current_pack_list.serial_records.filter(is_expected=True)

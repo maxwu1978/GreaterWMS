@@ -5,6 +5,7 @@ from django.test import TestCase
 from rest_framework.exceptions import APIException
 
 from asn.models import AsnDetailModel, AsnListModel
+from asn.serializers import ASNListGetSerializer
 
 from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
 from .views import _create_pack_list, _scan, _summary
@@ -118,6 +119,14 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(row['open_exception_count'], 0)
         self.assertEqual(row['result'], 'REVIEW')
         self.assertEqual(summary['receiving_summary']['status'], 'PASSED')
+
+    def test_asn_serializer_handles_missing_pack_list(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+
+        data = ASNListGetSerializer(asn, context={}).data
+
+        self.assertEqual(data['pack_list_status'], 'NOT_RECEIVED')
+        self.assertEqual(data['serial_acceptance']['status'], 'NOT_IMPORTED')
 
     def test_summary_marks_reconciliation_exception_for_quantity_variance(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
