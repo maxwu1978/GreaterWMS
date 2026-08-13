@@ -471,6 +471,7 @@ function serialImportForm (file, options) {
   form.append('shipout_ref', options['shipout-ref'] || '')
   form.append('source_type', options.source || 'AI_AGENT')
   form.append('note', options.note || '')
+  form.append('evidence_url', options['evidence-url'] || '')
   if (options['allow-all']) form.append('allow_all', 'true')
   return form
 }
@@ -485,7 +486,7 @@ function help () {
   process.stdout.write('Putaway: asn putaway --id ASN_DETAIL_ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('  serial exceptions --asn-code ASN [--json]\n  serial resolve --id ID --data {"action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  serial resolve-quantity --data {"asn_code":"ASN","goods_code":"SKU","action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  asn putaway --id ASN_DETAIL_ID --data {"asn_code":"ASN","goods_code":"SKU","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"} --dry-run|--confirm\n')
   process.stdout.write('AI Agent/CLI ingestion: Pack List and QC imports are not available in the web page.\n')
-  process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
+  process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE [--evidence-url URL] --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
   process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated openid token from the current GreaterWMS session\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
@@ -621,6 +622,7 @@ async function main () {
         inbound_po: options['inbound-po'] || '',
         shipout_ref: options['shipout-ref'] || '',
         allow_all: Boolean(options['allow-all']),
+        evidence_url: options['evidence-url'] || '',
       }, json)
       return
     }
@@ -646,6 +648,7 @@ async function main () {
         source_type: options.source || 'UPLOAD',
         note: options.note || '',
         allow_all: Boolean(options['allow-all']),
+        evidence_url: options['evidence-url'] || '',
       }, json)
       return
     }

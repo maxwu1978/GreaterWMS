@@ -81,6 +81,7 @@ class AsnDetailModel(models.Model):
     exception_resolved = models.BooleanField(default=False, verbose_name="Receiving Exception Resolved")
     exception_resolution_action = models.CharField(max_length=64, blank=True, default='', verbose_name="Exception Resolution Action")
     exception_resolution_note = models.TextField(blank=True, default='', verbose_name="Exception Resolution Note")
+    exception_resolution_location = models.CharField(max_length=255, blank=True, default='', verbose_name="Exception Resolution Location")
     exception_resolved_by = models.CharField(max_length=255, blank=True, default='', verbose_name="Exception Resolved By")
     exception_resolved_at = models.DateTimeField(blank=True, null=True, verbose_name="Exception Resolved Time")
     goods_weight = models.FloatField(default=0, verbose_name="Goods Weight")

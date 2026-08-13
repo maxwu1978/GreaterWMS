@@ -37,6 +37,7 @@ class PackListImportBatch(models.Model):
     source_type = models.CharField(max_length=32, blank=True, default='AI_AGENT')
     imported_by = models.CharField(max_length=255, blank=True, default='')
     note = models.TextField(blank=True, default='')
+    evidence_url = models.CharField(max_length=1000, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -180,9 +181,11 @@ class AsnSerialRecord(models.Model):
     scan_count = models.PositiveIntegerField(default=0)
     damaged = models.BooleanField(default=False)
     note = models.TextField(blank=True, default='')
+    evidence_url = models.CharField(max_length=1000, blank=True, default='')
     exception_resolved = models.BooleanField(default=False)
     exception_resolution_action = models.CharField(max_length=64, blank=True, default='')
     exception_resolution_note = models.TextField(blank=True, default='')
+    exception_resolution_location = models.CharField(max_length=255, blank=True, default='')
     exception_resolved_by = models.CharField(max_length=255, blank=True, default='')
     exception_resolved_at = models.DateTimeField(blank=True, null=True)
     expected_by = models.CharField(max_length=255, blank=True, default='')
@@ -213,3 +216,25 @@ class AsnSerialRecord(models.Model):
                 name='asnserial_openid_asn_sn_uniq'
             )
         ]
+
+
+# These values are stored in the existing resolution field so old records remain
+# readable while the UI can distinguish approval from hold or rejection.
+LEGACY_ACCEPT_EXCEPTION = 'ACCEPT_EXCEPTION'
+ACCEPT_FOR_PUTAWAY = 'ACCEPT_FOR_PUTAWAY'
+HOLD_QUARANTINE = 'HOLD_QUARANTINE'
+REJECT_RETURN = 'REJECT_RETURN'
+
+PUTAWAY_APPROVED_RESOLUTIONS = frozenset({
+    '',
+    LEGACY_ACCEPT_EXCEPTION,
+    ACCEPT_FOR_PUTAWAY,
+})
+NON_PUTAWAY_RESOLUTIONS = frozenset({
+    HOLD_QUARANTINE,
+    REJECT_RETURN,
+})
+
+
+def resolution_allows_putaway(action):
+    return action in PUTAWAY_APPROVED_RESOLUTIONS

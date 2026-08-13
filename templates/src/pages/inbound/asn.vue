@@ -833,6 +833,7 @@
     <asn-serial-panel
       v-model="serialPanelOpen"
       :asn-code="serialAsnCode"
+      :asn-context="serialAsnContext"
     />
   </div>
 </template>
@@ -1138,12 +1139,14 @@ export default {
       total: 0,
       paginationIpt: 1,
       serialPanelOpen: false,
-      serialAsnCode: ''
+      serialAsnCode: '',
+      serialAsnContext: {}
     }
   },
   methods: {
     openSerialPanel (e) {
       this.serialAsnCode = e.asn_code
+      this.serialAsnContext = e || {}
       this.serialPanelOpen = true
     },
     openPackList (e) {
@@ -1237,7 +1240,9 @@ export default {
       return 'Expected SN: ' + (summary.expected || 0) +
         ' | Received qty: ' + (summary.actual_received_qty || 0) +
         ' | Scanned: ' + scanned +
-        ' | Accepted: ' + (summary.accepted_for_putaway || summary.accepted || 0) +
+        ' | Eligible: ' + (summary.eligible_for_putaway || summary.accepted_for_putaway || summary.accepted || 0) +
+        ' | Held: ' + (summary.held || 0) +
+        ' | Rejected: ' + (summary.rejected || 0) +
         ' | Extra: ' + extra +
         ' | Open exceptions: ' + open
     },
@@ -1247,8 +1252,12 @@ export default {
       const accepted = Number(summary.accepted_for_putaway || summary.accepted || 0)
       const scanned = Number(summary.scan_record_count || summary.received || 0)
       const extra = Number(summary.extra_scan_count || 0)
+      const held = Number(summary.held || 0)
+      const rejected = Number(summary.rejected || 0)
       const open = Number(summary.exceptions || 0) + Number(summary.quantity_exceptions || 0)
       const parts = ['SN ' + accepted + '/' + expected, 'Scans ' + scanned]
+      if (held > 0) parts.push('Hold ' + held)
+      if (rejected > 0) parts.push('Reject ' + rejected)
       if (extra > 0) parts.push('Extra ' + extra + (Number(summary.resolved || 0) >= extra ? ' OK' : ''))
       if (open > 0) parts.push('Open ' + open)
       return parts.join(' · ')
@@ -1274,6 +1283,27 @@ export default {
           key: 'quantity',
           label: 'Qty: ' + quantityExceptions,
           title: 'Quantity exceptions: ' + quantityExceptions,
+          color: 'negative',
+          textColor: 'white'
+        })
+      }
+
+      const held = Number((row.serial_acceptance && row.serial_acceptance.held) || 0)
+      const rejected = Number((row.serial_acceptance && row.serial_acceptance.rejected) || 0)
+      if (held > 0) {
+        signals.push({
+          key: 'held',
+          label: 'Hold: ' + held,
+          title: 'Held or quarantined serials: ' + held,
+          color: 'amber-3',
+          textColor: 'dark'
+        })
+      }
+      if (rejected > 0) {
+        signals.push({
+          key: 'rejected',
+          label: 'Reject: ' + rejected,
+          title: 'Rejected or returned serials: ' + rejected,
           color: 'negative',
           textColor: 'white'
         })
@@ -1384,7 +1414,7 @@ export default {
     },
     openSerialPanelFromView () {
       this.viewForm = false
-      this.openSerialPanel({ asn_code: this.viewAsn })
+      this.openSerialPanel(this.viewRow || { asn_code: this.viewAsn })
     },
     editFromView () {
       const row = this.viewRow

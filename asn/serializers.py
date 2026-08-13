@@ -2,6 +2,10 @@ from rest_framework import serializers
 from .models import AsnListModel, AsnDetailModel
 from utils import datasolve
 from supplier.shortname import generated_supplier_short_name
+from asnserial.models import (
+    HOLD_QUARANTINE,
+    REJECT_RETURN,
+)
 
 class ASNListGetSerializer(serializers.ModelSerializer):
     asn_code = serializers.CharField(read_only=True, required=False)
@@ -185,7 +189,19 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             exception_statuses.add(AsnSerialRecord.UNEXPECTED)
         exceptions = records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing = records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
-        accepted_for_putaway = min(accepted + resolved, actual_received_qty)
+        resolved_for_putaway = records.filter(
+            exception_resolved=True,
+            exception_resolution_action__in=('', 'ACCEPT_EXCEPTION', 'ACCEPT_FOR_PUTAWAY'),
+        ).count()
+        accepted_for_putaway = min(accepted + resolved_for_putaway, actual_received_qty)
+        held = records.filter(
+            exception_resolved=True,
+            exception_resolution_action=HOLD_QUARANTINE,
+        ).count()
+        rejected = records.filter(
+            exception_resolved=True,
+            exception_resolution_action=REJECT_RETURN,
+        ).count()
         extra_scan_count = max(received - actual_received_qty, 0)
         current_pack_list = PackListDocument.objects.filter(
             openid=obj.openid,
@@ -232,6 +248,29 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 if expected_serials[serial_number] != received_serials[serial_number]
             )
 
+        # Quantity-only receiving has no SN rows by design. It is complete
+        # here only after all quantity exceptions have been explicitly resolved.
+        quantity_only_resolved = (
+            actual_received_qty > 0
+            and not records.exists()
+            and not expected
+            and not AsnDetailModel.objects.filter(
+                openid=obj.openid,
+                asn_code=obj.asn_code,
+                is_delete=False,
+                exception_resolved=False,
+            ).exists()
+        )
+        if quantity_only_resolved:
+            accepted_for_putaway = actual_received_qty
+        has_receiving_result = records.exists() or actual_received_qty == 0 or quantity_only_resolved
+        qc_complete = bool(
+            has_receiving_result
+            and not exceptions
+            and not missing
+            and not quantity_exceptions
+            and not pack_list_variance
+        )
         if exceptions or quantity_exceptions or pack_list_variance:
             status = 'EXCEPTIONS'
         elif not records.exists():
@@ -252,18 +291,16 @@ class ASNListGetSerializer(serializers.ModelSerializer):
             'extra_scan_count': extra_scan_count,
             'accepted': accepted,
             'accepted_for_putaway': accepted_for_putaway,
+            'eligible_for_putaway': accepted_for_putaway,
             'putaway_qty': accepted_for_putaway,
             'resolved': resolved,
+            'held': held,
+            'rejected': rejected,
             'exceptions': exceptions,
             'quantity_exceptions': quantity_exceptions,
             'pack_list_variance': pack_list_variance,
-            'ready_for_putaway': (
-                quantity_exceptions == 0
-                and exceptions == 0
-                and pack_list_variance == 0
-                and missing == 0
-                and (not expected or accepted_for_putaway >= expected)
-            ),
+            'qc_complete': qc_complete,
+            'ready_for_putaway': bool(qc_complete and accepted_for_putaway > 0),
         }
         return cache[cache_key]
 
@@ -300,7 +337,7 @@ class ASNListGetSerializer(serializers.ModelSerializer):
         actual_qty = int(self._get_detail_aggregate(obj)['actual_qty'] or 0)
         open_exceptions = int(serial.get('exceptions') or 0) + int(serial.get('quantity_exceptions') or 0)
         has_scan_result = serial.get('status') != 'NOT_IMPORTED'
-        inspection_incomplete = not serial.get('ready_for_putaway', False)
+        inspection_incomplete = not serial.get('qc_complete', False)
 
         if not obj.actual_arrival_at:
             result = {
@@ -355,7 +392,14 @@ class ASNListGetSerializer(serializers.ModelSerializer):
                 'action': 'VIEW',
                 'action_label': 'View',
             }
-        elif putaway['putaway_qty'] < putaway['actual_qty']:
+        elif serial.get('qc_complete') and int(serial.get('eligible_for_putaway') or 0) <= 0:
+            result = {
+                'status': 'QC_REVIEW_REQUIRED',
+                'reason': 'QC is complete, but no received units are eligible for putaway.',
+                'action': 'REVIEW_QC',
+                'action_label': 'Review QC',
+            }
+        elif putaway['putaway_qty'] < putaway['actual_qty'] and int(serial.get('eligible_for_putaway') or 0) > 0:
             result = {
                 'status': 'READY_FOR_PUTAWAY',
                 'reason': 'Receiving is accepted and quantity remains to be put away.',
@@ -536,6 +580,7 @@ class ASNDetailGetSerializer(serializers.ModelSerializer):
     exception_resolved = serializers.BooleanField(read_only=True, required=False)
     exception_resolution_action = serializers.CharField(read_only=True, required=False)
     exception_resolution_note = serializers.CharField(read_only=True, required=False)
+    exception_resolution_location = serializers.CharField(read_only=True, required=False)
     exception_resolved_by = serializers.CharField(read_only=True, required=False)
     exception_resolved_at = serializers.DateTimeField(read_only=True, required=False, format='%Y-%m-%d %H:%M:%S')
     creater = serializers.CharField(read_only=True, required=False)
@@ -578,6 +623,7 @@ class ASNDetailPostSerializer(serializers.ModelSerializer):
             'id', 'create_time', 'update_time',
             'exception_resolved', 'exception_resolution_action',
             'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+            'exception_resolution_location',
         ]
 
 class ASNSortedPostSerializer(serializers.ModelSerializer):
@@ -595,6 +641,7 @@ class ASNSortedPostSerializer(serializers.ModelSerializer):
             'id', 'create_time', 'update_time',
             'exception_resolved', 'exception_resolution_action',
             'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+            'exception_resolution_location',
         ]
 
 class ASNDetailUpdateSerializer(serializers.ModelSerializer):
@@ -611,6 +658,7 @@ class ASNDetailUpdateSerializer(serializers.ModelSerializer):
             'id', 'create_time', 'update_time',
             'exception_resolved', 'exception_resolution_action',
             'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+            'exception_resolution_location',
         ]
 
 class ASNDetailPartialUpdateSerializer(serializers.ModelSerializer):
@@ -627,6 +675,7 @@ class ASNDetailPartialUpdateSerializer(serializers.ModelSerializer):
             'id', 'create_time', 'update_time',
             'exception_resolved', 'exception_resolution_action',
             'exception_resolution_note', 'exception_resolved_by', 'exception_resolved_at',
+            'exception_resolution_location',
         ]
 
 class MoveToBinSerializer(serializers.ModelSerializer):

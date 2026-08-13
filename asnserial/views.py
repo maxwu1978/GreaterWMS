@@ -14,7 +14,19 @@ from asn.models import AsnDetailModel, AsnListModel
 from staff.models import ListModel as Staff
 from supplier.shortname import generated_supplier_short_name
 
-from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
+from .models import (
+    ACCEPT_FOR_PUTAWAY,
+    HOLD_QUARANTINE,
+    LEGACY_ACCEPT_EXCEPTION,
+    NON_PUTAWAY_RESOLUTIONS,
+    REJECT_RETURN,
+    AsnSerialRecord,
+    PackListDocument,
+    PackListImportBatch,
+    PackListLine,
+    PUTAWAY_APPROVED_RESOLUTIONS,
+    resolution_allows_putaway,
+)
 
 
 EXCEPTION_STATUSES = {
@@ -24,6 +36,36 @@ EXCEPTION_STATUSES = {
     AsnSerialRecord.DAMAGED,
     AsnSerialRecord.REJECTED,
 }
+
+SERIAL_EXCEPTION_ACTIONS = {
+    ACCEPT_FOR_PUTAWAY,
+    LEGACY_ACCEPT_EXCEPTION,
+    HOLD_QUARANTINE,
+    REJECT_RETURN,
+    'WAIVE_MISSING',
+    'REOPEN',
+}
+
+
+def _resolved_putaway_count(records):
+    return records.filter(
+        exception_resolved=True,
+        exception_resolution_action__in=PUTAWAY_APPROVED_RESOLUTIONS,
+    ).count()
+
+
+def _resolved_hold_count(records):
+    return records.filter(
+        exception_resolved=True,
+        exception_resolution_action=HOLD_QUARANTINE,
+    ).count()
+
+
+def _resolved_reject_count(records):
+    return records.filter(
+        exception_resolved=True,
+        exception_resolution_action=REJECT_RETURN,
+    ).count()
 
 
 def _openid(request):
@@ -46,6 +88,11 @@ def _clean(value):
     if value is None:
         return ''
     return str(value).strip().upper()
+
+
+def _text(value):
+    """Preserve free text such as evidence URLs without SKU normalization."""
+    return str(value or '').strip()
 
 
 def _is_damage_flag(value):
@@ -151,6 +198,7 @@ def _inspection_batch_json(batch):
         'accepted_count': batch.accepted_count,
         'exception_count': batch.exception_count,
         'note': batch.note,
+        'evidence_url': batch.evidence_url,
         'imported_by': batch.imported_by,
         'created_at': batch.created_at.isoformat() if batch.created_at else None,
     }
@@ -224,9 +272,11 @@ def _record_json(record):
         'scan_count': record.scan_count,
         'damaged': record.damaged,
         'note': record.note,
+        'evidence_url': record.evidence_url,
         'exception_resolved': record.exception_resolved,
         'exception_resolution_action': record.exception_resolution_action,
         'exception_resolution_note': record.exception_resolution_note,
+        'resolution_location': record.exception_resolution_location,
         'exception_resolved_by': record.exception_resolved_by,
         'exception_resolved_at': record.exception_resolved_at.isoformat() if record.exception_resolved_at else None,
         'expected_by': record.expected_by,
@@ -270,6 +320,12 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
         expected_count = sum(1 for record in line_records if record.is_expected)
         accepted_count = sum(1 for record in line_records if record.status == AsnSerialRecord.ACCEPTED)
         resolved_count = sum(1 for record in line_records if record.exception_resolved)
+        putaway_eligible_count = sum(
+            1 for record in line_records
+            if record.status == AsnSerialRecord.ACCEPTED or (
+                record.exception_resolved and resolution_allows_putaway(record.exception_resolution_action)
+            )
+        )
         exception_count = sum(
             1 for record in line_records
             if record.status in exception_statuses and not record.exception_resolved
@@ -292,7 +348,7 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
         open_exception_count = exception_count + serial_mismatch_count + int(quantity_exception_qty > 0)
         resolved_exception_total = resolved_count + int(quantity_exception_resolved)
         variance = received_qty - baseline_qty
-        accepted_qty = accepted_count if (strict_serial_check or (document and document.has_serials)) else received_qty
+        accepted_qty = putaway_eligible_count if (strict_serial_check or (document and document.has_serials)) else received_qty
         if open_exception_count or variance:
             result = 'EXCEPTION'
         elif not document or document.status == PackListDocument.PENDING:
@@ -310,6 +366,7 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             'asn_qty': planned_qty,
             'received_qty': received_qty,
             'accepted_qty': accepted_qty,
+            'putaway_eligible_qty': putaway_eligible_count,
             'variance': variance,
             'baseline': 'PACK_LIST' if document else 'ASN',
             'expected_serial_count': expected_count,
@@ -317,6 +374,9 @@ def _reconciliation_rows(document, details, records, strict_serial_check, except
             'open_exception_count': open_exception_count,
             'resolved_exception_count': resolved_exception_total,
             'quantity_exception_qty': quantity_exception_qty,
+            'goods_shortage_qty': int(detail.goods_shortage_qty or 0),
+            'goods_more_qty': int(detail.goods_more_qty or 0),
+            'goods_damage_qty': int(detail.goods_damage_qty or 0),
             'serial_mismatch_count': serial_mismatch_count,
             'result': result,
         })
@@ -351,10 +411,20 @@ def _summary(openid, asn_code):
         received_count = line_records.filter(is_received=True).count()
         accepted_count = line_records.filter(status=AsnSerialRecord.ACCEPTED).count()
         resolved_count = line_records.filter(exception_resolved=True).count()
+        resolved_putaway_count = _resolved_putaway_count(line_records)
         exception_count = line_records.filter(status__in=exception_statuses, exception_resolved=False).count()
         missing_count = line_records.filter(is_expected=True, is_received=False, exception_resolved=False).count()
         actual_received_qty = int(detail.goods_actual_qty or 0)
-        accepted_for_putaway = min(accepted_count + resolved_count, actual_received_qty)
+        quantity_only_resolved = (
+            actual_received_qty > 0
+            and not line_records.exists()
+            and not strict_serial_check
+            and bool(detail.exception_resolved)
+        )
+        accepted_for_putaway = actual_received_qty if quantity_only_resolved else min(
+            accepted_count + resolved_putaway_count,
+            actual_received_qty,
+        )
         quantity_exception_qty = 0 if detail.exception_resolved else (
             int(detail.goods_shortage_qty or 0)
             + int(detail.goods_more_qty or 0)
@@ -369,11 +439,18 @@ def _summary(openid, asn_code):
             'extra_scan_count': max(received_count - actual_received_qty, 0),
             'accepted_serial_count': accepted_count,
             'accepted_for_putaway': accepted_for_putaway,
+            'eligible_for_putaway': accepted_for_putaway,
             'resolved_exception_count': resolved_count,
+            'held_count': _resolved_hold_count(line_records),
+            'rejected_count': _resolved_reject_count(line_records),
             'missing_serial_count': missing_count,
             'exception_count': exception_count,
             'quantity_exception_qty': quantity_exception_qty,
             'quantity_exception_resolved': bool(detail.exception_resolved),
+            'exception_resolved': bool(detail.exception_resolved),
+            'exception_resolution_action': detail.exception_resolution_action,
+            'exception_resolution_note': detail.exception_resolution_note,
+            'resolution_location': detail.exception_resolution_location,
             'ready_for_putaway': (
                 quantity_exception_qty == 0 and (
                     not line_records.exists()
@@ -389,7 +466,17 @@ def _summary(openid, asn_code):
     actual_received_qty = sum(int(detail.goods_actual_qty or 0) for detail in details)
     physical_putaway_qty = sum(int(detail.sorted_qty or 0) for detail in details)
     scanned_record_count = records.filter(is_received=True).count()
-    accepted_for_putaway_total = min(accepted_total + resolved_total, actual_received_qty)
+    resolved_putaway_total = _resolved_putaway_count(records)
+    quantity_only_resolved = (
+        actual_received_qty > 0
+        and not records.exists()
+        and not has_expected_serials
+        and not details.filter(exception_resolved=False).exists()
+    )
+    accepted_for_putaway_total = actual_received_qty if quantity_only_resolved else min(
+        accepted_total + resolved_putaway_total,
+        actual_received_qty,
+    )
     extra_scan_record_count = max(scanned_record_count - actual_received_qty, 0)
     quantity_exception_total = sum(
         0 if detail.exception_resolved else (
@@ -414,6 +501,16 @@ def _summary(openid, asn_code):
         for row in reconciliation_rows
     ) if active_pack_list else 0
     pack_list_serial_mismatch = _pack_list_serial_mismatch(active_pack_list, records)
+    # Quantity-only receiving has no SN rows by design. It is complete here
+    # only after all quantity exceptions have been explicitly resolved.
+    has_receiving_result = records.exists() or actual_received_qty == 0 or quantity_only_resolved
+    qc_complete = bool(
+        has_receiving_result
+        and not open_reconciliation_exceptions
+        and not pack_list_variance
+        and missing_total == 0
+        and quantity_exception_total == 0
+    )
     if open_reconciliation_exceptions or pack_list_variance:
         reconciliation_status = 'EXCEPTION'
     elif not active_pack_list or active_pack_list.status == PackListDocument.PENDING:
@@ -472,6 +569,7 @@ def _summary(openid, asn_code):
         'inspection_batches': [_inspection_batch_json(batch) for batch in inspection_batches],
         'latest_inspection_batch': _inspection_batch_json(latest_inspection) if latest_inspection else None,
         'qc_status': qc_status,
+        'qc_complete': qc_complete,
         'verification_mode': verification_mode,
         'verification_note': (
             'Receiving scans are not checked against a Pack List yet.'
@@ -494,7 +592,10 @@ def _summary(openid, asn_code):
             'scan_record_count': scanned_record_count,
             'accepted': accepted_total,
             'accepted_for_putaway': accepted_for_putaway_total,
+            'eligible_for_putaway': accepted_for_putaway_total,
             'putaway_qty': physical_putaway_qty,
+            'held_qty': _resolved_hold_count(records),
+            'rejected_qty': _resolved_reject_count(records),
             'extra_scan_records': extra_scan_record_count,
             'open_exceptions': open_reconciliation_exceptions,
             'resolved_exceptions': resolved_reconciliation_exceptions,
@@ -510,6 +611,9 @@ def _summary(openid, asn_code):
         'total_accepted_serials': accepted_total,
         'total_resolved_exceptions': resolved_total,
         'total_accepted_for_putaway': accepted_for_putaway_total,
+        'total_eligible_for_putaway': accepted_for_putaway_total,
+        'total_held_serials': _resolved_hold_count(records),
+        'total_rejected_serials': _resolved_reject_count(records),
         'total_putaway_qty': physical_putaway_qty,
         'total_extra_scan_records': extra_scan_record_count,
         'total_exception_serials': exception_total,
@@ -518,13 +622,7 @@ def _summary(openid, asn_code):
         'pack_list_variance': pack_list_variance,
         'pack_list_serial_mismatch': pack_list_serial_mismatch,
         'pack_list_serial_mismatch_count': pack_list_serial_mismatch['total'],
-        'ready_for_putaway': (
-            quantity_exception_total == 0 and (
-                records.count() == 0
-                or (not strict_serial_check and exception_total == 0)
-                or (strict_serial_check and exception_total == 0 and missing_total == 0 and accepted_for_putaway_total >= records.filter(is_expected=True).count())
-            ) and pack_list_variance == 0 and open_reconciliation_exceptions == 0
-        ),
+        'ready_for_putaway': bool(qc_complete and accepted_for_putaway_total > physical_putaway_qty),
     }
 
 
@@ -552,6 +650,7 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         record.shipout_ref = _clean(metadata.get('shipout_ref')) or record.shipout_ref
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
         record.note = str(metadata.get('note') or record.note or '').strip()
+        record.evidence_url = _text(metadata.get('evidence_url')) or record.evidence_url
         record.pack_list = pack_list or record.pack_list
         record.import_batch = import_batch or record.import_batch
         record.expected_by = _operator_name(request, openid)
@@ -561,6 +660,7 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
+            record.exception_resolution_location = ''
             record.exception_resolved_by = ''
             record.exception_resolved_at = None
         record.save()
@@ -586,6 +686,7 @@ def _save_expected(openid, request, asn_code, goods_code, serial_number, row=Non
         shipout_ref=_clean(metadata.get('shipout_ref')),
         source_row=int(metadata.get('source_row') or 0),
         note=str(metadata.get('note') or '').strip(),
+        evidence_url=_text(metadata.get('evidence_url')),
         import_batch=import_batch,
         status=AsnSerialRecord.EXPECTED,
         is_expected=True,
@@ -632,6 +733,7 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         record.source_row = int(metadata.get('source_row') or record.source_row or 0)
         record.import_batch = import_batch or record.import_batch
         record.note = str(metadata.get('note') or record.note or '').strip()
+        record.evidence_url = _text(metadata.get('evidence_url')) or record.evidence_url
         record.damaged = bool(damaged) if inspection else record.damaged or bool(damaged)
         if not inspection and record.scan_count > 1:
             record.status = AsnSerialRecord.DUPLICATE
@@ -647,12 +749,14 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
+            record.exception_resolution_location = ''
             record.exception_resolved_by = ''
             record.exception_resolved_at = None
         elif inspection:
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
+            record.exception_resolution_location = ''
             record.exception_resolved_by = ''
             record.exception_resolved_at = None
         record.save()
@@ -670,6 +774,7 @@ def _scan(openid, request, asn_code, goods_code, serial_number, damaged=False, r
         shipout_ref=_clean(metadata.get('shipout_ref')),
         source_row=int(metadata.get('source_row') or 0),
         note=str(metadata.get('note') or '').strip(),
+        evidence_url=_text(metadata.get('evidence_url')),
         import_batch=metadata.get('import_batch'),
         status=AsnSerialRecord.DAMAGED if damaged else _scan_status_without_pack_list(openid, asn_code),
         is_expected=False,
@@ -697,9 +802,6 @@ class SerialRecordsView(APIView):
             records = records.filter(status=status)
         limit = min(max(int(request.query_params.get('limit', 500)), 1), 5000)
         return Response({'count': records.count(), 'results': [_record_json(r) for r in records[:limit]]})
-
-
-SERIAL_EXCEPTION_ACTIONS = {'ACCEPT_EXCEPTION', 'WAIVE_MISSING', 'REOPEN'}
 
 
 def _resolution_note(data):
@@ -738,6 +840,8 @@ class SerialExceptionsView(APIView):
                 'quantity': 1,
                 'exception_resolved': record.exception_resolved,
                 'note': record.note,
+                'evidence_url': record.evidence_url,
+                'resolution_location': record.exception_resolution_location,
             })
 
         details = AsnDetailModel.objects.filter(openid=openid, asn_code=asn_code, is_delete=False)
@@ -765,6 +869,7 @@ class SerialExceptionsView(APIView):
                 'quantity': quantity,
                 'exception_resolved': detail.exception_resolved,
                 'note': detail.exception_resolution_note,
+                'resolution_location': detail.exception_resolution_location,
             })
         return Response({'count': len(results), 'results': results})
 
@@ -781,7 +886,9 @@ class SerialExceptionResolveView(APIView):
             raise APIException({'detail': 'Serial record id is required'})
         action = str(data.get('action') or '').strip().upper()
         if action not in SERIAL_EXCEPTION_ACTIONS:
-            raise APIException({'detail': 'Action must be ACCEPT_EXCEPTION, WAIVE_MISSING, or REOPEN'})
+            raise APIException({
+                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REJECT_RETURN, WAIVE_MISSING, or REOPEN'
+            })
         record = AsnSerialRecord.objects.filter(id=record_id, openid=openid).first()
         if not record:
             raise APIException({'detail': 'Serial record does not exist'})
@@ -793,24 +900,30 @@ class SerialExceptionResolveView(APIView):
             raise APIException({'detail': 'WAIVE_MISSING is only valid for an expected SN that was not received'})
         if action != 'REOPEN' and not _resolution_note(data):
             raise APIException({'detail': 'A resolution note is required'})
+        resolution_location = _clean(data.get('resolution_location'))
+        if action in NON_PUTAWAY_RESOLUTIONS and not resolution_location:
+            raise APIException({'detail': 'A hold or return location is required'})
         if action == 'REOPEN':
             if not record.exception_resolved:
                 raise APIException({'detail': 'This serial exception is already open'})
             record.exception_resolved = False
             record.exception_resolution_action = ''
             record.exception_resolution_note = ''
+            record.exception_resolution_location = ''
             record.exception_resolved_by = ''
             record.exception_resolved_at = None
         else:
             record.exception_resolved = True
             record.exception_resolution_action = action
             record.exception_resolution_note = _resolution_note(data)
+            record.exception_resolution_location = resolution_location
             record.exception_resolved_by = _operator_name(request, openid)
             record.exception_resolved_at = timezone.now()
         record.save(update_fields=[
             'exception_resolved',
             'exception_resolution_action',
             'exception_resolution_note',
+            'exception_resolution_location',
             'exception_resolved_by',
             'exception_resolved_at',
             'update_time',
@@ -833,8 +946,16 @@ class QuantityExceptionResolveView(APIView):
         action = str(data.get('action') or '').strip().upper()
         if not asn_code or not goods_code:
             raise APIException({'detail': 'ASN Code and Goods Code are required'})
-        if action not in {'ACCEPT_EXCEPTION', 'REOPEN'}:
-            raise APIException({'detail': 'Action must be ACCEPT_EXCEPTION or REOPEN'})
+        if action not in {
+            ACCEPT_FOR_PUTAWAY,
+            LEGACY_ACCEPT_EXCEPTION,
+            HOLD_QUARANTINE,
+            REJECT_RETURN,
+            'REOPEN',
+        }:
+            raise APIException({
+                'detail': 'Action must be ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REJECT_RETURN, or REOPEN'
+            })
         detail = AsnDetailModel.objects.filter(
             openid=openid,
             asn_code=asn_code,
@@ -844,28 +965,34 @@ class QuantityExceptionResolveView(APIView):
         if not detail:
             raise APIException({'detail': 'ASN detail does not exist'})
         quantity = int(detail.goods_shortage_qty or 0) + int(detail.goods_more_qty or 0) + int(detail.goods_damage_qty or 0)
-        if action == 'ACCEPT_EXCEPTION' and quantity <= 0:
+        if action != 'REOPEN' and quantity <= 0:
             raise APIException({'detail': 'This ASN detail has no quantity exception'})
-        if action == 'ACCEPT_EXCEPTION' and not _resolution_note(data):
+        if action != 'REOPEN' and not _resolution_note(data):
             raise APIException({'detail': 'A resolution note is required'})
+        resolution_location = _clean(data.get('resolution_location'))
+        if action in NON_PUTAWAY_RESOLUTIONS and not resolution_location:
+            raise APIException({'detail': 'A hold or return location is required'})
         if action == 'REOPEN':
             if not detail.exception_resolved:
                 raise APIException({'detail': 'This quantity exception is already open'})
             detail.exception_resolved = False
             detail.exception_resolution_action = ''
             detail.exception_resolution_note = ''
+            detail.exception_resolution_location = ''
             detail.exception_resolved_by = ''
             detail.exception_resolved_at = None
         else:
             detail.exception_resolved = True
             detail.exception_resolution_action = action
             detail.exception_resolution_note = _resolution_note(data)
+            detail.exception_resolution_location = resolution_location
             detail.exception_resolved_by = _operator_name(request, openid)
             detail.exception_resolved_at = timezone.now()
         detail.save(update_fields=[
             'exception_resolved',
             'exception_resolution_action',
             'exception_resolution_note',
+            'exception_resolution_location',
             'exception_resolved_by',
             'exception_resolved_at',
             'update_time',
@@ -878,6 +1005,7 @@ class QuantityExceptionResolveView(APIView):
             'exception_resolved': detail.exception_resolved,
             'exception_resolution_action': detail.exception_resolution_action,
             'exception_resolution_note': detail.exception_resolution_note,
+            'resolution_location': detail.exception_resolution_location,
             'summary': _summary(openid, detail.asn_code),
         })
 
@@ -1394,6 +1522,7 @@ class SerialImportView(APIView):
         asn_code = _clean(request.data.get('asn_code'))
         inbound_po = _clean(request.data.get('inbound_po'))
         shipout_ref = _clean(request.data.get('shipout_ref'))
+        evidence_url = _text(request.data.get('evidence_url'))
         if not asn_code:
             raise APIException({'detail': 'ASN Code is required'})
         if not inbound_po and not shipout_ref and str(request.data.get('allow_all', '')).lower() != 'true':
@@ -1446,6 +1575,7 @@ class SerialImportView(APIView):
             content_hash=content_hash,
             imported_by=_operator_name(request, openid),
             note=str(request.data.get('note') or ('QC inspection import' if mode == 'receive' else 'Expected serial import')),
+            evidence_url=evidence_url,
             source_type=str(request.data.get('source_type') or 'AI_AGENT').upper(),
         )
         matched = 0
@@ -1480,6 +1610,7 @@ class SerialImportView(APIView):
                 'shipout_ref': row_shipout,
                 'damaged': _is_damage_flag(value('Damaged', 'Damage', 'Damage Flag', 'Damage Status')) or _is_damage_flag(inspection_result),
                 'note': value('QC Note', 'Inspection Note', 'Check Note', 'Note', 'Remarks') or inspection_result,
+                'evidence_url': _text(value('Evidence URL', 'Photo URL', 'Video URL', 'Google Drive', 'Google Drive URL')) or evidence_url,
                 'source_row': row_number,
                 'import_batch': import_batch,
             }

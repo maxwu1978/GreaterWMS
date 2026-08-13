@@ -1,14 +1,26 @@
 <template>
   <q-dialog :value="value" @input="$emit('input', $event)">
-    <q-card style="width: 960px; max-width: 96vw">
+    <q-card class="qc-review-card">
       <q-bar class="bg-light-blue-10 text-white">
-        <div>SN Receiving Control - {{ asnCode }}</div>
+        <div>QC Review - {{ asnCode }}</div>
         <q-space />
         <q-btn dense flat icon="close" v-close-popup />
       </q-bar>
 
-      <q-card-section class="q-gutter-sm">
+      <q-card-section class="qc-review-content q-gutter-sm">
+        <div class="row q-col-gutter-sm qc-context-grid">
+          <div class="col-6 col-md-3"><span class="qc-label">Owner</span><strong>{{ ownerLabel }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">Staging</span><strong>{{ stagingLabel }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">Unload driver</span><strong>{{ asnContext.unload_driver || 'Not assigned' }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">Putaway driver</span><strong>{{ asnContext.putaway_driver || 'Not assigned' }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">Pack List</span><strong>{{ packListLabel(summary && summary.pack_list_status) }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">QC source</span><strong>{{ qcSourceLabel }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">QC result</span><strong>{{ qcStatusLabel }}</strong></div>
+          <div class="col-6 col-md-3"><span class="qc-label">Arrival</span><strong>{{ arrivalLabel }}</strong></div>
+        </div>
+
         <q-select
+          v-if="goodsOptions.length > 1"
           v-model="selectedGoodsCode"
           outlined
           dense
@@ -16,81 +28,49 @@
           map-options
           :options="goodsOptions"
           label="SKU"
-          @input="loadData"
+          @input="refreshSerialData"
         />
 
-        <div class="row q-col-gutter-sm">
-          <div class="col-6 col-sm-3"><q-chip color="blue-1">Planned: {{ selectedLine.planned_qty || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="blue-1">Received Qty: {{ selectedLine.received_qty || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="grey-3">Expected SN: {{ selectedLine.expected_serial_count || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="grey-3">SN Records: {{ selectedLine.received_serial_count || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="green-2">Accepted: {{ selectedLine.accepted_serial_count || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="green-2">Putaway Qty: {{ selectedLine.accepted_for_putaway || 0 }}</q-chip></div>
-          <div v-if="selectedLine.extra_scan_count" class="col-6 col-sm-3"><q-chip color="orange-2">Extra scans: {{ selectedLine.extra_scan_count }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Exceptions: {{ selectedLine.exception_count || 0 }}</q-chip></div>
-          <div class="col-6 col-sm-3"><q-chip color="blue-1">Resolved: {{ selectedLine.resolved_exception_count || 0 }}</q-chip></div>
-          <div v-if="quantityExceptionQty" class="col-12 col-sm-6">
-            <q-chip color="orange-2">{{ quantityExceptionLabel }}</q-chip>
-            <q-btn
-              dense
-              flat
-              color="primary"
-              :label="selectedDetail.exception_resolved ? 'Reopen quantity exception' : 'Resolve quantity exception'"
-              @click="openQuantityResolution"
-            />
-          </div>
-        </div>
-
-        <q-banner v-if="summary" :class="summary.ready_for_putaway ? 'bg-green-1' : 'bg-orange-1'">
-          <span v-if="summary.verification_mode === 'ASN_ONLY'">No Pack List is attached. Scans will be recorded as unverified physical receipt.</span>
-          <span v-else-if="summary.verification_mode === 'PACK_LIST_QTY'">Pack List quantities are attached, but it has no SN. Physical scans are recorded without SN matching.</span>
-          <span v-else-if="summary.verification_mode === 'PACK_LIST_PENDING'">Pack List SN is pending confirmation. Confirm the document before using it as the receiving baseline.</span>
-          <span v-else>{{ summary.ready_for_putaway ? 'SN check passed. Putaway is allowed.' : 'SN check is incomplete. Resolve missing or exception SN before putaway.' }}<span v-if="summary.total_resolved_exceptions"> Resolved exceptions: {{ summary.total_resolved_exceptions }}.</span></span>
+        <q-banner v-if="summary" dense class="qc-decision-banner" :class="bannerClass">
+          <div class="text-weight-medium">{{ decisionBanner }}</div>
+          <div class="text-caption q-mt-xs">{{ summary.verification_note || 'QC result is recorded in GreaterWMS.' }}</div>
         </q-banner>
 
-        <q-separator />
-        <div class="text-subtitle2">Expected SN</div>
-        <div class="row q-col-gutter-sm">
-          <div class="col-12 col-md-7">
-            <q-input
-              v-model="expectedText"
-              outlined
-              type="textarea"
-              autogrow
-              label="One expected SN per line"
-            />
-          </div>
-          <div class="col-12 col-md-5 q-gutter-y-sm">
-            <q-btn color="primary" label="Save Expected SN" @click="saveExpectedText" />
-            <q-file v-model="selectedFile" outlined dense accept=".xlsx" label="Scan sheet (.xlsx)" />
-            <q-input v-model="inboundPo" outlined dense label="Inbound PO filter" />
-            <q-input v-model="shipoutRef" outlined dense label="IB / SHIPOUT filter" />
-            <div class="q-gutter-xs">
-              <q-btn outline color="primary" label="Import Expected Excel" @click="importFile('expected')" />
-              <q-btn outline color="positive" label="Import Received Excel" @click="importFile('receive')" />
-            </div>
-          </div>
+        <div class="row q-col-gutter-sm qc-metrics">
+          <div class="col-6 col-sm-3"><q-chip color="blue-1">Planned: {{ selectedLine.planned_qty || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="blue-1">Received: {{ selectedLine.received_qty || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="green-2">Accepted: {{ selectedLine.accepted_serial_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="purple-2">Eligible: {{ eligibleForPutaway }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="amber-2">Held: {{ selectedLine.held_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="orange-2">Rejected: {{ selectedLine.rejected_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip :color="selectedLine.exception_count ? 'red-2' : 'grey-3'">Open: {{ selectedLine.exception_count || 0 }}</q-chip></div>
+          <div class="col-6 col-sm-3"><q-chip color="grey-3">Putaway done: {{ summary.total_putaway_qty || 0 }}</q-chip></div>
+        </div>
+
+        <div v-if="quantityExceptionQty" class="row items-center q-gutter-sm">
+          <q-chip color="orange-2">Quantity exception: {{ quantityExceptionLabel }}</q-chip>
+          <q-btn
+            dense
+            flat
+            color="primary"
+            :label="selectedLine.exception_resolved ? 'Reopen quantity decision' : 'Resolve quantity exception'"
+            @click="openQuantityResolution"
+          />
+        </div>
+
+        <div v-if="latestInspection" class="qc-import-summary">
+          <span>QC import: <strong>{{ latestInspection.status }}</strong></span>
+          <span>{{ latestInspection.matched_count || 0 }} scanned</span>
+          <span>{{ latestInspection.accepted_count || 0 }} accepted</span>
+          <span>{{ latestInspection.exception_count || 0 }} exceptions</span>
+          <span>{{ formatDate(latestInspection.created_at) }}</span>
+          <a v-if="latestInspection.evidence_url" :href="latestInspection.evidence_url" target="_blank" rel="noopener">Evidence</a>
         </div>
 
         <q-separator />
-        <div class="text-subtitle2">Receive Scan</div>
-        <div class="row q-col-gutter-sm items-center">
-          <div class="col-12 col-md-6">
-            <q-input
-              ref="scanInput"
-              v-model="scanSerial"
-              outlined
-              dense
-              autofocus
-              label="Scan SN and press Enter"
-              @keyup.enter="scanCurrent"
-            />
-          </div>
-          <div class="col-6 col-md-2"><q-checkbox v-model="scanDamaged" label="Damaged" /></div>
-          <div class="col-6 col-md-2"><q-btn color="positive" label="Receive Scan" @click="scanCurrent" /></div>
-        </div>
-
+        <div class="text-subtitle2">QC records</div>
         <q-table
+          class="qc-record-table"
           dense
           flat
           bordered
@@ -98,67 +78,102 @@
           :data="records"
           :columns="recordColumns"
           :pagination.sync="pagination"
-          no-data-label="No SN records"
+          :table-style="{ minWidth: '880px' }"
+          no-data-label="No QC records"
         >
-          <template v-slot:body-cell-resolution="props">
-            <q-btn
-              v-if="canResolve(props.row)"
-              dense
-              flat
-              color="primary"
-              :label="props.row.exception_resolved ? 'Reopen' : 'Resolve'"
-              @click="openSerialResolution(props.row)"
-            />
-            <span v-else class="text-grey-6">-</span>
+          <template v-slot:body-cell-status="props">
+            <q-td :props="props">
+              <q-chip dense square :color="recordStatusColor(props.value)">{{ recordStatusLabel(props.value) }}</q-chip>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-note="props">
+            <q-td :props="props" class="qc-ellipsis-cell">
+              <span :title="props.value || ''">{{ props.value || '-' }}</span>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-evidence_url="props">
+            <q-td :props="props">
+              <a v-if="props.value" :href="props.value" target="_blank" rel="noopener">Open</a>
+              <span v-else class="text-grey-6">-</span>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-disposition="props">
+            <q-td :props="props">
+              <q-chip v-if="props.row.exception_resolved" dense square :color="dispositionColor(props.row.exception_resolution_action)">
+                {{ dispositionLabel(props.row.exception_resolution_action) }}
+              </q-chip>
+              <q-btn
+                v-else-if="canResolve(props.row)"
+                dense
+                flat
+                color="primary"
+                label="Resolve"
+                @click="openSerialResolution(props.row)"
+              />
+              <span v-else class="text-grey-6">-</span>
+            </q-td>
           </template>
         </q-table>
 
-        <q-dialog v-model="resolutionForm">
-          <q-card style="width: 460px; max-width: 92vw">
-            <q-bar class="bg-light-blue-10 text-white">
-              <div>{{ resolutionTitle }}</div>
-              <q-space />
-              <q-btn dense flat icon="close" v-close-popup />
-            </q-bar>
-            <q-card-section class="q-gutter-sm">
-              <q-select
-                v-model="resolutionAction"
-                outlined
-                dense
-                emit-value
-                map-options
-                :options="resolutionActionOptions"
-                label="Resolution"
-              />
-              <q-input
-                v-model="resolutionNote"
-                outlined
-                type="textarea"
-                autogrow
-                label="Audit note"
-                hint="Required when accepting an exception"
-              />
-            </q-card-section>
-            <q-card-actions align="right">
-              <q-btn flat label="Cancel" v-close-popup />
-              <q-btn color="primary" label="Save" @click="submitResolution" />
-            </q-card-actions>
-          </q-card>
-        </q-dialog>
+        <div class="text-caption text-grey-7">
+          QC completion controls putaway eligibility. Assign the putaway driver and final storage bin from the ASN putaway action after this review.
+        </div>
       </q-card-section>
     </q-card>
+
+    <q-dialog v-model="resolutionForm">
+      <q-card class="qc-resolution-card">
+        <q-bar class="bg-light-blue-10 text-white">
+          <div>{{ resolutionTitle }}</div>
+          <q-space />
+          <q-btn dense flat icon="close" v-close-popup />
+        </q-bar>
+        <q-card-section class="q-gutter-sm">
+          <q-select
+            v-model="resolutionAction"
+            outlined
+            dense
+            emit-value
+            map-options
+            :options="resolutionActionOptions"
+            label="Disposition"
+          />
+          <q-input
+            v-if="requiresLocation"
+            v-model="resolutionLocation"
+            outlined
+            dense
+            label="Hold / return location"
+            hint="Required for a held or rejected item"
+          />
+          <q-input
+            v-model="resolutionNote"
+            outlined
+            type="textarea"
+            autogrow
+            label="QC decision note"
+            hint="Required for every disposition"
+          />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup />
+          <q-btn color="primary" label="Save decision" @click="submitResolution" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-dialog>
 </template>
 
 <script>
-import { getauth, postauth, postauthfile } from '../boot/axios_request'
+import { getauth, postauth } from '../boot/axios_request'
 
 export default {
   name: 'AsnSerialPanel',
   props: {
     value: { type: Boolean, default: false },
     asnCode: { type: String, default: '' },
-    goodsCode: { type: String, default: '' }
+    goodsCode: { type: String, default: '' },
+    asnContext: { type: Object, default: () => ({}) }
   },
   data () {
     return {
@@ -166,72 +181,109 @@ export default {
       selectedGoodsCode: this.goodsCode,
       summary: null,
       records: [],
-      expectedText: '',
-      scanSerial: '',
-      scanDamaged: false,
-      selectedFile: null,
-      inboundPo: '',
-      shipoutRef: '',
+      inspectionBatches: [],
       pagination: { page: 1, rowsPerPage: 10 },
       resolutionForm: false,
-      resolutionType: '',
+      resolutionType: 'serial',
       resolutionTarget: null,
       resolutionAction: '',
       resolutionNote: '',
+      resolutionLocation: '',
       recordColumns: [
         { name: 'serial_number', label: 'SN', field: 'serial_number', align: 'left' },
         { name: 'goods_code', label: 'SKU', field: 'goods_code', align: 'left' },
-        { name: 'status', label: 'Status', field: 'status', align: 'center' },
-        { name: 'scan_count', label: 'Scans', field: 'scan_count', align: 'center' },
-        { name: 'inbound_po', label: 'PO', field: 'inbound_po', align: 'left' },
-        { name: 'shipout_ref', label: 'IB', field: 'shipout_ref', align: 'left' },
-        { name: 'source_location', label: 'Source Location', field: 'source_location', align: 'left' },
-        { name: 'resolution', label: 'Resolution', field: 'exception_resolved', align: 'center' }
+        { name: 'status', label: 'QC Result', field: 'status', align: 'center' },
+        { name: 'note', label: 'QC Note', field: 'note', align: 'left' },
+        { name: 'evidence_url', label: 'Evidence', field: 'evidence_url', align: 'center' },
+        { name: 'disposition', label: 'Disposition', field: 'exception_resolution_action', align: 'center' }
       ]
     }
   },
   computed: {
-    goodsOptions () {
-      return this.details.map(item => ({ label: item.goods_code, value: item.goods_code }))
+    ownerLabel () {
+      return this.asnContext.supplier_short_name || this.asnContext.supplier || '-'
+    },
+    stagingLabel () {
+      const slots = Array.isArray(this.asnContext.staging_bins) ? this.asnContext.staging_bins : []
+      return slots.length ? slots.join(', ') : (this.asnContext.staging_bin || 'Not assigned')
+    },
+    arrivalLabel () {
+      return this.formatDate(this.asnContext.actual_arrival_at || (this.summary && this.summary.actual_arrival_at))
     },
     selectedLine () {
       if (!this.summary || !this.selectedGoodsCode) return {}
       return this.summary.lines.find(item => item.goods_code === this.selectedGoodsCode) || {}
     },
-    selectedDetail () {
-      return this.details.find(item => item.goods_code === this.selectedGoodsCode) || {}
+    goodsOptions () {
+      return this.details.map(detail => ({
+        label: detail.goods_code,
+        value: detail.goods_code
+      }))
+    },
+    eligibleForPutaway () {
+      return Number(this.selectedLine.eligible_for_putaway || this.selectedLine.accepted_for_putaway || 0)
     },
     quantityExceptionQty () {
-      const detail = this.selectedDetail
-      return Number(detail.goods_shortage_qty || 0) + Number(detail.goods_more_qty || 0) + Number(detail.goods_damage_qty || 0)
+      return Number(this.selectedLine.quantity_exception_qty || 0)
     },
     quantityExceptionLabel () {
-      const detail = this.selectedDetail
       const parts = []
-      if (detail.goods_shortage_qty) parts.push('Shortage ' + detail.goods_shortage_qty)
-      if (detail.goods_more_qty) parts.push('Overage ' + detail.goods_more_qty)
-      if (detail.goods_damage_qty) parts.push('Damage ' + detail.goods_damage_qty)
-      return 'Quantity: ' + parts.join(' / ') + (detail.exception_resolved ? ' (resolved)' : '')
+      if (this.selectedLine.goods_shortage_qty) parts.push('Shortage ' + this.selectedLine.goods_shortage_qty)
+      if (this.selectedLine.goods_more_qty) parts.push('Overage ' + this.selectedLine.goods_more_qty)
+      if (this.selectedLine.goods_damage_qty) parts.push('Damage ' + this.selectedLine.goods_damage_qty)
+      return parts.join(' / ') || String(this.quantityExceptionQty)
+    },
+    latestInspection () {
+      return (this.summary && this.summary.latest_inspection_batch) || this.inspectionBatches[0] || null
+    },
+    qcStatusLabel () {
+      return this.summary && this.summary.qc_status ? this.summary.qc_status : 'NOT_STARTED'
+    },
+    qcSourceLabel () {
+      if (this.latestInspection) return this.latestInspection.source_type || 'AI_AGENT'
+      return this.summary && this.summary.verification_mode ? this.summary.verification_mode : 'ASN_ONLY'
+    },
+    openExceptionCount () {
+      return Number((this.summary && this.summary.total_exception_serials) || 0) + Number((this.summary && this.summary.total_quantity_exceptions) || 0)
+    },
+    decisionBanner () {
+      if (!this.summary) return 'Loading QC result.'
+      if (this.openExceptionCount > 0) return 'QC action required. Resolve every open exception before putaway.'
+      if (!this.summary.qc_complete) return 'QC result is incomplete. Review the imported acceptance result.'
+      if (this.eligibleForPutaway < Number(this.selectedLine.received_qty || 0)) return 'QC complete with held or rejected units. Put away eligible quantity only.'
+      return 'QC complete. Assign the putaway driver and final storage bin.'
+    },
+    bannerClass () {
+      if (this.openExceptionCount > 0) return 'bg-orange-1'
+      return this.summary && this.summary.qc_complete ? 'bg-green-1' : 'bg-orange-1'
     },
     resolutionTitle () {
-      return this.resolutionType === 'quantity' ? 'Quantity exception' : 'Serial exception'
+      return this.resolutionType === 'quantity' ? 'Quantity disposition' : 'SN disposition'
+    },
+    requiresLocation () {
+      return this.resolutionAction === 'HOLD_QUARANTINE' || this.resolutionAction === 'REJECT_RETURN'
     },
     resolutionActionOptions () {
       if (this.resolutionType === 'quantity') {
         return [
-          { label: 'Accept exception', value: 'ACCEPT_EXCEPTION' },
+          { label: 'Accept for putaway', value: 'ACCEPT_FOR_PUTAWAY' },
+          { label: 'Hold / quarantine', value: 'HOLD_QUARANTINE' },
+          { label: 'Reject / return', value: 'REJECT_RETURN' },
           { label: 'Reopen', value: 'REOPEN' }
         ]
       }
-      return this.resolutionTarget && this.resolutionTarget.is_received
-        ? [
-          { label: 'Accept exception', value: 'ACCEPT_EXCEPTION' },
-          { label: 'Reopen', value: 'REOPEN' }
-        ]
-        : [
+      if (this.resolutionTarget && !this.resolutionTarget.is_received) {
+        return [
           { label: 'Waive missing SN', value: 'WAIVE_MISSING' },
           { label: 'Reopen', value: 'REOPEN' }
         ]
+      }
+      return [
+        { label: 'Accept for putaway', value: 'ACCEPT_FOR_PUTAWAY' },
+        { label: 'Hold / quarantine', value: 'HOLD_QUARANTINE' },
+        { label: 'Reject / return', value: 'REJECT_RETURN' },
+        { label: 'Reopen', value: 'REOPEN' }
+      ]
     }
   },
   watch: {
@@ -245,21 +297,21 @@ export default {
   methods: {
     loadData () {
       if (!this.asnCode) return
-      getauth('asn/detail/?asn_code=' + encodeURIComponent(this.asnCode)).then(res => {
-        this.details = res.results || []
-        if (!this.selectedGoodsCode && this.details.length) this.selectedGoodsCode = this.details[0].goods_code
-        return this.refreshSerialData()
-      }).catch(() => {})
-    },
-    refreshSerialData () {
       const query = '?asn_code=' + encodeURIComponent(this.asnCode)
-      return getauth('asn/serial/summary/' + query).then(res => {
-        this.summary = res
-        return getauth('asn/serial/records/' + query + (this.selectedGoodsCode ? '&goods_code=' + encodeURIComponent(this.selectedGoodsCode) : ''))
-      }).then(res => {
-        this.records = res.results || []
+      getauth('asn/detail/' + query).then(detailResponse => {
+        this.details = detailResponse.results || []
+        if (!this.selectedGoodsCode && this.details.length) this.selectedGoodsCode = this.details[0].goods_code
+        return Promise.all([
+          getauth('asn/serial/summary/' + query),
+          getauth('asn/serial/records/' + query + (this.selectedGoodsCode ? '&goods_code=' + encodeURIComponent(this.selectedGoodsCode) : '')),
+          getauth('asn/serial/inspections/' + query)
+        ]).then(([summary, records, inspections]) => {
+          this.summary = summary
+          this.records = records.results || []
+          this.inspectionBatches = inspections.results || []
+        })
       }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to load SN data', color: 'negative' })
+        this.$q.notify({ message: err.detail || 'Unable to load QC review', color: 'negative' })
       })
     },
     canResolve (record) {
@@ -268,94 +320,183 @@ export default {
     openSerialResolution (record) {
       this.resolutionType = 'serial'
       this.resolutionTarget = record
-      this.resolutionAction = record.exception_resolved ? 'REOPEN' : (record.is_received ? 'ACCEPT_EXCEPTION' : 'WAIVE_MISSING')
+      this.resolutionAction = record.exception_resolved ? 'REOPEN' : (record.is_received ? 'ACCEPT_FOR_PUTAWAY' : 'WAIVE_MISSING')
       this.resolutionNote = record.exception_resolution_note || ''
+      this.resolutionLocation = record.resolution_location || ''
       this.resolutionForm = true
     },
     openQuantityResolution () {
       this.resolutionType = 'quantity'
-      this.resolutionTarget = this.selectedDetail
-      this.resolutionAction = this.selectedDetail.exception_resolved ? 'REOPEN' : 'ACCEPT_EXCEPTION'
-      this.resolutionNote = this.selectedDetail.exception_resolution_note || ''
+      this.resolutionTarget = this.selectedLine
+      this.resolutionAction = this.selectedLine.exception_resolved ? 'REOPEN' : 'ACCEPT_FOR_PUTAWAY'
+      this.resolutionNote = this.selectedLine.exception_resolution_note || ''
+      this.resolutionLocation = this.selectedLine.resolution_location || ''
       this.resolutionForm = true
     },
     submitResolution () {
       if (!this.resolutionTarget) return
+      if (this.resolutionAction !== 'REOPEN' && !this.resolutionNote.trim()) {
+        this.$q.notify({ message: 'Enter a QC decision note', color: 'negative' })
+        return
+      }
+      if (this.requiresLocation && !this.resolutionLocation.trim()) {
+        this.$q.notify({ message: 'Enter a hold or return location', color: 'negative' })
+        return
+      }
       const isQuantity = this.resolutionType === 'quantity'
       const payload = isQuantity
         ? {
           asn_code: this.asnCode,
           goods_code: this.resolutionTarget.goods_code,
           action: this.resolutionAction,
-          note: this.resolutionNote
+          note: this.resolutionNote,
+          resolution_location: this.resolutionLocation
         }
         : {
           id: this.resolutionTarget.id,
           action: this.resolutionAction,
-          note: this.resolutionNote
+          note: this.resolutionNote,
+          resolution_location: this.resolutionLocation
         }
       const endpoint = isQuantity ? 'asn/serial/exceptions/resolve-quantity/' : 'asn/serial/exceptions/resolve/'
       postauth(endpoint, payload).then(() => {
         this.resolutionForm = false
         this.refreshSerialData()
-        this.$q.notify({ message: 'Exception status updated', color: 'positive' })
+        this.$q.notify({ message: 'QC disposition saved', color: 'positive' })
       }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to update exception', color: 'negative' })
+        this.$q.notify({ message: err.detail || 'Unable to save QC disposition', color: 'negative' })
       })
     },
-    saveExpectedText () {
-      const serialNumbers = this.expectedText.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-      if (!this.selectedGoodsCode || !serialNumbers.length) {
-        this.$q.notify({ message: 'Select SKU and enter expected SN', color: 'negative' })
-        return
-      }
-      postauth('asn/serial/expected/', {
-        asn_code: this.asnCode,
-        goods_code: this.selectedGoodsCode,
-        serial_numbers: serialNumbers
-      }).then(() => {
-        this.expectedText = ''
-        this.refreshSerialData()
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to save expected SN', color: 'negative' })
+    refreshSerialData () {
+      const query = '?asn_code=' + encodeURIComponent(this.asnCode)
+      return Promise.all([
+        getauth('asn/serial/summary/' + query),
+        getauth('asn/serial/records/' + query + (this.selectedGoodsCode ? '&goods_code=' + encodeURIComponent(this.selectedGoodsCode) : '')),
+        getauth('asn/serial/inspections/' + query)
+      ]).then(([summary, records, inspections]) => {
+        this.summary = summary
+        this.records = records.results || []
+        this.inspectionBatches = inspections.results || []
       })
     },
-    scanCurrent () {
-      if (!this.scanSerial || !this.selectedGoodsCode) return
-      postauth('asn/serial/scan/', {
-        asn_code: this.asnCode,
-        goods_code: this.selectedGoodsCode,
-        serial_number: this.scanSerial,
-        damaged: this.scanDamaged
-      }).then(res => {
-        this.scanSerial = ''
-        this.scanDamaged = false
-        this.refreshSerialData()
-        if (res.record && res.record.status !== 'ACCEPTED') {
-          this.$q.notify({ message: 'SN result: ' + res.record.status, color: 'warning' })
-        }
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to record scan', color: 'negative' })
-      })
+    recordStatusLabel (status) {
+      return {
+        ACCEPTED: 'Accepted',
+        EXPECTED: 'Expected',
+        UNVERIFIED: 'Unverified',
+        UNEXPECTED: 'Unexpected',
+        DUPLICATE: 'Duplicate',
+        WRONG_SKU: 'Wrong SKU',
+        DAMAGED: 'Damaged',
+        REJECTED: 'Rejected'
+      }[status] || status || '-'
     },
-    importFile (mode) {
-      if (!this.selectedFile || (!this.inboundPo && !this.shipoutRef)) {
-        this.$q.notify({ message: 'Select an Excel file and provide PO or IB filter', color: 'negative' })
-        return
-      }
-      const form = new FormData()
-      form.append('file', this.selectedFile)
-      form.append('asn_code', this.asnCode)
-      form.append('mode', mode)
-      form.append('inbound_po', this.inboundPo)
-      form.append('shipout_ref', this.shipoutRef)
-      postauthfile('asn/serial/import/', form).then(res => {
-        this.refreshSerialData()
-        this.$q.notify({ message: 'Imported ' + res.matched_rows + ' rows', color: res.errors && res.errors.length ? 'warning' : 'positive' })
-      }).catch(err => {
-        this.$q.notify({ message: err.detail || 'Unable to import scan sheet', color: 'negative' })
-      })
+    recordStatusColor (status) {
+      return {
+        ACCEPTED: 'positive',
+        EXPECTED: 'grey-4',
+        UNVERIFIED: 'orange-3',
+        DAMAGED: 'negative',
+        REJECTED: 'negative',
+        UNEXPECTED: 'orange-3',
+        DUPLICATE: 'orange-3',
+        WRONG_SKU: 'orange-3'
+      }[status] || 'grey-4'
+    },
+    dispositionLabel (action) {
+      return {
+        ACCEPT_EXCEPTION: 'Accepted for Putaway',
+        ACCEPT_FOR_PUTAWAY: 'Accepted for Putaway',
+        HOLD_QUARANTINE: 'Held / Quarantine',
+        REJECT_RETURN: 'Rejected / Return',
+        WAIVE_MISSING: 'Missing SN Waived',
+        REOPEN: 'Open'
+      }[action] || '-'
+    },
+    dispositionColor (action) {
+      return {
+        ACCEPT_EXCEPTION: 'positive',
+        ACCEPT_FOR_PUTAWAY: 'positive',
+        HOLD_QUARANTINE: 'amber-3',
+        REJECT_RETURN: 'negative',
+        WAIVE_MISSING: 'orange-3',
+        REOPEN: 'grey-4'
+      }[action] || 'grey-4'
+    },
+    packListLabel (status) {
+      return {
+        PENDING: 'Pending',
+        CONFIRMED: 'Confirmed',
+        LATE: 'Late reference',
+        LATE_PENDING: 'Late / pending',
+        NOT_RECEIVED: 'Not received'
+      }[status] || status || 'Not received'
+    },
+    formatDate (value) {
+      return String(value || '').replace('T', ' ').slice(0, 16) || 'Not provided'
     }
   }
 }
 </script>
+
+<style scoped>
+.qc-review-card {
+  width: 1120px;
+  max-width: 96vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.qc-review-content {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.qc-context-grid > div {
+  min-height: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qc-label {
+  color: #6b7280;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.qc-decision-banner {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.qc-metrics .q-chip {
+  width: 100%;
+  justify-content: center;
+  margin: 0;
+}
+
+.qc-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.qc-record-table {
+  max-width: 100%;
+}
+
+.qc-ellipsis-cell {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qc-resolution-card {
+  width: 500px;
+  max-width: 92vw;
+}
+</style>

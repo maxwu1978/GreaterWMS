@@ -8,7 +8,14 @@ from rest_framework.exceptions import APIException
 from asn.models import AsnDetailModel, AsnListModel
 from asn.serializers import ASNListGetSerializer
 
-from .models import AsnSerialRecord, PackListDocument, PackListImportBatch, PackListLine
+from .models import (
+    HOLD_QUARANTINE,
+    REJECT_RETURN,
+    AsnSerialRecord,
+    PackListDocument,
+    PackListImportBatch,
+    PackListLine,
+)
 from .views import _create_pack_list, _scan, _summary
 
 
@@ -444,6 +451,18 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(record.note, 'Packaging damaged during receiving')
         self.assertFalse(_summary(self.openid, self.asn_code)['ready_for_putaway'])
 
+    def test_qc_evidence_url_preserves_case(self):
+        record, _ = _scan(
+            self.openid,
+            self.request(),
+            self.asn_code,
+            '702-S',
+            'SN-EVIDENCE-001',
+            row={'evidence_url': 'https://drive.google.com/drive/u/0/folders/AbC123'},
+        )
+
+        self.assertEqual(record.evidence_url, 'https://drive.google.com/drive/u/0/folders/AbC123')
+
     def test_open_quantity_exception_is_not_ready_for_putaway(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
         detail.goods_actual_qty = 1
@@ -462,3 +481,65 @@ class PackListWorkflowTests(TestCase):
         summary = _summary(self.openid, self.asn_code)
         self.assertEqual(summary['total_quantity_exceptions'], 0)
         self.assertTrue(summary['ready_for_putaway'])
+
+    def test_held_serial_is_not_putaway_eligible_but_qc_can_complete(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 2
+        detail.save(update_fields=['goods_actual_qty'])
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-OK-001',
+            status=AsnSerialRecord.ACCEPTED,
+            is_expected=True,
+            is_received=True,
+        )
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-HOLD-001',
+            status=AsnSerialRecord.DAMAGED,
+            is_expected=True,
+            is_received=True,
+            damaged=True,
+            exception_resolved=True,
+            exception_resolution_action=HOLD_QUARANTINE,
+            exception_resolution_note='Move damaged unit to quarantine.',
+            exception_resolution_location='QC-HOLD-01',
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+        line = summary['lines'][0]
+
+        self.assertTrue(summary['qc_complete'])
+        self.assertEqual(summary['total_eligible_for_putaway'], 1)
+        self.assertEqual(summary['total_held_serials'], 1)
+        self.assertEqual(line['eligible_for_putaway'], 1)
+        self.assertTrue(summary['ready_for_putaway'])
+
+    def test_rejected_serials_are_not_putaway_eligible(self):
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.goods_actual_qty = 1
+        detail.save(update_fields=['goods_actual_qty'])
+        AsnSerialRecord.objects.create(
+            openid=self.openid,
+            asn_code=self.asn_code,
+            goods_code='702-S',
+            serial_number='SN-REJECT-001',
+            status=AsnSerialRecord.REJECTED,
+            is_expected=True,
+            is_received=True,
+            exception_resolved=True,
+            exception_resolution_action=REJECT_RETURN,
+            exception_resolution_note='Return damaged unit.',
+            exception_resolution_location='RETURN-01',
+        )
+
+        summary = _summary(self.openid, self.asn_code)
+
+        self.assertTrue(summary['qc_complete'])
+        self.assertEqual(summary['total_rejected_serials'], 1)
+        self.assertEqual(summary['total_eligible_for_putaway'], 0)
+        self.assertFalse(summary['ready_for_putaway'])
