@@ -284,8 +284,11 @@ class ReceivingRecordListView(APIView):
     def get(self, request):
         qs = ReceivingRecord.objects.filter(openid=_openid(request))
         status = request.GET.get('status')
+        receipt_no = str(request.GET.get('receipt_no') or '').strip()
         if status:
             qs = qs.filter(status=status)
+        if receipt_no:
+            qs = qs.filter(receipt_no=receipt_no)
         return Response({
             'count': qs.count(),
             'results': [_record_data(record) for record in qs[:200]],
@@ -435,6 +438,58 @@ class ReceivingRecordDetailView(APIView):
         record = ReceivingRecord.objects.filter(openid=_openid(request), id=pk).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        return Response(_record_data(record))
+
+
+class ReceivingPutawayAssignView(APIView):
+    """Assign the driver who owns the remaining receiving putaway work."""
+
+    @transaction.atomic
+    def post(self, request):
+        _ensure_roles(request, 'Manager', 'Supervisor', 'Warehouse', 'Inbound')
+        openid = _openid(request)
+        receipt_no = str(request.data.get('receipt_no') or '').strip()
+        driver_name = str(request.data.get('driver_name') or request.data.get('driver') or '').strip()
+        if not receipt_no or not driver_name:
+            raise ValidationError({'detail': 'receipt_no and driver_name are required'})
+        record = ReceivingRecord.objects.select_for_update().filter(
+            openid=openid,
+            receipt_no=receipt_no,
+        ).first()
+        if record is None:
+            raise ValidationError({'detail': 'Receiving record does not exist'})
+        if record.status != ReceivingRecord.PUTAWAY_PENDING:
+            raise ValidationError({'detail': 'Driver can only be assigned when putaway is pending'})
+        if not DriverModel.objects.filter(
+            openid=openid,
+            driver_name=driver_name,
+            is_delete=False,
+        ).exists():
+            raise ValidationError({'detail': 'Putaway driver does not exist'})
+        remaining = sum(
+            max(int(detail.accepted_qty or 0) - int(detail.putaway_qty or 0), 0)
+            for detail in record.details.select_for_update()
+        )
+        if remaining <= 0:
+            raise ValidationError({'detail': 'No remaining quantity requires putaway'})
+        identity = getattr(request, 'auth', None)
+        role = str(getattr(identity, 'staff_type', '') or '').strip().casefold()
+        if record.putaway_driver and record.putaway_driver != driver_name and role not in ('manager', 'supervisor'):
+            raise ValidationError({'detail': 'Only a manager or supervisor can reassign the putaway driver'})
+        record.putaway_driver = driver_name
+        record.putaway_assigned_by = _operator_name(request)
+        record.putaway_assigned_at = timezone.now()
+        record.save(update_fields=[
+            'putaway_driver', 'putaway_assigned_by', 'putaway_assigned_at', 'update_time',
+        ])
+        ReceivingReconciliationEvent.objects.create(
+            receipt=record,
+            openid=openid,
+            event_type='PUTAWAY_DRIVER_ASSIGNED',
+            operator=_operator_name(request),
+            note='Putaway driver assigned: %s' % driver_name,
+            payload={'driver_name': driver_name},
+        )
         return Response(_record_data(record))
 
 
@@ -722,6 +777,8 @@ class ReceivingPutawayView(APIView):
         driver_name = str(request.data.get('driver_name') or request.data.get('driver') or '').strip()
         if not driver_name:
             raise ValidationError({'detail': 'A putaway driver is required'})
+        if record.putaway_driver and driver_name != record.putaway_driver:
+            raise ValidationError({'detail': 'This receiving record is assigned to putaway driver %s' % record.putaway_driver})
         if not DriverModel.objects.filter(openid=openid, driver_name=driver_name, is_delete=False).exists():
             raise ValidationError({'detail': 'Putaway driver does not exist'})
         identity = getattr(request, 'auth', None)
@@ -735,6 +792,10 @@ class ReceivingPutawayView(APIView):
                 return Response(_record_data(record))
         if record.linked_asn_code and not detail.asn_stock_released:
             _apply_linked_asn_inventory(record, detail, int(detail.actual_qty or 0))
+        if not record.putaway_driver:
+            record.putaway_driver = driver_name
+            record.putaway_assigned_by = _operator_name(request)
+            record.putaway_assigned_at = timezone.now()
         goods_master = _goods_master(openid, goods_code)
         stock = _stock_for_update(openid, goods_code, goods_master)
         if not record.linked_asn_code:

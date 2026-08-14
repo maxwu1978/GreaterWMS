@@ -222,14 +222,25 @@ class OperationsBoardViewSet(viewsets.ViewSet):
 
         viewer_role = str(getattr(auth, 'staff_type', '') or '').strip().casefold()
         viewer_name = str(getattr(auth, 'staff_name', '') or '').strip()
+        view = str(request.query_params.get('view') or 'active').strip().casefold()
+        if view not in ('active', 'history'):
+            return Response({'detail': 'view must be active or history'}, status=400)
+        history = view == 'history'
         now = timezone.now()
         items = []
-        items.extend(self._inbound_items(openid, now))
-        items.extend(self._receiving_items(openid, now))
-        items.extend(self._outbound_items(openid, now))
-        items.extend(self._transport_items(openid, now))
-        items = self._filter_for_identity(items, viewer_role, viewer_name)
-        lane_order = {'blocked': 0, 'delayed': 1, 'now': 2, 'next': 3}
+        items.extend(self._inbound_items(openid, now, history=history))
+        items.extend(self._receiving_items(openid, now, history=history))
+        items.extend(self._outbound_items(openid, now, history=history))
+        items.extend(self._transport_items(openid, now, history=history))
+        items = self._filter_for_identity(items, viewer_role, viewer_name, history=history)
+        lane_order = {
+            'blocked': 0,
+            'delayed': 1,
+            'now': 2,
+            'next': 3,
+            'completed': 4,
+            'cancelled': 5,
+        }
         items.sort(key=lambda item: (lane_order[item['lane']], item['sort_time']))
 
         counts = {
@@ -238,24 +249,57 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'next': sum(item['lane'] == 'next' for item in items),
             'delayed': sum(item['lane'] == 'delayed' for item in items),
             'blocked': sum(item['lane'] == 'blocked' for item in items),
+            'completed': sum(item['lane'] == 'completed' for item in items),
+            'cancelled': sum(item['lane'] == 'cancelled' for item in items),
         }
         for item in items:
             item.pop('sort_time', None)
+        try:
+            limit = min(max(int(request.query_params.get('limit', 100)), 1), 500)
+        except (TypeError, ValueError):
+            return Response({'detail': 'limit must be an integer'}, status=400)
         return Response({
             'generated_at': now.isoformat(),
+            'view': view,
             'viewer': {
                 'staff_name': viewer_name,
                 'staff_type': getattr(auth, 'staff_type', '') or '',
                 'scope': 'all' if viewer_role in self.MANAGEMENT_ROLES else 'role',
             },
-            'items': items[:100],
+            'items': items[:limit],
+            'has_more': len(items) > limit,
             'counts': counts,
         })
 
-    def _filter_for_identity(self, items, viewer_role, viewer_name):
+    def _filter_for_identity(self, items, viewer_role, viewer_name, history=False):
         """Keep the dashboard server-side scoped to the logged-in role."""
         if viewer_role in self.MANAGEMENT_ROLES:
             return items
+        if history:
+            def has_role(item, role):
+                return role in set(item.get('history_roles') or [])
+
+            if viewer_role == 'driver':
+                return [
+                    item for item in items
+                    if has_role(item, 'DRIVER')
+                    and viewer_name.casefold() in {
+                        str(name).casefold() for name in item.get('history_assignees') or []
+                    }
+                ]
+            if viewer_role == 'qc':
+                return [item for item in items if has_role(item, 'QC')]
+            if viewer_role == 'warehouse':
+                return [item for item in items if has_role(item, 'WAREHOUSE')]
+            if viewer_role == 'logistics':
+                return [item for item in items if has_role(item, 'LOGISTICS')]
+            if viewer_role == 'inbound':
+                return [item for item in items if item.get('category') in ('inbound', 'receiving')]
+            if viewer_role == 'outbound':
+                return [item for item in items if item.get('category') == 'outbound']
+            if viewer_role == 'stockcontrol':
+                return [item for item in items if has_role(item, 'WAREHOUSE')]
+            return []
         if viewer_role == 'driver':
             return [
                 item for item in items
@@ -292,13 +336,22 @@ class OperationsBoardViewSet(viewsets.ViewSet):
     def _timestamp(row):
         return row.update_time or row.create_time
 
-    def _inbound_items(self, openid, now):
+    def _inbound_items(self, openid, now, history=False):
         status_map = {
             1: ('Unload', 'Stage', 'asn', True),
             2: ('Receive', 'Stage', 'predeliverystock', False),
             3: ('Inspect', 'Stage', 'presortstock', False),
             4: ('Putaway', 'Storage', 'sortstock', False),
         }
+        business_status_map = {
+            1: 'PRE_ARRIVAL',
+            2: 'UNLOADING',
+            3: 'RECEIVING_REVIEW',
+            4: 'PUTAWAY',
+            5: 'COMPLETED',
+        }
+        if history:
+            status_map[5] = ('Completed', 'Storage', 'asnfinish', False)
         grouped = {}
         asn_context = {
             row['asn_code']: row for row in AsnListModel.objects.filter(
@@ -362,6 +415,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'staging_reserved_qty': staging['reserved'],
                 'staging_occupied_qty': staging['occupied'],
                 'package_qty': intake.get('package_qty') or 0,
+                'history': history,
+                'history_roles': [],
+                'history_assignees': [],
             })
             if row.asn_status < current['status']:
                 current['status'] = row.asn_status
@@ -371,12 +427,33 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'location': location,
                 'action_route': route,
                 'planned': planned,
+                'business_status': business_status_map[current['status']],
             })
             if current['status'] == 1:
-                if current['actual_arrival_at']:
-                    current.update({'operation': 'Unload', 'planned': False})
+                if current['actual_arrival_at'] and current['unload_driver']:
+                    current.update({'operation': 'Unload', 'planned': False, 'business_status': 'UNLOADING'})
+                elif current['actual_arrival_at']:
+                    current.update({
+                        'operation': 'Assign Unloading Driver',
+                        'planned': False,
+                        'business_status': 'AWAITING_UNLOADING_DRIVER',
+                    })
                 elif current['staging_reserved_qty']:
-                    current['operation'] = 'Await Arrival'
+                    current.update({'operation': 'Await Arrival', 'planned': True})
+                else:
+                    current.update({'operation': 'Reserve Stage', 'planned': True})
+            elif current['status'] == 4 and current['putaway_driver']:
+                current.update({
+                    'operation': 'Putaway',
+                    'planned': False,
+                    'business_status': 'PUTAWAY_PENDING',
+                })
+            elif current['status'] == 4:
+                current.update({
+                    'operation': 'Assign Putaway Driver',
+                    'planned': False,
+                    'business_status': 'PUTAWAY_PENDING',
+                })
             if current['status'] == 1 and current['actual_arrival_at'] and current['unload_driver']:
                 current.update({'assigned_role': 'DRIVER', 'assignee_name': current['unload_driver']})
             elif current['status'] == 3:
@@ -395,6 +472,23 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             current['timestamp'] = max(current['timestamp'], self._timestamp(row))
 
         for item in grouped.values():
+            if history:
+                roles = {'WAREHOUSE'}
+                assignees = []
+                if item.get('status', 0) >= 3:
+                    roles.add('QC')
+                if item.get('unload_driver'):
+                    roles.add('DRIVER')
+                    assignees.append(item['unload_driver'])
+                if item.get('putaway_driver'):
+                    roles.add('DRIVER')
+                    assignees.append(item['putaway_driver'])
+                item.update({
+                    'operation': 'Completed',
+                    'business_status': 'EXCEPTION' if item.get('blocked') else 'COMPLETED',
+                    'history_roles': sorted(roles),
+                    'history_assignees': assignees,
+                })
             if item['status'] == 4:
                 summary = receiving_summary(openid, item['reference'])
                 if not summary.get('ready_for_putaway', False):
@@ -404,35 +498,77 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                         'action_route': 'asn',
                         'planned': False,
                         'blocked': True,
+                        'business_status': 'RECEIVING_REVIEW',
                         'assigned_role': 'QC',
                         'assignee_name': '',
                     })
 
         return [self._format_item(item, now) for item in grouped.values()]
 
-    def _receiving_items(self, openid, now):
+    def _receiving_items(self, openid, now, history=False):
         records = ReceivingRecord.objects.filter(
             openid=openid,
-        ).exclude(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
+        )
+        if history:
+            records = records.filter(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
+        else:
+            records = records.exclude(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
         items = []
+        reconciliation_status_map = {
+            ReceivingRecord.NO_ASN: 'AWAITING_ASN',
+            ReceivingRecord.PENDING: 'RECONCILIATION_PENDING',
+            ReceivingRecord.MATCHED: 'MATCHED',
+            ReceivingRecord.EXCEPTION: 'EXCEPTION',
+            ReceivingRecord.RESOLVED: 'RESOLVED',
+            ReceivingRecord.DISPUTED: 'DISPUTED',
+        }
         for record in records:
+            business_reconciliation_status = reconciliation_status_map.get(
+                record.reconciliation_status,
+                record.reconciliation_status,
+            )
             details = list(record.details.all())
-            total = sum(int(detail.actual_qty or 0) for detail in details)
+            physical_total = sum(int(detail.actual_qty or 0) for detail in details)
+            accepted_total = sum(int(detail.accepted_qty or 0) for detail in details)
+            total = accepted_total if record.status == ReceivingRecord.PUTAWAY_PENDING else physical_total
             progress = sum(int(detail.putaway_qty or 0) for detail in details)
-            if record.status == ReceivingRecord.QC_PENDING:
+            assignee = ''
+            if history:
+                operation = 'Cancelled' if record.status == ReceivingRecord.CANCELLED else 'Completed'
+                role = 'DRIVER' if record.putaway_driver else 'QC' if record.qc_by else 'WAREHOUSE'
+                assignee = record.putaway_driver or record.qc_by or record.closed_by or ''
+                blocked = record.status == ReceivingRecord.CANCELLED
+                planned = False
+            elif record.status == ReceivingRecord.QC_PENDING:
                 operation, role, blocked, planned = 'Inspect', 'QC', False, False
             elif record.status == ReceivingRecord.QC_EXCEPTION:
                 operation, role, blocked, planned = 'Resolve QC Exception', 'QC', True, False
             elif record.status == ReceivingRecord.PUTAWAY_PENDING:
-                operation, role, blocked, planned = 'Putaway', 'WAREHOUSE', False, False
+                if record.putaway_driver:
+                    operation, role, blocked, planned = 'Putaway', 'DRIVER', False, False
+                    assignee = record.putaway_driver
+                else:
+                    operation, role, blocked, planned = 'Assign Putaway Driver', 'WAREHOUSE', False, False
+                    assignee = ''
             elif record.reconciliation_status in (ReceivingRecord.EXCEPTION, ReceivingRecord.DISPUTED):
                 operation, role, blocked, planned = 'Resolve Reconciliation', 'WAREHOUSE', True, False
+                assignee = ''
             elif record.reconciliation_status == ReceivingRecord.NO_ASN:
                 operation, role, blocked, planned = 'Await ASN', 'WAREHOUSE', False, True
+                assignee = ''
             elif record.reconciliation_status == ReceivingRecord.PENDING:
                 operation, role, blocked, planned = 'Reconcile ASN', 'WAREHOUSE', False, False
+                assignee = ''
             else:
                 operation, role, blocked, planned = 'Close Receipt', 'WAREHOUSE', False, False
+                assignee = ''
+            history_roles = {'WAREHOUSE'}
+            history_assignees = []
+            if record.qc_by:
+                history_roles.add('QC')
+            if record.putaway_driver:
+                history_roles.add('DRIVER')
+                history_assignees.append(record.putaway_driver)
             items.append(self._format_item({
                 'category': 'receiving',
                 'reference': record.receipt_no,
@@ -450,23 +586,62 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'timestamp': record.update_time or record.create_time,
                 'eta': None,
                 'assigned_role': role,
-                'assignee_name': '',
+                'assignee_name': assignee,
                 'exception_note': record.exception_note,
+                'business_status': (
+                    'CANCELLED' if record.status == ReceivingRecord.CANCELLED else
+                    'RESOLVED' if history and record.reconciliation_status == ReceivingRecord.RESOLVED else
+                    'MATCHED' if history and record.reconciliation_status == ReceivingRecord.MATCHED else
+                    record.reconciliation_status if history and record.reconciliation_status in (
+                        ReceivingRecord.EXCEPTION,
+                        ReceivingRecord.DISPUTED,
+                    ) else
+                    'COMPLETED' if history else
+                    business_reconciliation_status if record.status == ReceivingRecord.PUTAWAY_COMPLETE else
+                    record.status
+                ),
+                'history': history,
+                'history_roles': sorted(history_roles),
+                'history_assignees': history_assignees,
             }, now))
         return items
 
-    def _transport_items(self, openid, now):
+    def _transport_items(self, openid, now, history=False):
+        business_status_map = {
+            TransportOrder.REQUESTED: 'REQUESTED',
+            TransportOrder.SCHEDULED: 'SCHEDULED',
+            TransportOrder.DRIVER_ASSIGNED: 'DRIVER_ASSIGNED',
+            TransportOrder.IN_TRANSIT: 'IN_TRANSIT',
+            TransportOrder.ARRIVED: 'ARRIVED',
+            TransportOrder.COMPLETED: 'COMPLETED',
+            TransportOrder.CANCELLED: 'CANCELLED',
+        }
         orders = TransportOrder.objects.filter(openid=openid).exclude(
             status__in=(TransportOrder.COMPLETED, TransportOrder.CANCELLED),
         )
+        if history:
+            orders = TransportOrder.objects.filter(
+                openid=openid,
+                status__in=(TransportOrder.COMPLETED, TransportOrder.CANCELLED),
+            )
         items = []
         for order in orders:
-            if order.status in (TransportOrder.REQUESTED, TransportOrder.SCHEDULED):
+            if history:
+                operation = 'Cancelled' if order.status == TransportOrder.CANCELLED else 'Completed'
+                role = 'LOGISTICS'
+                assignee = order.driver_name
+                planned = False
+            elif order.status in (TransportOrder.REQUESTED, TransportOrder.SCHEDULED):
                 operation, role, assignee, planned = 'Assign Driver', 'LOGISTICS', order.logistics_coordinator, False
             elif order.status in (TransportOrder.DRIVER_ASSIGNED, TransportOrder.IN_TRANSIT):
                 operation, role, assignee, planned = 'Transport', 'DRIVER', order.driver_name, False
             else:
                 operation, role, assignee, planned = 'Confirm Delivery', 'LOGISTICS', order.logistics_coordinator, False
+            history_roles = {'LOGISTICS'}
+            history_assignees = []
+            if order.driver_name:
+                history_roles.add('DRIVER')
+                history_assignees.append(order.driver_name)
             items.append(self._format_item({
                 'category': 'transport',
                 'reference': order.transport_no,
@@ -485,10 +660,14 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'assigned_role': role,
                 'assignee_name': assignee or '',
                 'exception_note': order.note,
+                'business_status': business_status_map.get(order.status, order.status),
+                'history': history,
+                'history_roles': sorted(history_roles),
+                'history_assignees': history_assignees,
             }, now))
         return items
 
-    def _outbound_items(self, openid, now):
+    def _outbound_items(self, openid, now, history=False):
         status_map = {
             1: ('Release', 'Shipping', 'freshorder', True),
             2: ('Release', 'Shipping', 'neworder', True),
@@ -496,6 +675,20 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             4: ('Pack', 'Shipping', 'pickedstock', False),
             5: ('Ship', 'Dock', 'shippedstock', False),
         }
+        business_status_map = {
+            1: 'RELEASED',
+            2: 'RELEASED',
+            3: 'PICKING',
+            4: 'PACKING',
+            5: 'IN_TRANSIT',
+            6: 'COMPLETED',
+            7: 'CANCELLED',
+        }
+        if history:
+            status_map.update({
+                6: ('Completed', 'Dock', 'shippedstock', False),
+                7: ('Cancelled', 'Dock', 'neworder', False),
+            })
         grouped = {}
         rows = list(DnDetailModel.objects.filter(
             openid=openid,
@@ -526,6 +719,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'timestamp': self._timestamp(row),
                 'eta': None,
                 'driver_name': dispatch_context.get(row.dn_code, ''),
+                'history': history,
+                'history_roles': [],
+                'history_assignees': [],
             })
             if row.dn_status < current['status']:
                 current['status'] = row.dn_status
@@ -535,6 +731,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'location': location,
                 'action_route': route,
                 'planned': planned,
+                'business_status': business_status_map[current['status']],
             })
             if current['status'] == 5 and current['driver_name']:
                 current.update({'assigned_role': 'DRIVER', 'assignee_name': current['driver_name']})
@@ -547,12 +744,31 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             )
             current['timestamp'] = max(current['timestamp'], self._timestamp(row))
 
+        if history:
+            for item in grouped.values():
+                roles = {'WAREHOUSE'}
+                assignees = []
+                if item.get('driver_name'):
+                    roles.add('DRIVER')
+                    assignees.append(item['driver_name'])
+                item.update({
+                    'operation': 'Cancelled' if item['status'] == 7 else 'Completed',
+                    'business_status': (
+                        'CANCELLED' if item['status'] == 7 else
+                        'EXCEPTION' if item.get('blocked') else
+                        'COMPLETED'
+                    ),
+                    'history_roles': sorted(roles),
+                    'history_assignees': assignees,
+                })
         return [self._format_item(item, now) for item in grouped.values()]
 
     def _format_item(self, item, now):
         timestamp = item['timestamp']
         eta = item.get('eta')
-        if item.get('actual_arrival_at') and item.get('operation') == 'Unload':
+        if item.get('history'):
+            lane = 'cancelled' if item.get('business_status') == 'CANCELLED' else 'completed'
+        elif item.get('actual_arrival_at') and item.get('operation') == 'Unload':
             lane = 'blocked' if item['blocked'] else 'now'
         else:
             lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
@@ -563,6 +779,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'category': item['category'],
             'operation': item['operation'],
             'status': item.get('status', ''),
+            'business_status': item.get('business_status', item.get('status', '')),
+            'next_action': item.get('operation', ''),
             'reconciliation_status': item.get('reconciliation_status', ''),
             'exception_note': item.get('exception_note', ''),
             'lane': lane,
@@ -580,6 +798,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'assigned_role': item.get('assigned_role', 'WAREHOUSE'),
             'assignee_name': item.get('assignee_name', ''),
             'assigned_to': item.get('assignee_name') or item.get('assigned_role', 'WAREHOUSE'),
+            'history_roles': item.get('history_roles', []),
+            'history_assignees': item.get('history_assignees', []),
+            'is_history': bool(item.get('history')),
             'action_route': item['action_route'],
             'sort_time': timestamp or now,
         }

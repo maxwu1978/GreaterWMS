@@ -19,6 +19,7 @@ from warehouse.models import ListModel as WarehouseModel
 from .models import ReceivingDetail, ReceivingRecord, ReceivingSerial
 from .views import (
     ReceivingExceptionResolveView,
+    ReceivingPutawayAssignView,
     ReceivingPutawayView,
     ReceivingQcCompleteView,
     ReceivingRecordListView,
@@ -96,6 +97,12 @@ class ReceivingFlowTests(TestCase):
         })
         self.assertEqual(qc.data['status'], ReceivingRecord.PUTAWAY_PENDING)
 
+        assigned = self.call(ReceivingPutawayAssignView, {
+            'receipt_no': 'RC-001',
+            'driver_name': 'Tom',
+        })
+        self.assertEqual(assigned.data['putaway_driver'], 'Tom')
+
         putaway = self.call(ReceivingPutawayView, {
             'receipt_no': 'RC-001',
             'goods_code': self.goods_code,
@@ -105,6 +112,7 @@ class ReceivingFlowTests(TestCase):
             'idempotency_key': 'RC-001-A1-01',
         })
         self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_COMPLETE)
+        self.assertEqual(putaway.data['putaway_driver'], 'Tom')
         self.assertEqual(StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code).onhand_stock, 2)
         self.assertEqual(putaway.data['reconciliation_status'], ReceivingRecord.NO_ASN)
 

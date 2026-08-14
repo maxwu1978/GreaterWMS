@@ -1567,6 +1567,8 @@ export default {
       }
       if (asnCode) {
         params.unshift('asn_code__icontains=' + encodeURIComponent(asnCode))
+      } else if (this.$route.query && this.$route.query.asn_code) {
+        params.unshift('asn_code__icontains=' + encodeURIComponent(this.$route.query.asn_code))
       }
       return this.pathname + 'list/?' + params.join('&')
     },
@@ -2286,6 +2288,11 @@ export default {
     '$route.query.asn_status' (value) {
       const status = Number(value)
       this.statusFilter = [1, 2, 3, 4, 5].indexOf(status) !== -1 ? status : ''
+      this.current = 1
+      this.paginationIpt = 1
+      this.getList()
+    },
+    '$route.query.asn_code' () {
       this.current = 1
       this.paginationIpt = 1
       this.getList()

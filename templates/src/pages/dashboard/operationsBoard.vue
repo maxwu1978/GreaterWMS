@@ -22,6 +22,16 @@
     </q-card-section>
 
     <q-card-section class="operations-board__controls row items-center q-pa-none">
+      <q-btn-toggle
+        v-model="viewMode"
+        dense
+        unelevated
+        toggle-color="primary"
+        class="operations-board__view-toggle q-ml-sm"
+        :options="viewOptions"
+        @input="changeView"
+      />
+      <q-separator vertical class="q-mx-sm" />
       <q-tabs
         v-model="activeFilter"
         dense
@@ -49,7 +59,7 @@
       :row-class="rowClass"
       :loading="loading"
       :pagination.sync="pagination"
-      :no-data-label="label('operations_board.no_work', 'No active warehouse work')"
+      :no-data-label="noDataLabel"
     >
       <template v-slot:body-cell-lane="props">
         <q-td :props="props">
@@ -82,6 +92,13 @@
       </template>
       <template v-slot:body-cell-operation="props">
         <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
+      </template>
+      <template v-slot:body-cell-business_status="props">
+        <q-td :props="props">
+          <q-badge :color="businessStatusColor(props.row.business_status)">
+            {{ businessStatusLabel(props.row.business_status) }}
+          </q-badge>
+        </q-td>
       </template>
       <template v-slot:body-cell-category="props">
         <q-td :props="props">
@@ -124,6 +141,7 @@ export default {
   data () {
     return {
       activeFilter: 'all',
+      viewMode: 'active',
       items: [],
       viewer: { staff_name: '', staff_type: '', scope: '' },
       loading: false,
@@ -133,6 +151,13 @@ export default {
   },
   computed: {
     filters () {
+      if (this.viewMode === 'history') {
+        return [
+          { key: 'all', label: this.label('operations_board.all', 'All') },
+          { key: 'completed', label: this.label('operations_board.completed', 'Completed') },
+          { key: 'cancelled', label: this.label('operations_board.cancelled', 'Cancelled') }
+        ]
+      }
       return [
         { key: 'all', label: this.label('operations_board.all', 'All') },
         { key: 'now', label: this.label('operations_board.now', 'Now') },
@@ -140,6 +165,17 @@ export default {
         { key: 'delayed', label: this.label('operations_board.delayed', 'Delayed') },
         { key: 'blocked', label: this.label('operations_board.blocked', 'Blocked') }
       ]
+    },
+    viewOptions () {
+      return [
+        { label: this.label('operations_board.active', 'Active'), value: 'active' },
+        { label: this.label('operations_board.history', 'History'), value: 'history' }
+      ]
+    },
+    noDataLabel () {
+      return this.viewMode === 'history'
+        ? this.label('operations_board.no_history', 'No processed work')
+        : this.label('operations_board.no_work', 'No active warehouse work')
     },
     filteredItems () {
       if (this.activeFilter === 'all') return this.items
@@ -161,7 +197,7 @@ export default {
         { name: 'reference', label: this.label('operations_board.reference', 'Reference'), field: 'reference', align: 'left' },
         { name: 'location', label: this.label('operations_board.location', 'Target Area'), field: 'location', align: 'left' },
         { name: 'quantity', label: this.label('operations_board.quantity', 'Remaining / Total'), field: 'quantity', align: 'right' },
-        { name: 'lane', label: this.label('operations_board.status', 'Work Status'), field: 'lane', align: 'left' },
+        { name: 'business_status', label: this.label('operations_board.status', 'Status'), field: 'business_status', align: 'left' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
@@ -181,7 +217,7 @@ export default {
     getList () {
       if (!this.$q.localStorage.has('auth')) return
       this.loading = true
-      getauth('dashboard/operations/')
+      getauth('dashboard/operations/?view=' + encodeURIComponent(this.viewMode) + '&limit=200')
         .then(res => {
           this.items = res.items || []
           this.viewer = res.viewer || { staff_name: '', staff_type: '', scope: '' }
@@ -190,6 +226,10 @@ export default {
         .finally(() => {
           this.loading = false
         })
+    },
+    changeView () {
+      this.activeFilter = 'all'
+      this.getList()
     },
     laneLabel (lane) {
       return this.label(`operations_board.${lane}`, lane)
@@ -201,6 +241,17 @@ export default {
     operationLabel (operation) {
       const key = String(operation || '').toLowerCase()
       return this.label(`operations_board.${key}`, operation)
+    },
+    businessStatusLabel (status) {
+      const key = String(status || '').toLowerCase()
+      return this.label(`operations_board.status_${key}`, status || '-')
+    },
+    businessStatusColor (status) {
+      const value = String(status || '').toUpperCase()
+      if (value === 'COMPLETED' || value === 'MATCHED') return 'positive'
+      if (value === 'CANCELLED' || value.includes('EXCEPTION') || value === 'DISPUTED') return 'negative'
+      if (value.includes('PENDING') || value === 'PRE_ARRIVAL') return 'primary'
+      return 'grey-7'
     },
     locationLabel (location) {
       const key = String(location || '').toLowerCase()
@@ -220,14 +271,22 @@ export default {
         now: 'positive',
         next: 'primary',
         delayed: 'warning',
-        blocked: 'negative'
+        blocked: 'negative',
+        completed: 'positive',
+        cancelled: 'negative'
       }[lane] || 'grey'
     },
     rowClass (row) {
       return `operations-board__row--${row.lane || 'default'}`
     },
     openItem (item) {
-      if (item.action_route) this.$router.push({ name: item.action_route })
+      if (!item.action_route) return
+      const query = { reference: item.reference }
+      if (item.category === 'inbound') query.asn_code = item.reference
+      if (item.category === 'receiving') query.receipt_no = item.reference
+      if (item.category === 'outbound') query.dn_code = item.reference
+      if (item.category === 'transport') query.transport_no = item.reference
+      this.$router.push({ name: item.action_route, query })
     }
   }
 }

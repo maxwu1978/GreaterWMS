@@ -89,12 +89,15 @@ class TransportOrderListView(APIView):
         status = str(request.GET.get('status') or '').strip().upper()
         direction = str(request.GET.get('direction') or '').strip().upper()
         driver_name = str(request.GET.get('driver_name') or '').strip()
+        transport_no = str(request.GET.get('transport_no') or '').strip()
         if status:
             qs = qs.filter(status=status)
         if direction:
             qs = qs.filter(direction=direction)
         if driver_name:
             qs = qs.filter(driver_name=driver_name)
+        if transport_no:
+            qs = qs.filter(transport_no=transport_no)
         return Response({
             'count': qs.count(),
             'results': TransportOrderSerializer(qs[:200], many=True).data,

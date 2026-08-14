@@ -48,11 +48,20 @@ export default {
   mounted () {
     this.load()
   },
+  watch: {
+    '$route.query.transport_no' () {
+      this.load()
+    }
+  },
   methods: {
     load () {
       if (!this.$q.localStorage.has('auth')) return
       this.loading = true
-      getauth('transport/orders/')
+      const transportNo = this.$route.query && this.$route.query.transport_no
+      const path = transportNo
+        ? 'transport/orders/?transport_no=' + encodeURIComponent(transportNo)
+        : 'transport/orders/'
+      getauth(path)
         .then(response => { this.rows = response.results || [] })
         .catch(() => {})
         .finally(() => { this.loading = false })

@@ -139,7 +139,9 @@ export default {
     getList () {
       var _this = this
       if (_this.$q.localStorage.has('auth')) {
-        getauth(_this.pathname + '&page=' + '' + _this.current, {
+        var reference = (_this.$route.query && _this.$route.query.dn_code) || ''
+        var path = _this.pathname + (reference ? '&dn_code__icontains=' + encodeURIComponent(reference) : '') + '&page=' + '' + _this.current
+        getauth(path, {
         }).then(res => {
           _this.table_list = res.results
           _this.total = res.count
@@ -265,6 +267,13 @@ export default {
       _this.getList()
     } else {
       _this.authin = '0'
+    }
+  },
+  watch: {
+    '$route.query.dn_code' () {
+      this.current = 1
+      this.paginationIpt = 1
+      this.getList()
     }
   },
   mounted () {
