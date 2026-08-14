@@ -3,7 +3,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from staff.auth import issue_session_token
-from staff.models import ListModel as Staff
+from staff.models import ListModel as Staff, StaffSessionToken
 from userprofile.models import Users
 
 
@@ -61,6 +61,26 @@ class RoleAuthorizationTests(TestCase):
         self.assertEqual(data['openid'], data['token'])
         self.assertEqual(data['tenant_openid'], self.tenant_openid)
         self.assertEqual(self.request(data['token']).get('/company/').status_code, 200)
+
+    def test_locked_admin_login_does_not_issue_a_session_token(self):
+        self.admin.is_lock = True
+        self.admin.save(update_fields=['is_lock'])
+        existing_token_count = StaffSessionToken.objects.filter(
+            staff_id=self.admin.id,
+        ).count()
+
+        response = self.client.post(
+            '/login/',
+            {'name': 'role-admin', 'password': 'test-password-123'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 423)
+        self.assertIn('locked', response.json()['detail'].lower())
+        self.assertEqual(
+            StaffSessionToken.objects.filter(staff_id=self.admin.id).count(),
+            existing_token_count,
+        )
 
     def test_worker_cannot_manage_staff_or_master_data(self):
         worker = self.request(self.worker_token, operator=self.worker.id)

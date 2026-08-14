@@ -46,6 +46,16 @@ def login(request, *args, **kwargs):
             ).first() if user_detail else None
             if user_detail is None or staff_detail is None:
                 return JsonResponse({'detail': 'User profile is not configured'}, status=500)
+            if staff_detail.is_lock:
+                return JsonResponse(
+                    {
+                        'detail': (
+                            'Administrator account is locked. '
+                            'Please contact the administrator'
+                        )
+                    },
+                    status=423,
+                )
             api_token = issue_session_token(staff_detail, token_kind='admin')
             data = {
                 "name": data['name'],
