@@ -24,6 +24,7 @@ from cyclecount.models import QTYRecorder as qtychangerecorder
 from cyclecount.models import CyclecountModeDayModel as cyclecount
 from django.db.models import Q
 from django.db.models import Sum
+from django.db import transaction
 from utils.md5 import Md5
 import re
 from .serializers import FileListRenderSerializer, FileDetailRenderSerializer
@@ -1836,7 +1837,10 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         id = self.get_project()
         if self.request.user:
-            return DnListModel.objects.filter(openid=self.request.auth.openid, id=id, is_delete=False)
+            queryset = DnListModel.objects.filter(openid=self.request.auth.openid, id=id, is_delete=False)
+            if self.action == 'create':
+                queryset = queryset.select_for_update()
+            return queryset
         else:
             return DnListModel.objects.none()
 
@@ -1846,6 +1850,7 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.dn_status != 4:
@@ -1855,67 +1860,127 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
             staging_bin = data.get('staging_bin')
             if not staging_bin:
                 raise APIException({"detail": "Please select an outbound staging location"})
-            staff_name = staff.objects.filter(openid=self.request.auth.openid,
-                                              id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
-            if driverlist.objects.filter(openid=self.request.auth.openid,
-                                         driver_name=str(data['driver']),
-                                         is_delete=False).exists():
-                driver = driverlist.objects.filter(openid=self.request.auth.openid,
-                                                   driver_name=str(data['driver']),
-                                                   is_delete=False).first()
-                dn_detail = DnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                         dn_code=str(data['dn_code']),
-                                                         dn_status=4, customer=qs.customer,
-                                                         )
+            requested_dn_code = str(data.get('dn_code') or '').strip()
+            if requested_dn_code and requested_dn_code != str(qs.dn_code):
+                raise APIException({"detail": "DN code does not match the selected delivery note"})
+            dn_code = str(qs.dn_code)
+            driver_name = str(data.get('driver') or '').strip()
+            if not driver_name:
+                raise APIException({"detail": "Please select a driver"})
+            operator = staff.objects.filter(
+                openid=self.request.auth.openid,
+                id=self.request.META.get('HTTP_OPERATOR'),
+                is_delete=False,
+            ).first()
+            if operator is None:
+                raise APIException({"detail": "Operator does not exist"})
+            if driverdispatch.objects.filter(
+                openid=self.request.auth.openid,
+                dn_code=dn_code,
+            ).exists():
+                raise APIException({"detail": "This DN has already been dispatched"})
+            driver = driverlist.objects.filter(
+                openid=self.request.auth.openid,
+                driver_name=driver_name,
+                is_delete=False,
+            ).first()
+            if driver is not None:
+                dn_detail = list(DnDetailModel.objects.select_for_update().filter(
+                    openid=self.request.auth.openid,
+                    dn_code=dn_code,
+                    dn_status=4,
+                    customer=qs.customer,
+                ))
+                pick_qty_change = list(PickingListModel.objects.select_for_update().filter(
+                    openid=self.request.auth.openid,
+                    dn_code=dn_code,
+                ))
+                if not dn_detail:
+                    raise APIException({"detail": "No picked DN detail exists for this delivery note"})
+                if not pick_qty_change:
+                    raise APIException({"detail": "No picking record exists for this delivery note"})
+
+                stock_by_goods = {}
+                picked_by_goods = {}
+                for detail in dn_detail:
+                    picked_qty = int(detail.picked_qty or 0)
+                    if picked_qty < 0:
+                        raise APIException({"detail": "Picked quantity cannot be negative"})
+                    picked_by_goods[detail.goods_code] = picked_by_goods.get(detail.goods_code, 0) + picked_qty
+                for goods_code, picked_qty in picked_by_goods.items():
+                    goods_qty_change = stocklist.objects.select_for_update().filter(
+                        openid=self.request.auth.openid,
+                        goods_code=goods_code,
+                    ).first()
+                    if goods_qty_change is None:
+                        raise APIException({"detail": "Stock record does not exist for %s" % goods_code})
+                    if int(goods_qty_change.goods_qty or 0) < picked_qty or int(goods_qty_change.picked_stock or 0) < picked_qty:
+                        raise APIException({"detail": "Stock is insufficient for %s" % goods_code})
+                    stock_by_goods[goods_code] = goods_qty_change
+                for picking in pick_qty_change:
+                    picked_qty = int(picking.picked_qty or 0)
+                    if picked_qty < 0:
+                        raise APIException({"detail": "Picked quantity cannot be negative"})
+                    bin_qty_change = stockbin.objects.select_for_update().filter(
+                        openid=self.request.auth.openid,
+                        goods_code=picking.goods_code,
+                        bin_name=picking.bin_name,
+                        t_code=picking.t_code,
+                    ).first()
+                    if bin_qty_change is None:
+                        raise APIException({"detail": "Picking bin record does not exist for %s" % picking.goods_code})
+                    if int(bin_qty_change.picked_qty or 0) < picked_qty:
+                        raise APIException({"detail": "Picked bin quantity is insufficient for %s" % picking.goods_code})
                 try:
                     reserve_staging_slot(
                         self.request.auth.openid,
                         StagingAssignment.OUTBOUND,
                         qs.dn_code,
                         staging_bin,
-                        dn_detail.aggregate(sum=Sum('picked_qty'))['sum'] or 0,
+                        sum(int(detail.picked_qty or 0) for detail in dn_detail),
                         '',
                         request.META.get('HTTP_OPERATOR', ''),
                     )
                 except StagingError as exc:
                     raise APIException({"detail": str(exc)})
                 qs.dn_status = 5
-                pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
-                                                                  dn_code=str(data['dn_code']))
-                for i in range(len(dn_detail)):
-                    goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
-                                                                goods_code=dn_detail[i].goods_code).first()
-                    goods_qty_change.goods_qty = goods_qty_change.goods_qty - dn_detail[i].picked_qty
-                    goods_qty_change.picked_stock = goods_qty_change.picked_stock - dn_detail[i].picked_qty
-                    dn_detail[i].dn_status = 5
-                    dn_detail[i].intransit_qty = dn_detail[i].picked_qty
-                    dn_detail[i].save()
+                for detail in dn_detail:
+                    goods_qty_change = stock_by_goods[detail.goods_code]
+                    goods_qty_change.goods_qty = goods_qty_change.goods_qty - detail.picked_qty
+                    goods_qty_change.picked_stock = goods_qty_change.picked_stock - detail.picked_qty
+                    detail.dn_status = 5
+                    detail.intransit_qty = detail.picked_qty
+                    detail.save()
                     goods_qty_change.save()
                     if goods_qty_change.goods_qty == 0 and goods_qty_change.back_order_stock == 0:
                         goods_qty_change.delete()
-                for j in range(len(pick_qty_change)):
-                    bin_qty_change = stockbin.objects.filter(openid=self.request.auth.openid,
-                                                             goods_code=pick_qty_change[j].goods_code,
-                                                             bin_name=pick_qty_change[j].bin_name,
-                                                             t_code=pick_qty_change[j].t_code).first()
-                    bin_qty_change.picked_qty = bin_qty_change.picked_qty - pick_qty_change[j].picked_qty
+                for picking in pick_qty_change:
+                    bin_qty_change = stockbin.objects.filter(
+                        openid=self.request.auth.openid,
+                        goods_code=picking.goods_code,
+                        bin_name=picking.bin_name,
+                        t_code=picking.t_code,
+                    ).first()
+                    bin_qty_change.picked_qty = bin_qty_change.picked_qty - picking.picked_qty
                     bin_qty_change.save()
-                    bin_stock_check = stockbin.objects.filter(openid=self.request.auth.openid,
-                                                              goods_code=pick_qty_change[j].goods_code,
-                                                              bin_name=pick_qty_change[j].bin_name,
-                                                              t_code=pick_qty_change[j].t_code).first()
+                    bin_stock_check = stockbin.objects.filter(
+                        openid=self.request.auth.openid,
+                        goods_code=picking.goods_code,
+                        bin_name=picking.bin_name,
+                        t_code=picking.t_code,
+                    ).first()
                     if bin_stock_check.goods_qty == 0 and bin_stock_check.pick_qty == 0 and bin_stock_check.picked_qty == 0:
                         bin_stock_check.delete()
                         if stockbin.objects.filter(openid=self.request.auth.openid,
                                                    bin_name=bin_stock_check.bin_name,
                                                    goods_qty__gt=0).exists() is False:
                             binset.objects.filter(openid=self.request.auth.openid,
-                                                  bin_name=pick_qty_change[j].bin_name).update(empty_label=True)
+                                                  bin_name=picking.bin_name).update(empty_label=True)
                 driverdispatch.objects.create(openid=self.request.auth.openid,
                                               driver_name=driver.driver_name,
-                                              dn_code=str(data['dn_code']),
-                                              contact=driver.contact,
-                                              creater=str(staff_name))
+                                              dn_code=dn_code,
+                                              contact=str(driver.contact or ''),
+                                              creater=str(operator.staff_name))
                 qs.save()
                 release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
                 return Response({"detail": "success"}, status=200)

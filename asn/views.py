@@ -54,13 +54,15 @@ from staging.services import (
 from .services import inbound_package_quantity
 
 
-def _operator_name(request):
+def _operator_name(request, required=False):
     operator_id = request.META.get('HTTP_OPERATOR', '')
     operator = staff.objects.filter(
         openid=request.auth.openid,
         id=operator_id,
         is_delete=False,
     ).first() if operator_id else None
+    if required and operator is None:
+        raise APIException({'detail': 'Operator does not exist'})
     return operator.staff_name if operator else str(operator_id or '')
 
 
@@ -545,7 +547,7 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
             return Response(replay)
         if AsnListModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']), is_delete=False).exists():
             if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=str(data['supplier']), is_delete=False).exists():
-                staff_name = staff.objects.filter(openid=self.request.auth.openid, id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
+                staff_name = _operator_name(self.request, required=True)
                 for i in range(len(data['goods_code'])):
                     check_data = {
                         'openid': self.request.auth.openid,
@@ -664,8 +666,7 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
                                        asn_status=1, is_delete=False).exists():
             if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=str(data['supplier']),
                                        is_delete=False).exists():
-                staff_name = staff.objects.filter(openid=self.request.auth.openid,
-                                                  id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
+                staff_name = _operator_name(self.request, required=True)
                 for i in range(len(data['goods_code'])):
                     check_data = {
                         'openid': self.request.auth.openid,

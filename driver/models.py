@@ -19,7 +19,7 @@ class ListModel(models.Model):
 class DispatchListModel(models.Model):
     driver_name = models.CharField(max_length=255, verbose_name="Driver Name")
     dn_code = models.CharField(max_length=255, verbose_name="DN Code")
-    contact = models.BigIntegerField(default=0, verbose_name="Contact Number")
+    contact = models.CharField(default='', max_length=255, blank=True, verbose_name="Contact Number")
     creater = models.CharField(max_length=255, verbose_name="Who Created")
     openid = models.CharField(max_length=255, verbose_name="Openid")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="Create Time")
