@@ -22,16 +22,6 @@
     </q-card-section>
 
     <q-card-section class="operations-board__controls row items-center q-pa-none">
-      <q-btn-toggle
-        v-model="viewMode"
-        dense
-        unelevated
-        toggle-color="primary"
-        class="operations-board__view-toggle q-ml-sm"
-        :options="viewOptions"
-        @input="changeView"
-      />
-      <q-separator vertical class="q-mx-sm" />
       <q-tabs
         v-model="activeFilter"
         dense
@@ -141,7 +131,6 @@ export default {
   data () {
     return {
       activeFilter: 'all',
-      viewMode: 'active',
       items: [],
       viewer: { staff_name: '', staff_type: '', scope: '' },
       loading: false,
@@ -151,13 +140,6 @@ export default {
   },
   computed: {
     filters () {
-      if (this.viewMode === 'history') {
-        return [
-          { key: 'all', label: this.label('operations_board.all', 'All') },
-          { key: 'completed', label: this.label('operations_board.completed', 'Completed') },
-          { key: 'cancelled', label: this.label('operations_board.cancelled', 'Cancelled') }
-        ]
-      }
       return [
         { key: 'all', label: this.label('operations_board.all', 'All') },
         { key: 'now', label: this.label('operations_board.now', 'Now') },
@@ -166,16 +148,8 @@ export default {
         { key: 'blocked', label: this.label('operations_board.blocked', 'Blocked') }
       ]
     },
-    viewOptions () {
-      return [
-        { label: this.label('operations_board.active', 'Active'), value: 'active' },
-        { label: this.label('operations_board.history', 'History'), value: 'history' }
-      ]
-    },
     noDataLabel () {
-      return this.viewMode === 'history'
-        ? this.label('operations_board.no_history', 'No processed work')
-        : this.label('operations_board.no_work', 'No active warehouse work')
+      return this.label('operations_board.no_work', 'No active warehouse work')
     },
     filteredItems () {
       if (this.activeFilter === 'all') return this.items
@@ -217,7 +191,7 @@ export default {
     getList () {
       if (!this.$q.localStorage.has('auth')) return
       this.loading = true
-      getauth('dashboard/operations/?view=' + encodeURIComponent(this.viewMode) + '&limit=200')
+      getauth('dashboard/operations/?view=active&limit=200')
         .then(res => {
           this.items = res.items || []
           this.viewer = res.viewer || { staff_name: '', staff_type: '', scope: '' }
@@ -226,10 +200,6 @@ export default {
         .finally(() => {
           this.loading = false
         })
-    },
-    changeView () {
-      this.activeFilter = 'all'
-      this.getList()
     },
     laneLabel (lane) {
       return this.label(`operations_board.${lane}`, lane)
