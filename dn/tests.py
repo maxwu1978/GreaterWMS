@@ -11,7 +11,8 @@ from stock.models import StockBinModel, StockListModel
 from staging.models import StagingAssignment
 
 from .models import DnDetailModel, DnListModel, PickingListModel
-from .views import DnDispatchViewSet
+from .serializers import DNListGetSerializer
+from .views import DnDispatchViewSet, DnPODViewSet
 
 
 class DnDispatchSafetyTests(TestCase):
@@ -93,6 +94,14 @@ class DnDispatchSafetyTests(TestCase):
         view.get_object = lambda: DnListModel.objects.get(id=self.dn.id)
         return view.create(request, self.dn.id)
 
+    def pod(self, data=None):
+        request = self.request(data)
+        view = DnPODViewSet()
+        view.request = request
+        view.action = 'create'
+        view.get_object = lambda: DnListModel.objects.get(id=self.dn.id)
+        return view.create(request, self.dn.id)
+
     def test_missing_dn_code_and_free_form_contact_dispatch_once(self):
         response = self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-LEFT-01'})
 
@@ -104,6 +113,17 @@ class DnDispatchSafetyTests(TestCase):
             DispatchListModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code).contact,
             'N/A',
         )
+        dispatch = DispatchListModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code)
+        self.assertEqual(dispatch.staging_bin, 'STAGE-LEFT-01')
+        self.assertEqual(
+            StagingAssignment.objects.get(openid=self.openid, reference_code=self.dn.dn_code).status,
+            StagingAssignment.ACTIVE,
+        )
+        summary = DNListGetSerializer(self.dn).data
+        self.assertEqual(summary['dispatch_driver'], 'Tom')
+        self.assertEqual(summary['staging_bin'], 'STAGE-LEFT-01')
+        self.assertEqual(summary['staging_status'], 'Occupied')
+        self.assertEqual(summary['sku_summary'], 'SKU-01 x 2')
         stock = StockListModel.objects.get(openid=self.openid, goods_code='SKU-01')
         self.assertEqual(stock.goods_qty, 1)
         self.assertEqual(stock.picked_stock, 0)
@@ -133,6 +153,50 @@ class DnDispatchSafetyTests(TestCase):
             status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
         ).exists())
         self.assertFalse(DispatchListModel.objects.filter(openid=self.openid, dn_code=self.dn.dn_code).exists())
+
+    def test_pod_records_exception_and_releases_staging(self):
+        self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-RIGHT-01'})
+
+        response = self.pod({
+            'dn_code': self.dn.dn_code,
+            'goodsData': [{
+                'goods_code': 'SKU-01',
+                'intransit_qty': 1,
+                'delivery_damage_qty': 1,
+                'delivery_note': 'One unit damaged on delivery',
+            }],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.dn.refresh_from_db()
+        detail = DnDetailModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code)
+        self.assertEqual(self.dn.dn_status, 6)
+        self.assertEqual(detail.delivery_actual_qty, 1)
+        self.assertEqual(detail.delivery_shortage_qty, 1)
+        self.assertEqual(detail.delivery_damage_qty, 1)
+        self.assertEqual(detail.delivery_note, 'One unit damaged on delivery')
+        self.assertFalse(StagingAssignment.objects.filter(
+            openid=self.openid,
+            reference_code=self.dn.dn_code,
+            status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
+        ).exists())
+
+    def test_pod_rejects_damage_above_actual_quantity(self):
+        self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-RIGHT-01'})
+
+        with self.assertRaises(APIException) as raised:
+            self.pod({
+                'dn_code': self.dn.dn_code,
+                'goodsData': [{
+                    'goods_code': 'SKU-01',
+                    'intransit_qty': 1,
+                    'delivery_damage_qty': 2,
+                    'delivery_note': 'Invalid damage quantity',
+                }],
+            })
+        self.assertIn('between 0 and actual quantity', raised.exception.detail['detail'])
+        self.dn.refresh_from_db()
+        self.assertEqual(self.dn.dn_status, 5)
 
     def test_missing_operator_is_rejected_before_inventory_change(self):
         with self.assertRaises(APIException) as raised:

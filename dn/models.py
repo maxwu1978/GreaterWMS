@@ -36,6 +36,7 @@ class DnDetailModel(models.Model):
     delivery_shortage_qty = models.BigIntegerField(default=0, verbose_name="Delivery Shortage QTY")
     delivery_more_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
     delivery_damage_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
+    delivery_note = models.TextField(default='', blank=True, verbose_name="Delivery Exception Note")
     goods_weight = models.FloatField(default=0, verbose_name="Goods Weight")
     goods_volume = models.FloatField(default=0, verbose_name="Goods Volume")
     goods_cost = models.FloatField(default=0, verbose_name="Goods Cost")

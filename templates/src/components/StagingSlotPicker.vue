@@ -1,7 +1,7 @@
 <template>
   <div class="staging-slot-picker">
     <div class="text-caption text-grey-7 q-mb-sm">
-      Select staging slots. Reserved slots can be selected when starting an unload.
+      {{ helperText }}
     </div>
     <div v-if="loading" class="text-grey q-pa-sm">Loading staging occupancy...</div>
     <div v-for="zone in zones" :key="zone.name" class="q-mb-md">
@@ -55,6 +55,11 @@ export default {
     }
   },
   computed: {
+    helperText () {
+      return this.flow === 'OUTBOUND'
+        ? 'Select the staging slot used for this shipment.'
+        : 'Select staging slots for unloading.'
+    },
     zones () {
       return ['STAGE-LEFT', 'STAGE-RIGHT'].map(name => {
         const slots = this.slots.filter(slot => slot.zone === name)

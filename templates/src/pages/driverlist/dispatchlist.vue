@@ -40,6 +40,9 @@
                <q-td key="dn_code" :props="props">
                  {{ props.row.dn_code }}
                </q-td>
+               <q-td key="staging_bin" :props="props">
+                 {{ props.row.staging_bin || '-' }}
+               </q-td>
                <q-td key="contact" :props="props">
                  {{ props.row.contact }}
                </q-td>
@@ -104,6 +107,7 @@ export default {
       columns: [
         { name: 'driver_name', required: true, label: this.$t('driver.view_dispatch.driver_name'), align: 'left', field: 'driver_name' },
         { name: 'dn_code', label: this.$t('driver.view_dispatch.dn_code'), field: 'dn_code', align: 'center' },
+        { name: 'staging_bin', label: 'Staging', field: 'staging_bin', align: 'center' },
         { name: 'contact', label: this.$t('driver.view_dispatch.contact'), field: 'contact', align: 'center' },
         { name: 'creater', label: this.$t('creater'), field: 'creater', align: 'center' },
         { name: 'create_time', label: this.$t('createtime'), field: 'create_time', align: 'center' },
@@ -148,17 +152,17 @@ export default {
         })
       }
     },
-    changePageEnter(e) {
+    changePageEnter (e) {
       if (Number(this.paginationIpt) < 1) {
-        this.current = 1;
-        this.paginationIpt = 1;
+        this.current = 1
+        this.paginationIpt = 1
       } else if (Number(this.paginationIpt) > this.max) {
-        this.current = this.max;
-        this.paginationIpt = this.max;
+        this.current = this.max
+        this.paginationIpt = this.max
       } else {
-        this.current = Number(this.paginationIpt);
+        this.current = Number(this.paginationIpt)
       }
-      this.getList();
+      this.getList()
     },
     getSearchList () {
       var _this = this

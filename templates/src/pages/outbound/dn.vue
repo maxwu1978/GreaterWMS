@@ -46,15 +46,24 @@
         </template>
         <template v-slot:body="props">
           <q-tr :props="props">
-            <q-td key="dn_code" :props="props">{{ props.row.dn_code }}</q-td>
-            <q-td key="dn_status" :props="props">{{ props.row.dn_status }}</q-td>
-            <q-td key="total_weight" :props="props">{{ props.row.total_weight.toFixed(4) }}</q-td>
-            <q-td key="total_volume" :props="props">{{ props.row.total_volume.toFixed(4) }}</q-td>
-            <q-td key="customer" :props="props">{{ props.row.customer }}</q-td>
-            <q-td key="creater" :props="props">{{ props.row.creater }}</q-td>
-            <q-td key="create_time" :props="props">{{ props.row.create_time }}</q-td>
-            <q-td key="update_time" :props="props">{{ props.row.update_time }}</q-td>
-            <q-td key="action" :props="props" style="width: 100px">
+            <q-td key="dn_code" :props="props" class="outbound-nowrap">{{ props.row.dn_code }}</q-td>
+            <q-td key="dn_status" :props="props">
+              <q-badge color="primary" outline>{{ props.row.dn_status }}</q-badge>
+            </q-td>
+            <q-td key="customer" :props="props" class="outbound-nowrap">{{ props.row.customer || '-' }}</q-td>
+            <q-td key="sku_summary" :props="props" class="outbound-nowrap">{{ props.row.sku_summary || '-' }}</q-td>
+            <q-td key="dispatch_driver" :props="props" class="outbound-nowrap">{{ props.row.dispatch_driver || '-' }}</q-td>
+            <q-td key="staging_bin" :props="props" class="outbound-nowrap">
+              <div>{{ props.row.staging_bin || '-' }}</div>
+              <div class="text-caption text-grey-6">{{ props.row.staging_status || 'Not assigned' }}</div>
+            </q-td>
+            <q-td key="delivery_exception" :props="props" class="outbound-nowrap">
+              <q-badge v-if="props.row.delivery_exception" color="negative">{{ props.row.delivery_exception }}</q-badge>
+              <span v-else class="text-grey-6">-</span>
+            </q-td>
+            <q-td key="next_step" :props="props" class="outbound-nowrap">{{ props.row.next_step }}</q-td>
+            <q-td key="update_time" :props="props" class="outbound-nowrap">{{ props.row.update_time }}</q-td>
+            <q-td key="action" :props="props" class="outbound-action-cell">
               <q-btn
                 round
                 flat
@@ -65,86 +74,34 @@
               >
                 <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('printthisdn') }}</q-tooltip>
               </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="positive"
-                icon="img:statics/outbound/order.png"
-                @click="neworderData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('confirmorder') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="positive"
-                icon="img:statics/outbound/orderrelease.png"
-                @click="orderreleaseData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('releaseorder') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="secondary"
-                icon="print"
-                @click="PrintPickingList(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('print') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="purple"
-                icon="img:statics/outbound/picked.png"
-                @click="pickedData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('confirmpicked') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="dark"
-                icon="rv_hookup"
-                @click="DispatchDN(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('dispatch') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="info"
-                icon="img:statics/outbound/receiving.png"
-                @click="PODData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('outbound.pod') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="purple"
-                icon="edit"
-                @click="editData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('edit') }}</q-tooltip>
-              </q-btn>
-              <q-btn
-                round
-                flat
-                push
-                color="dark"
-                icon="delete"
-                @click="deleteData(props.row)"
-              >
-                <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">{{ $t('delete') }}</q-tooltip>
-              </q-btn>
+              <q-btn-dropdown round flat dense color="primary" dropdown-icon="more_vert">
+                <q-list dense>
+                  <q-item v-if="canAction(props.row, 'confirm')" clickable v-close-popup @click="neworderData(props.row)">
+                    <q-item-section>{{ $t('confirmorder') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'release')" clickable v-close-popup @click="orderreleaseData(props.row)">
+                    <q-item-section>{{ $t('releaseorder') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'print')" clickable v-close-popup @click="PrintPickingList(props.row)">
+                    <q-item-section>{{ $t('print') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'pick')" clickable v-close-popup @click="pickedData(props.row)">
+                    <q-item-section>{{ $t('confirmpicked') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'dispatch')" clickable v-close-popup @click="DispatchDN(props.row)">
+                    <q-item-section>{{ $t('dispatch') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'pod')" clickable v-close-popup @click="PODData(props.row)">
+                    <q-item-section>{{ $t('outbound.pod') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'edit')" clickable v-close-popup @click="editData(props.row)">
+                    <q-item-section>{{ $t('edit') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'delete')" clickable v-close-popup @click="deleteData(props.row)">
+                    <q-item-section>{{ $t('delete') }}</q-item-section>
+                  </q-item>
+                </q-list>
+              </q-btn-dropdown>
             </q-td>
             <template v-if="props.row.transportation_fee.detail !== []">
               <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]" content-style="font-size: 12px">
@@ -795,7 +752,7 @@
       </q-card>
     </q-dialog>
     <q-dialog v-model="podForm">
-      <q-card class="shadow-24">
+      <q-card class="shadow-24 outbound-pod-card">
         <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
           <div>{{ $t('outbound.dn') }}: {{ podFormData.dn_code }}</div>
           <q-space />
@@ -806,6 +763,7 @@
         <q-card-section style="max-height: 325px; width: 400px" class="scroll">
           {{ $t('baseinfo.customer') }}: {{ podFormData.customer }}
           <div v-for="(item, index) in podFormData.goodsData" :key="index">
+            <div class="text-caption text-grey-7 q-mt-sm">{{ item.goods_code }} · Expected: {{ item.expected_delivery_qty }}</div>
             <q-input
               dense
               outlined
@@ -835,6 +793,15 @@
                 ></q-input>
               </template>
             </q-input>
+            <q-input
+              dense
+              outlined
+              square
+              v-model="item.delivery_note"
+              label="Exception note"
+              hint="Required when shortage, more quantity, or damage is recorded"
+              class="q-mt-xs"
+            />
           </div>
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
@@ -879,15 +846,16 @@ export default {
       driver_list: [],
       customer_detail: {},
       columns: [
-        { name: 'dn_code', required: true, label: this.$t('outbound.view_dn.dn_code'), align: 'left', field: 'dn_code' },
-        { name: 'dn_status', label: this.$t('outbound.view_dn.dn_status'), field: 'dn_status', align: 'center' },
-        { name: 'total_weight', label: this.$t('outbound.view_dn.total_weight'), field: 'total_weight', align: 'center' },
-        { name: 'total_volume', label: this.$t('outbound.view_dn.total_volume'), field: 'total_volume', align: 'center' },
-        { name: 'customer', label: this.$t('outbound.view_dn.customer'), field: 'customer', align: 'center' },
-        { name: 'creater', label: this.$t('creater'), field: 'creater', align: 'center' },
-        { name: 'create_time', label: this.$t('createtime'), field: 'create_time', align: 'center' },
-        { name: 'update_time', label: this.$t('updatetime'), field: 'update_time', align: 'center' },
-        { name: 'action', label: this.$t('action'), align: 'right' }
+        { name: 'dn_code', required: true, label: 'DN', align: 'left', field: 'dn_code', style: 'width: 130px', headerStyle: 'width: 130px' },
+        { name: 'dn_status', label: this.$t('outbound.view_dn.dn_status'), field: 'dn_status', align: 'center', style: 'width: 115px', headerStyle: 'width: 115px' },
+        { name: 'customer', label: this.$t('outbound.view_dn.customer'), field: 'customer', align: 'left', style: 'width: 135px', headerStyle: 'width: 135px' },
+        { name: 'sku_summary', label: 'SKU / QTY', field: 'sku_summary', align: 'left', style: 'width: 170px', headerStyle: 'width: 170px' },
+        { name: 'dispatch_driver', label: 'Driver', field: 'dispatch_driver', align: 'left', style: 'width: 100px', headerStyle: 'width: 100px' },
+        { name: 'staging_bin', label: 'Staging', field: 'staging_bin', align: 'left', style: 'width: 135px', headerStyle: 'width: 135px' },
+        { name: 'delivery_exception', label: 'Exception', field: 'delivery_exception', align: 'left', style: 'width: 105px', headerStyle: 'width: 105px' },
+        { name: 'next_step', label: 'Next Step', field: 'next_step', align: 'left', style: 'width: 155px', headerStyle: 'width: 155px' },
+        { name: 'update_time', label: this.$t('updatetime'), field: 'update_time', align: 'center', style: 'width: 155px', headerStyle: 'width: 155px' },
+        { name: 'action', label: this.$t('action'), align: 'right', style: 'width: 84px', headerStyle: 'width: 84px' }
       ],
       filter: '',
       pagination: {
@@ -971,8 +939,51 @@ export default {
     }
   },
   methods: {
+    statusLabel (status) {
+      const labels = {
+        1: this.$t('outbound.freshorder'),
+        2: this.$t('outbound.neworder'),
+        3: this.$t('outbound.pickstock'),
+        4: this.$t('outbound.pickedstock'),
+        5: this.$t('outbound.shippedstock'),
+        6: this.$t('outbound.received')
+      }
+      return labels[Number(status)] || 'N/A'
+    },
+    nextStepLabel (status) {
+      const nextSteps = {
+        1: this.$t('confirmorder'),
+        2: this.$t('releaseorder'),
+        3: this.$t('confirmpicked'),
+        4: this.$t('dispatch'),
+        5: this.$t('outbound.pod'),
+        6: 'Complete'
+      }
+      return nextSteps[Number(status)] || 'Review'
+    },
+    normalizeRows (rows) {
+      return (rows || []).map(item => {
+        const statusCode = Number(item.dn_status)
+        return {
+          ...item,
+          dn_status_code: statusCode,
+          dn_status: this.statusLabel(statusCode),
+          next_step: this.nextStepLabel(statusCode)
+        }
+      })
+    },
+    canAction (row, action) {
+      const status = Number(row.dn_status_code)
+      if (action === 'confirm' || action === 'edit' || action === 'delete') return status === 1
+      if (action === 'release') return status === 2
+      if (action === 'print') return status >= 3 && status <= 5
+      if (action === 'pick') return status === 3
+      if (action === 'dispatch') return status === 4
+      if (action === 'pod') return status === 5
+      return false
+    },
     validate1 (val) {
-      const reg = /^[1-9]\d*$/g
+      const reg = /^\d+$/g
       const check = reg.test(val)
       if (check) {
         this.isError1 = false
@@ -1005,24 +1016,7 @@ export default {
                 _this.max = Math.ceil(res.count / 30)
               }
             }
-            res.results.forEach(item => {
-              if (item.dn_status === 1) {
-                item.dn_status = _this.$t('outbound.freshorder')
-              } else if (item.dn_status === 2) {
-                item.dn_status = _this.$t('outbound.neworder')
-              } else if (item.dn_status === 3) {
-                item.dn_status = _this.$t('outbound.pickstock')
-              } else if (item.dn_status === 4) {
-                item.dn_status = _this.$t('outbound.pickedstock')
-              } else if (item.dn_status === 5) {
-                item.dn_status = _this.$t('outbound.shippedstock')
-              } else if (item.dn_status === 6) {
-                item.dn_status = _this.$t('outbound.received')
-              } else {
-                item.dn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.normalizeRows(res.results)
             res.results.forEach(item => {
               if (item.asn_status === 1) {
                 item.asn_status = _this.$t()
@@ -1072,24 +1066,7 @@ export default {
                 _this.max = Math.ceil(res.count / 30)
               }
             }
-            res.results.forEach(item => {
-              if (item.dn_status === 1) {
-                item.dn_status = _this.$t('outbound.freshorder')
-              } else if (item.dn_status === 2) {
-                item.dn_status = _this.$t('outbound.neworder')
-              } else if (item.dn_status === 3) {
-                item.dn_status = _this.$t('outbound.pickstock')
-              } else if (item.dn_status === 4) {
-                item.dn_status = _this.$t('outbound.pickedstock')
-              } else if (item.dn_status === 5) {
-                item.dn_status = _this.$t('outbound.shippedstock')
-              } else if (item.dn_status === 6) {
-                item.dn_status = _this.$t('outbound.received')
-              } else {
-                item.dn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.normalizeRows(res.results)
             _this.customer_list = res.customer_list
             _this.customer_list1 = res.customer_list
             _this.pathname_previous = res.previous
@@ -1111,24 +1088,7 @@ export default {
         getauth(_this.pathname_previous, {})
           .then(res => {
             _this.table_list = []
-            res.results.forEach(item => {
-              if (item.dn_status === 1) {
-                item.dn_status = _this.$t('outbound.freshorder')
-              } else if (item.dn_status === 2) {
-                item.dn_status = _this.$t('outbound.neworder')
-              } else if (item.dn_status === 3) {
-                item.dn_status = _this.$t('outbound.pickstock')
-              } else if (item.dn_status === 4) {
-                item.dn_status = _this.$t('outbound.pickedstock')
-              } else if (item.dn_status === 5) {
-                item.dn_status = _this.$t('outbound.shippedstock')
-              } else if (item.dn_status === 6) {
-                item.dn_status = _this.$t('outbound.received')
-              } else {
-                item.dn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.normalizeRows(res.results)
             _this.customer_list = res.customer_list
             _this.customer_list1 = res.customer_list
             _this.pathname_previous = res.previous
@@ -1150,24 +1110,7 @@ export default {
         getauth(_this.pathname_next, {})
           .then(res => {
             _this.table_list = []
-            res.results.forEach(item => {
-              if (item.dn_status === 1) {
-                item.dn_status = _this.$t('outbound.freshorder')
-              } else if (item.dn_status === 2) {
-                item.dn_status = _this.$t('outbound.neworder')
-              } else if (item.dn_status === 3) {
-                item.dn_status = _this.$t('outbound.pickstock')
-              } else if (item.dn_status === 4) {
-                item.dn_status = _this.$t('outbound.pickedstock')
-              } else if (item.dn_status === 5) {
-                item.dn_status = _this.$t('outbound.shippedstock')
-              } else if (item.dn_status === 6) {
-                item.dn_status = _this.$t('outbound.received')
-              } else {
-                item.dn_status = 'N/A'
-              }
-              _this.table_list.push(item)
-            })
+            _this.table_list = _this.normalizeRows(res.results)
             _this.customer_list = res.customer_list
             _this.customer_list1 = res.customer_list
             _this.pathname_previous = res.previous
@@ -1486,25 +1429,32 @@ export default {
     },
     orderreleaseAllData () {
       var _this = this
-      postauth(_this.pathname + 'orderrelease/', {})
-        .then(res => {
-          _this.table_list = []
-          _this.getList()
-          if (!res.detail) {
-            _this.$q.notify({
-              message: 'Success Release All Order',
-              icon: 'check',
-              color: 'green'
-            })
-          }
-        })
-        .catch(err => {
-          _this.$q.notify({
-            message: err.detail,
-            icon: 'close',
-            color: 'negative'
+      _this.$q.dialog({
+        title: 'Release ready orders',
+        message: 'Release all confirmed orders into picking. Continue?',
+        cancel: true,
+        persistent: true
+      }).onOk(() => {
+        postauth(_this.pathname + 'orderrelease/', {})
+          .then(res => {
+            _this.table_list = []
+            _this.getList()
+            if (!res.detail) {
+              _this.$q.notify({
+                message: 'Ready orders released',
+                icon: 'check',
+                color: 'green'
+              })
+            }
           })
-        })
+          .catch(err => {
+            _this.$q.notify({
+              message: err.detail,
+              icon: 'close',
+              color: 'negative'
+            })
+          })
+      })
     },
     orderreleaseDataSubmit () {
       var _this = this
@@ -1573,8 +1523,8 @@ export default {
       var _this = this
       update(() => {
         const needle = val.toLocaleLowerCase()
-        const data_filter = _this.customer_list1
-        _this.customer_list = data_filter.filter(v => v.toLocaleLowerCase().indexOf(needle) > -1)
+        const dataFilter = _this.customer_list1
+        _this.customer_list = dataFilter.filter(v => v.toLocaleLowerCase().indexOf(needle) > -1)
       })
     },
     PrintPickingList (e) {
@@ -1702,25 +1652,24 @@ export default {
         return
       }
       update(() => {
-        const needle = val.toLowerCase()
-        getauth('driver/?driver_name__icontains=' + needle)
-          .then(res => {
-            const drivernamelist = []
-            for (let i = 0; i < res.results.length; i++) {
-              drivernamelist.push(res.results[i].driver_name)
-            }
-            LocalStorage.set('driver_name_list', drivernamelist)
-            _this.driver_options = LocalStorage.getItem('driver_name_list')
-            _this.$forceUpdate()
-          })
-          .catch(err => {
-            _this.$q.notify({
-              message: err.detail,
-              icon: 'close',
-              color: 'negative'
-            })
-          })
+        _this.loadDispatchDriverOptions(val)
       })
+    },
+    loadDispatchDriverOptions (needle = '') {
+      const query = needle ? '?driver_name__icontains=' + encodeURIComponent(needle) : '?page=1'
+      getauth('driver/' + query)
+        .then(res => {
+          const driverNames = (res.results || []).map(item => item.driver_name).filter(Boolean)
+          LocalStorage.set('driver_name_list', driverNames)
+          this.driver_options = driverNames
+        })
+        .catch(err => {
+          this.$q.notify({
+            message: err.detail,
+            icon: 'close',
+            color: 'negative'
+          })
+        })
     },
     DispatchDN (e) {
       var _this = this
@@ -1734,6 +1683,7 @@ export default {
         _this.dispatchFormData.dn_code = e.dn_code
         _this.dispatchFormData.staging_bin = ''
         _this.dispatchid = e.id
+        _this.loadDispatchDriverOptions()
         _this.dispatchForm = true
       }
     },
@@ -1779,7 +1729,13 @@ export default {
         getauth(_this.pathname + 'detail/?dn_code=' + e.dn_code).then(res => {
           _this.podForm = true
           _this.podid = e.id
-          _this.podFormData.goodsData = res.results
+          _this.podFormData.goodsData = (res.results || []).map(item => ({
+            ...item,
+            expected_delivery_qty: Number(item.intransit_qty || 0),
+            intransit_qty: Number(item.intransit_qty || 0),
+            delivery_damage_qty: Number(item.delivery_damage_qty || 0),
+            delivery_note: item.delivery_note || ''
+          }))
         })
       }
     },
@@ -1795,6 +1751,20 @@ export default {
     },
     PODDataSubmit () {
       var _this = this
+      const invalidExceptionNotes = (_this.podFormData.goodsData || []).some(item => {
+        const expected = Number(item.expected_delivery_qty || 0)
+        const actual = Number(item.intransit_qty)
+        const damage = Number(item.delivery_damage_qty || 0)
+        return (actual !== expected || damage > 0) && !String(item.delivery_note || '').trim()
+      })
+      if (invalidExceptionNotes) {
+        _this.$q.notify({
+          message: 'Add an exception note for shortage, more quantity, or damage',
+          icon: 'close',
+          color: 'negative'
+        })
+        return
+      }
       if (!(_this.isError1 || _this.isError2)) {
         postauth(_this.pathname + 'pod/' + _this.podid + '/', _this.podFormData)
           .then(res => {
@@ -1803,7 +1773,7 @@ export default {
             _this.getList()
             if (!res.detail) {
               _this.$q.notify({
-                message: 'Success Dispatch',
+                message: 'Proof of delivery recorded',
                 icon: 'check',
                 color: 'green'
               })
@@ -1857,3 +1827,18 @@ export default {
   destroyed () {}
 }
 </script>
+
+<style scoped>
+.outbound-nowrap {
+  white-space: nowrap;
+}
+
+.outbound-action-cell {
+  white-space: nowrap;
+  min-width: 84px;
+}
+
+.outbound-pod-card {
+  min-width: 500px;
+}
+</style>

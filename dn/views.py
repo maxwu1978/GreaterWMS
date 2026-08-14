@@ -34,7 +34,7 @@ from .files import FileListRenderCN, FileListRenderEN, FileDetailRenderCN, FileD
 from rest_framework.settings import api_settings
 from staff.models import ListModel as staff
 from staging.models import StagingAssignment
-from staging.services import StagingError, release_staging_slot, reserve_staging_slot
+from staging.services import StagingError, occupy_staging_slot, release_staging_slot, reserve_staging_slot
 
 class DnListViewSet(viewsets.ModelViewSet):
     """
@@ -1979,10 +1979,11 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                 driverdispatch.objects.create(openid=self.request.auth.openid,
                                               driver_name=driver.driver_name,
                                               dn_code=dn_code,
+                                              staging_bin=str(staging_bin),
                                               contact=str(driver.contact or ''),
                                               creater=str(operator.staff_name))
                 qs.save()
-                release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
+                occupy_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
                 return Response({"detail": "success"}, status=200)
             else:
                 raise APIException({"detail": "Driver Does Not Exists"})
@@ -2017,72 +2018,70 @@ class DnPODViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.dn_status != 5:
             raise APIException({"detail": "This DN Status Not Intran-Sit"})
-        else:
-            qs.dn_status = 6
-            data = self.request.data
-            for i in range(len(data['goodsData'])):
-                delivery_damage_qty = data['goodsData'][i].get('delivery_damage_qty')
-                delivery_actual_qty = data['goodsData'][i].get('intransit_qty')
-                if delivery_actual_qty < 0:
-                    raise APIException({"detail": "Delivery Actual QTY Must >= 0"})
-                else:
-                    if delivery_damage_qty < 0:
-                        raise APIException({"detail": "Delivery Damage QTY Must >= 0"})
-            dn_detail = DnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                     dn_code=str(data['dn_code']),
-                                                     dn_status=5, customer=qs.customer,
-                                                     )
-            for j in range(len(data['goodsData'])):
-                delivery_damage_qty = data['goodsData'][j].get('delivery_damage_qty')
-                delivery_actual_qty = data['goodsData'][j].get('intransit_qty')
-                goods_code = data['goodsData'][j].get('goods_code')
-                if delivery_damage_qty > 0:
-                    goods_detail = dn_detail.filter(goods_code=goods_code).first()
-                    if delivery_actual_qty > goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.delivery_more_qty = delivery_actual_qty - goods_detail.intransit_qty
-                        goods_detail.delivery_damage_qty = delivery_damage_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    elif delivery_actual_qty < goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.delivery_shortage_qty = goods_detail.intransit_qty - delivery_actual_qty
-                        goods_detail.delivery_damage_qty = delivery_damage_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    elif delivery_actual_qty == goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.delivery_damage_qty = delivery_damage_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    else:
-                        continue
-                    goods_detail.save()
-                elif delivery_damage_qty == 0:
-                    goods_detail = dn_detail.filter(goods_code=goods_code).first()
-                    if delivery_actual_qty > goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.delivery_more_qty = delivery_actual_qty - goods_detail.intransit_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    elif delivery_actual_qty < goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.delivery_shortage_qty = goods_detail.intransit_qty - delivery_actual_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    elif delivery_actual_qty == goods_detail.intransit_qty:
-                        goods_detail.delivery_actual_qty = delivery_actual_qty
-                        goods_detail.intransit_qty = 0
-                        goods_detail.dn_status = 6
-                    else:
-                        continue
-                    goods_detail.save()
-            qs.save()
-            return Response({"detail": "success"}, status=200)
+        data = self.request.data
+        dn_code = str(data.get('dn_code') or qs.dn_code)
+        if dn_code != str(qs.dn_code):
+            raise APIException({"detail": "DN code does not match the selected delivery note"})
+        raw_goods = data.get('goodsData') or []
+        if not raw_goods:
+            raise APIException({"detail": "Delivery details are required"})
+
+        dn_detail = list(DnDetailModel.objects.select_for_update().filter(
+            openid=self.request.auth.openid,
+            dn_code=dn_code,
+            dn_status=5,
+            customer=qs.customer,
+            is_delete=False,
+        ))
+        details_by_code = {str(item.goods_code): item for item in dn_detail}
+        if len(details_by_code) != len(dn_detail):
+            raise APIException({"detail": "Duplicate goods codes require a separate delivery line"})
+        submitted_codes = set()
+        updates = []
+        for item in raw_goods:
+            goods_code = str(item.get('goods_code') or '').strip()
+            if not goods_code or goods_code in submitted_codes:
+                raise APIException({"detail": "Each goods code must be submitted once"})
+            if goods_code not in details_by_code:
+                raise APIException({"detail": "Goods code does not belong to this delivery note: %s" % goods_code})
+            submitted_codes.add(goods_code)
+            try:
+                delivery_actual_qty = int(item.get('intransit_qty'))
+                delivery_damage_qty = int(item.get('delivery_damage_qty') or 0)
+            except (TypeError, ValueError):
+                raise APIException({"detail": "Delivery quantities must be integers"})
+            if delivery_actual_qty < 0:
+                raise APIException({"detail": "Delivery Actual QTY Must >= 0"})
+            if delivery_damage_qty < 0 or delivery_damage_qty > delivery_actual_qty:
+                raise APIException({"detail": "Delivery Damage QTY must be between 0 and actual quantity"})
+            expected_qty = int(details_by_code[goods_code].intransit_qty or 0)
+            delivery_note = str(item.get('delivery_note') or '').strip()
+            if (delivery_actual_qty != expected_qty or delivery_damage_qty > 0) and not delivery_note:
+                raise APIException({"detail": "An exception note is required for %s" % goods_code})
+            updates.append((details_by_code[goods_code], delivery_actual_qty, delivery_damage_qty, expected_qty, delivery_note))
+
+        missing_codes = set(details_by_code) - submitted_codes
+        if missing_codes:
+            raise APIException({"detail": "Missing delivery details for: %s" % ', '.join(sorted(missing_codes))})
+
+        for goods_detail, actual_qty, damage_qty, expected_qty, note in updates:
+            goods_detail.delivery_actual_qty = actual_qty
+            goods_detail.delivery_shortage_qty = max(expected_qty - actual_qty, 0)
+            goods_detail.delivery_more_qty = max(actual_qty - expected_qty, 0)
+            goods_detail.delivery_damage_qty = damage_qty
+            goods_detail.delivery_note = note
+            goods_detail.intransit_qty = 0
+            goods_detail.dn_status = 6
+            goods_detail.save()
+        qs.dn_status = 6
+        qs.save()
+        release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
+        return Response({"detail": "success"}, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileListRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

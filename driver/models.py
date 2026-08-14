@@ -19,6 +19,7 @@ class ListModel(models.Model):
 class DispatchListModel(models.Model):
     driver_name = models.CharField(max_length=255, verbose_name="Driver Name")
     dn_code = models.CharField(max_length=255, verbose_name="DN Code")
+    staging_bin = models.CharField(default='', max_length=255, blank=True, verbose_name="Staging Location")
     contact = models.CharField(default='', max_length=255, blank=True, verbose_name="Contact Number")
     creater = models.CharField(max_length=255, verbose_name="Who Created")
     openid = models.CharField(max_length=255, verbose_name="Openid")
