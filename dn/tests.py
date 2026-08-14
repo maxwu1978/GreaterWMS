@@ -382,3 +382,33 @@ class OutboundPayloadValidationTests(TestCase):
             })
 
         self.assertEqual(raised.exception.detail['goods_qty'][0], 'Entry 0 must be an integer.')
+
+    def test_sn_validation_supports_new_detail_before_detail_row_exists(self):
+        openid = 'dn-sn-detail-create-test'
+        dn = DnListModel.objects.create(
+            dn_code='DN-SN-CREATE-01',
+            dn_status=1,
+            picking_mode=DnListModel.SN,
+            customer='Customer A',
+            creater='tester',
+            bar_code='DN-SN-CREATE-BAR',
+            openid=openid,
+        )
+        AsnSerialRecord.objects.create(
+            openid=openid,
+            asn_code='ASN-SN-CREATE-01',
+            goods_code='SKU-SN-CREATE',
+            scanned_goods_code='SKU-SN-CREATE',
+            serial_number='SN-CREATE-001',
+            status=AsnSerialRecord.ACCEPTED,
+            is_received=True,
+        )
+
+        _validate_outbound_serial_request(
+            openid,
+            dn,
+            ['SKU-SN-CREATE'],
+            [1],
+            [['SN-CREATE-001']],
+            expected_serials_by_goods={'SKU-SN-CREATE': ['SN-CREATE-001']},
+        )

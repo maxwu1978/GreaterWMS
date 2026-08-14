@@ -98,7 +98,14 @@ def _requested_serials_for_line(data, index):
     return normalized
 
 
-def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, serial_numbers):
+def _validate_outbound_serial_request(
+    openid,
+    dn,
+    goods_codes,
+    quantities,
+    serial_numbers,
+    expected_serials_by_goods=None,
+):
     if dn.picking_mode != DnListModel.SN:
         return
     if len(serial_numbers) != len(goods_codes):
@@ -110,9 +117,12 @@ def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, seria
         detail = DnDetailModel.objects.filter(
             openid=openid, dn_code=dn.dn_code, goods_code=goods_code, is_delete=False,
         ).first()
-        if detail is None:
+        if detail is None and expected_serials_by_goods is None:
             raise APIException({'detail': 'Outbound SKU does not exist: %s' % goods_code})
-        expected = set(detail.requested_serials or [])
+        expected = set(
+            detail.requested_serials if detail is not None
+            else expected_serials_by_goods.get(goods_code, [])
+        )
         if len(values) != int(quantity):
             raise APIException({'detail': 'SN count must equal quantity for %s' % goods_code})
         if not set(values).issubset(expected):
@@ -561,6 +571,10 @@ class DnDetailViewSet(viewsets.ModelViewSet):
                     goods_codes,
                     quantities,
                     serial_numbers,
+                    expected_serials_by_goods={
+                        goods_code: values
+                        for goods_code, values in zip(goods_codes, serial_numbers)
+                    },
                 )
                 staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                                   id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
