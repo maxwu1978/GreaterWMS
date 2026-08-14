@@ -1,1 +1,1 @@
-https://greaterwms-v2-test3-sn.onrender.com
+https://api.maxsmartwms.online
