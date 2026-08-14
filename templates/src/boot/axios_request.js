@@ -64,7 +64,7 @@ axiosInstanceAuth.interceptors.request.use(
         config.headers.patch['Content-Type'] = 'application/json, charset="utf-8"'
         config.headers.put['Content-Type'] = 'application/json, charset="utf-8"'
       }
-      config.headers.token = LocalStorage.getItem('openid')
+      config.headers.token = config.headers.token || LocalStorage.getItem('openid')
       config.headers.operator = LocalStorage.getItem('login_id')
       config.headers.language = lang
       if (config.method === 'post' || config.method === 'patch' || config.method === 'put' || config.method === 'delete') {
@@ -211,7 +211,7 @@ axiosInstanceAuthScan.interceptors.request.use(
       config.headers.post['Content-Type'] = 'application/json, charset="utf-8"'
       config.headers.patch['Content-Type'] = 'application/json, charset="utf-8"'
       config.headers.put['Content-Type'] = 'application/json, charset="utf-8"'
-      config.headers.token = LocalStorage.getItem('openid')
+      config.headers.token = config.headers.token || LocalStorage.getItem('openid')
       config.headers.operator = LocalStorage.getItem('login_id')
       config.headers.language = lang
       if (config.method === 'post' || config.method === 'patch' || config.method === 'put' || config.method === 'delete') {
@@ -598,8 +598,8 @@ axiosFile.interceptors.response.use(
   }
 )
 
-function getauth (url) {
-  return axiosInstanceAuth.get(url)
+function getauth (url, config = {}) {
+  return axiosInstanceAuth.get(url, config)
 }
 
 function get (url) {

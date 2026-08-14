@@ -7,6 +7,7 @@ from django.utils.decorators import method_decorator
 from django.utils import timezone
 from django.contrib.auth.models import User
 from staff.models import ListModel as staff
+from staff.auth import issue_session_token
 import json, random, os
 from django.conf import settings
 from scanner.models import ListModel as scanner
@@ -109,6 +110,10 @@ def register(request, *args, **kwargs):
                                                  openid=transaction_code)
                             user_id = staff.objects.filter(openid=transaction_code, staff_name=str(data['name']),
                                                  staff_type='Admin', check_code=check_code).first().id
+                            api_token = issue_session_token(
+                                staff.objects.get(id=user_id),
+                                token_kind='admin',
+                            )
                             folder = os.path.exists(os.path.join(settings.BASE_DIR, 'media/' + transaction_code))
                             if not folder:
                                 os.makedirs(os.path.join(settings.BASE_DIR, 'media/' + transaction_code))
@@ -117,7 +122,9 @@ def register(request, *args, **kwargs):
                                 os.makedirs(os.path.join(settings.BASE_DIR, 'media/' + transaction_code + "/darwin"))
                             ret = FBMsg.ret()
                             ret['ip'] = ip
-                            data['openid'] = transaction_code
+                            data['openid'] = api_token
+                            data['token'] = api_token
+                            data['tenant_openid'] = transaction_code
                             data['name'] = str(data['name'])
                             data['user_id'] = user_id
                             data.pop('password1', '')

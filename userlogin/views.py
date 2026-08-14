@@ -6,6 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from userprofile.models import Users
 from staff.models import ListModel as staff
+from staff.auth import issue_session_token
 
 @csrf_exempt
 def login(request, *args, **kwargs):
@@ -40,13 +41,22 @@ def login(request, *args, **kwargs):
             staff_detail = staff.objects.filter(
                 openid=user_detail.openid,
                 staff_name=str(user_detail.name),
+                staff_type__iexact='Admin',
+                is_delete=False,
             ).first() if user_detail else None
             if user_detail is None or staff_detail is None:
                 return JsonResponse({'detail': 'User profile is not configured'}, status=500)
+            api_token = issue_session_token(staff_detail, token_kind='admin')
             data = {
                 "name": data['name'],
-                'openid': user_detail.openid,
+                # ``openid`` is retained as the frontend's historical token
+                # field; it now contains an opaque session token, not the
+                # tenant identifier.
+                'openid': api_token,
+                'token': api_token,
+                'tenant_openid': user_detail.openid,
                 "user_id": staff_detail.id,
+                "staff_type": staff_detail.staff_type,
             }
             ret = FBMsg.ret()
             ret['ip'] = ip

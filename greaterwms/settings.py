@@ -41,6 +41,12 @@ SECRET_KEY = configured_secret_key or get_random_secret_key()
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _env_bool('DEBUG', default=False)
 
+# Tenant openid values identify a warehouse but are not credentials.  This
+# switch exists only for a controlled migration and is intentionally off by
+# default.
+ALLOW_LEGACY_OPENID_AUTH = _env_bool('ALLOW_LEGACY_OPENID_AUTH', default=False)
+AUTH_SESSION_TTL_DAYS = max(1, int(os.environ.get('AUTH_SESSION_TTL_DAYS', '30')))
+
 ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', [
     'localhost',
     '127.0.0.1',

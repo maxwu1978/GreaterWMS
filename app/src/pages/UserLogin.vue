@@ -193,17 +193,28 @@ export default defineComponent({
               message: _this.$t('notice.mobile_userlogin.notice4')
             })
           } else {
+            const adminToken = localStorage.getItem('admin_token')
+            if (!adminToken) {
+              _this.$q.notify({
+                type: 'negative',
+                message: 'Please sign in as administrator before selecting a staff account'
+              })
+              return
+            }
             _this.$axios.get(
               _this.baseurl + '/staff/?staff_name=' + _this.staff_name + '&check_code=' + _this.check_code,
               {
                 headers: {
                   "Content-Type": 'application/json, charset="utf-8"',
-                  "token" : _this.openid,
+                  "token" : adminToken,
                   "language" : _this.lang
                 }
               })
               .then((res) => {
-                if (res.data.count === 1) {
+                if (res.data.count === 1 && res.data.auth_token) {
+                  _this.$store.commit('settings/Openid', res.data.auth_token)
+                  localStorage.setItem('openid', res.data.auth_token)
+                  localStorage.removeItem('admin_token')
                   _this.$store.commit('loginauth/loginAuth', '1')
                   _this.$store.commit('loginauth/loginName',  _this.staff_name)
                   _this.$store.commit('loginauth/loginId', res.data.results[0].id)
@@ -245,7 +256,11 @@ export default defineComponent({
           _this.$axios.post(_this.baseurl + '/login/', _this.adminlogin)
             .then((res) => {
               if (res.data.code === '200') {
-                _this.$store.commit('settings/Openid', res.data.data.openid)
+                const adminToken = res.data.data.token || res.data.data.openid
+                _this.$store.commit('settings/Openid', adminToken)
+                localStorage.setItem('openid', adminToken)
+                localStorage.setItem('admin_token', adminToken)
+                localStorage.setItem('tenant_openid', res.data.data.tenant_openid || res.data.data.openid)
                 _this.$store.commit('loginauth/loginAuth', '1')
                 _this.$store.commit('loginauth/loginName', res.data.data.name)
                 _this.$store.commit('loginauth/loginId', res.data.data.user_id)

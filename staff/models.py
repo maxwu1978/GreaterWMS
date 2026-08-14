@@ -16,6 +16,31 @@ class ListModel(models.Model):
         verbose_name_plural = "Staff"
         ordering = ['staff_name']
 
+
+class StaffSessionToken(models.Model):
+    """Opaque API session bound to exactly one staff record."""
+
+    TOKEN_KINDS = (
+        ('admin', 'Administrator'),
+        ('staff', 'Staff'),
+    )
+
+    staff_id = models.BigIntegerField(db_index=True)
+    openid = models.CharField(max_length=255, db_index=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    token_kind = models.CharField(max_length=16, choices=TOKEN_KINDS, default='staff')
+    is_revoked = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    create_time = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'staff_session_token'
+        indexes = [
+            models.Index(fields=['staff_id', 'is_revoked']),
+            models.Index(fields=['openid', 'is_revoked']),
+        ]
+
 class TypeListModel(models.Model):
     staff_type = models.CharField(max_length=255, verbose_name="Staff Type")
     openid = models.CharField(max_length=255, verbose_name="Openid")

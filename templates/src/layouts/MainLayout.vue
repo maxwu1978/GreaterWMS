@@ -829,16 +829,31 @@ export default {
               color: 'negative'
             })
           } else {
-            LocalStorage.set('openid', _this.openid)
+            var adminToken = LocalStorage.getItem('admin_token')
+            if (!adminToken) {
+              _this.$q.notify({
+                message: 'Please sign in as administrator before selecting a staff account',
+                icon: 'close',
+                color: 'negative'
+              })
+              return
+            }
             SessionStorage.set('axios_check', 'false')
             getauth(
               'staff/?staff_name=' +
                 _this.login_name +
                 '&check_code=' +
-                _this.check_code
+                _this.check_code,
+              {
+                headers: {
+                  token: adminToken
+                }
+              }
             )
               .then((res) => {
-                if (res.count === 1) {
+                if (res.count === 1 && res.auth_token) {
+                  LocalStorage.set('openid', res.auth_token)
+                  LocalStorage.remove('admin_token')
                   _this.authin = '1'
                   _this.login = false
                   _this.login_id = res.results[0].id
@@ -887,14 +902,17 @@ export default {
           post('login/', _this.adminlogin)
             .then((res) => {
               if (res.code === '200') {
+                var adminToken = res.data.token || res.data.openid
                 _this.authin = '1'
                 _this.login = false
                 _this.admin = false
-                _this.openid = res.data.openid
+                _this.openid = res.data.tenant_openid || res.data.openid
                 _this.login_name = res.data.name
                 _this.login_id = res.data.user_id
                 LocalStorage.set('auth', '1')
-                LocalStorage.set('openid', res.data.openid)
+                LocalStorage.set('openid', adminToken)
+                LocalStorage.set('admin_token', adminToken)
+                LocalStorage.set('tenant_openid', res.data.tenant_openid || res.data.openid)
                 LocalStorage.set('login_name', _this.login_name)
                 LocalStorage.set('login_id', _this.login_id)
                 LocalStorage.set('login_mode', 'admin')
@@ -929,6 +947,9 @@ export default {
       _this.authin = '0'
       _this.login_name = ''
       LocalStorage.remove('auth')
+      LocalStorage.remove('openid')
+      LocalStorage.remove('admin_token')
+      LocalStorage.remove('tenant_openid')
       SessionStorage.remove('axios_check')
       LocalStorage.set('login_name', '')
       LocalStorage.set('login_id', '')
@@ -951,12 +972,15 @@ export default {
       post('register/', _this.registerform)
         .then((res) => {
           if (res.code === '200') {
+            var adminToken = res.data.token || res.data.openid
             _this.register = false
-            _this.openid = res.data.openid
+            _this.openid = res.data.tenant_openid || res.data.openid
             _this.login_name = _this.registerform.name
             _this.login_id = res.data.user_id
             _this.authin = '1'
-            LocalStorage.set('openid', res.data.openid)
+            LocalStorage.set('openid', adminToken)
+            LocalStorage.set('admin_token', adminToken)
+            LocalStorage.set('tenant_openid', res.data.tenant_openid || res.data.openid)
             LocalStorage.set('login_name', _this.registerform.name)
             LocalStorage.set('login_id', _this.login_id)
             LocalStorage.set('auth', '1')
@@ -1003,12 +1027,13 @@ export default {
           if (res.count === 1) {
             _this.openid = res.results[0].openid
             _this.warehouse_name = res.results[0].warehouse_name
-            LocalStorage.set('openid', _this.openid)
+            LocalStorage.set('tenant_openid', _this.openid)
           } else {
             _this.warehouseOptions = res.results
             if (LocalStorage.has('openid')) {
+              var selectedTenant = LocalStorage.getItem('tenant_openid')
               _this.warehouseOptions.forEach((item, index) => {
-                if (item.openid === LocalStorage.getItem('openid')) {
+                if (item.openid === (selectedTenant || LocalStorage.getItem('openid'))) {
                   _this.warehouse_name = item.warehouse_name
                 }
               })
@@ -1028,7 +1053,7 @@ export default {
       var _this = this
       _this.warehouse_name = _this.warehouseOptions[e].warehouse_name
       _this.openid = _this.warehouseOptions[e].openid
-      LocalStorage.set('openid', _this.openid)
+      LocalStorage.set('tenant_openid', _this.openid)
       LocalStorage.set('staff_type', 'Admin')
       _this.login_name = ''
       LocalStorage.set('login_name', '')
@@ -1057,7 +1082,7 @@ export default {
   created () {
     var _this = this
     if (LocalStorage.has('openid')) {
-      _this.openid = LocalStorage.getItem('openid')
+      _this.openid = LocalStorage.getItem('tenant_openid') || LocalStorage.getItem('openid')
       _this.activeTab = LocalStorage.getItem('login_mode') || 'admin'
       _this.admin = _this.activeTab === 'admin'
     } else {
