@@ -7,10 +7,11 @@ from rest_framework.exceptions import ValidationError
 from asn.models import AsnDetailModel, AsnListModel
 from binset.models import ListModel as BinModel
 from driver.models import ListModel as DriverModel
+from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from goods.models import ListModel as GoodsModel
 from stock.models import StockListModel
 
-from .models import ReceivingRecord
+from .models import ReceivingRecord, ReceivingSerial
 from .views import (
     ReceivingExceptionResolveView,
     ReceivingPutawayView,
@@ -198,3 +199,119 @@ class ReceivingFlowTests(TestCase):
                 'receipt_no': 'RC-003',
                 'asn_code': 'ASN-BEFORE-001',
             })
+
+    def test_canceled_outbound_return_reenters_inventory_through_receiving(self):
+        DnListModel.objects.create(
+            dn_code='DN-RETURN-001',
+            dn_status=7,
+            customer='Customer A',
+            creater='tester',
+            bar_code='DN-RETURN-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        DnDetailModel.objects.create(
+            dn_code='DN-RETURN-001',
+            dn_status=7,
+            customer='Customer A',
+            goods_code=self.goods_code,
+            goods_desc='Receiving test SKU',
+            goods_qty=2,
+            cancelled_qty=2,
+            creater='tester',
+            openid=self.openid,
+        )
+        created = self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-RETURN-001',
+            'customer': 'Customer A',
+            'source_type': 'OUTBOUND_RETURN',
+            'source_reference': 'DN-RETURN-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        self.assertEqual(created.status_code, 201)
+        self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-RETURN-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        putaway = self.call(ReceivingPutawayView, {
+            'receipt_no': 'RC-RETURN-001',
+            'goods_code': self.goods_code,
+            'quantity': 2,
+            'bin_name': 'A1-01',
+            'driver_name': 'Tom',
+        })
+        self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_COMPLETE)
+        self.assertEqual(
+            StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code).onhand_stock,
+            2,
+        )
+
+    def test_outbound_return_allows_released_serial_to_be_received_again(self):
+        self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-SN-HISTORY-001',
+            'customer': 'Customer A',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+        })
+        self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-SN-HISTORY-001',
+            'details': [{
+                'goods_code': self.goods_code,
+                'actual_qty': 1,
+                'serials': ['SN-RETURN-001'],
+            }],
+        })
+        self.assertTrue(ReceivingSerial.objects.filter(
+            serial_number='SN-RETURN-001',
+            status=ReceivingSerial.ACCEPTED,
+        ).exists())
+
+        DnListModel.objects.create(
+            dn_code='DN-RETURN-SN-001',
+            dn_status=7,
+            customer='Customer A',
+            creater='tester',
+            bar_code='DN-RETURN-SN-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        DnDetailModel.objects.create(
+            dn_code='DN-RETURN-SN-001',
+            dn_status=7,
+            customer='Customer A',
+            goods_code=self.goods_code,
+            goods_desc='Receiving test SKU',
+            goods_qty=1,
+            cancelled_qty=1,
+            creater='tester',
+            openid=self.openid,
+        )
+        DnSerialAllocation.objects.create(
+            openid=self.openid,
+            dn_code='DN-RETURN-SN-001',
+            goods_code=self.goods_code,
+            serial_number='SN-RETURN-001',
+            status=DnSerialAllocation.RELEASED,
+            created_by='tester',
+        )
+        created = self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-RETURN-SN-001',
+            'customer': 'Customer A',
+            'source_type': 'OUTBOUND_RETURN',
+            'source_reference': 'DN-RETURN-SN-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+        })
+        self.assertEqual(created.status_code, 201)
+        qc = self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-RETURN-SN-001',
+            'details': [{
+                'goods_code': self.goods_code,
+                'actual_qty': 1,
+                'serials': ['SN-RETURN-001'],
+            }],
+        })
+        self.assertEqual(qc.data['status'], ReceivingRecord.PUTAWAY_PENDING)
+        self.assertTrue(ReceivingSerial.objects.filter(
+            detail__receipt__receipt_no='RC-RETURN-SN-001',
+            serial_number='SN-RETURN-001',
+            status=ReceivingSerial.ACCEPTED,
+        ).exists())

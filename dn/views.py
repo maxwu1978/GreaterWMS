@@ -2474,12 +2474,20 @@ class DnCancelInTransitViewSet(viewsets.ModelViewSet):
         qs.canceled_by = str(getattr(request.auth, 'staff_name', '') or request.META.get('HTTP_OPERATOR', ''))
         qs.canceled_at = now
         qs.save(update_fields=['dn_status', 'cancellation_note', 'canceled_by', 'canceled_at', 'update_time'])
-        DnDetailModel.objects.filter(
+        canceled_details = list(DnDetailModel.objects.select_for_update().filter(
             openid=request.auth.openid,
             dn_code=qs.dn_code,
             dn_status=5,
             is_delete=False,
-        ).update(dn_status=7, update_time=now)
+        ))
+        canceled_quantities = {}
+        for detail in canceled_details:
+            canceled_qty = max(int(detail.intransit_qty or 0), 0)
+            canceled_quantities[detail.goods_code] = canceled_qty
+            detail.cancelled_qty = canceled_qty
+            detail.intransit_qty = 0
+            detail.dn_status = 7
+            detail.save(update_fields=['cancelled_qty', 'intransit_qty', 'dn_status', 'update_time'])
         _mark_serials(
             request.auth.openid,
             qs.dn_code,
@@ -2488,7 +2496,12 @@ class DnCancelInTransitViewSet(viewsets.ModelViewSet):
         )
         _cancel_outbound_transport(request, qs, note)
         released = release_staging_slot(request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
-        return Response({'detail': 'success', 'released': released}, status=200)
+        return Response({
+            'detail': 'success',
+            'released': released,
+            'cancelled_qty': canceled_quantities,
+            'inventory_action': 'Return goods must be processed through Receiving, QC and Putaway.',
+        }, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileListRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

@@ -220,6 +220,7 @@ class DnDispatchSafetyTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['released'], 1)
+        self.assertEqual(response.data['cancelled_qty'], {'SKU-01': 2})
         self.dn.refresh_from_db()
         self.assertEqual(self.dn.dn_status, 7)
         self.assertEqual(self.dn.cancellation_note, 'Carrier returned before delivery')
@@ -229,9 +230,18 @@ class DnDispatchSafetyTests(TestCase):
             DnDetailModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code).dn_status,
             7,
         )
+        detail = DnDetailModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code)
+        self.assertEqual(detail.cancelled_qty, 2)
+        self.assertEqual(detail.intransit_qty, 0)
+        # Cancellation does not invent stock. A physical return must re-enter
+        # through Receiving and Putaway before inventory is increased.
+        self.assertEqual(
+            StockListModel.objects.get(openid=self.openid, goods_code='SKU-01').goods_qty,
+            1,
+        )
         assignment = StagingAssignment.objects.get(openid=self.openid, reference_code=self.dn.dn_code)
         self.assertEqual(assignment.status, StagingAssignment.RELEASED)
-        self.assertEqual(DNListGetSerializer(self.dn).data['delivery_exception'], 'Cancelled')
+        self.assertEqual(DNListGetSerializer(self.dn).data['delivery_exception'], 'Cancelled (2)')
 
         with self.assertRaises(APIException):
             self.cancel_intransit({'cancellation_note': 'Duplicate close'}, is_admin=True)

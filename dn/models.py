@@ -55,6 +55,7 @@ class DnDetailModel(models.Model):
     delivery_shortage_qty = models.BigIntegerField(default=0, verbose_name="Delivery Shortage QTY")
     delivery_more_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
     delivery_damage_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
+    cancelled_qty = models.BigIntegerField(default=0, verbose_name="Cancelled QTY")
     delivery_note = models.TextField(default='', blank=True, verbose_name="Delivery Exception Note")
     requested_serials = models.JSONField(default=list, verbose_name="Requested Serial Numbers")
     picked_serials = models.JSONField(default=list, verbose_name="Picked Serial Numbers")

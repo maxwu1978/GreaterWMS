@@ -12,6 +12,7 @@ from asn.models import AsnDetailModel, AsnListModel
 from asnserial.models import AsnSerialRecord
 from binset.models import ListModel as BinModel
 from cyclecount.models import QTYRecorder
+from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from driver.models import ListModel as DriverModel
 from goods.models import ListModel as GoodsModel
 from stock.models import StockBinModel, StockListModel
@@ -235,6 +236,34 @@ class ReceivingRecordListView(APIView):
         ).exists():
             raise ValidationError({'detail': 'Linked ASN does not exist'})
 
+        source_type = str(data.get('source_type') or 'OPERATOR').strip().upper()
+        source_reference = str(data.get('source_reference') or '').strip()
+        return_details = {}
+        if source_type == 'OUTBOUND_RETURN':
+            if not source_reference:
+                raise ValidationError({'detail': 'Outbound return requires source_reference'})
+            return_dn = DnListModel.objects.filter(
+                openid=openid,
+                dn_code=source_reference,
+                dn_status=7,
+                is_delete=False,
+            ).first()
+            if return_dn is None:
+                raise ValidationError({'detail': 'Canceled outbound delivery note does not exist'})
+            if customer and return_dn.customer and customer.casefold() != return_dn.customer.casefold():
+                raise ValidationError({'detail': 'Return customer does not match the canceled delivery note'})
+            return_details = {
+                detail.goods_code: detail
+                for detail in DnDetailModel.objects.filter(
+                    openid=openid,
+                    dn_code=source_reference,
+                    dn_status=7,
+                    is_delete=False,
+                )
+            }
+            if not return_details:
+                raise ValidationError({'detail': 'Canceled outbound delivery note has no returnable details'})
+
         receipt_no = str(data.get('receipt_no') or '').strip() or _receipt_no(openid)
         if ReceivingRecord.objects.filter(openid=openid, receipt_no=receipt_no).exists():
             raise ValidationError({'detail': 'Receiving record already exists'})
@@ -242,13 +271,13 @@ class ReceivingRecordListView(APIView):
             openid=openid,
             receipt_no=receipt_no,
             customer=customer,
-            source_reference=str(data.get('source_reference') or '').strip(),
+            source_reference=source_reference,
             container_tracking=str(data.get('container_tracking') or '').strip(),
             received_at=_parse_datetime(data.get('received_at'), 'received_at'),
             status=ReceivingRecord.QC_PENDING,
             reconciliation_status=ReceivingRecord.PENDING if linked_asn_code else ReceivingRecord.NO_ASN,
             linked_asn_code=linked_asn_code,
-            source_type=str(data.get('source_type') or 'OPERATOR').strip().upper(),
+            source_type=source_type,
             source_hash=str(data.get('source_hash') or '').strip(),
             created_by=_operator_name(request),
         )
@@ -261,11 +290,20 @@ class ReceivingRecordListView(APIView):
                 raise ValidationError({'detail': 'Duplicate receiving SKU: %s' % goods_code})
             seen.add(goods_code)
             goods_master = _goods_master(openid, goods_code)
-            expected_qty = _integer(raw.get('expected_qty', raw.get('goods_qty', 0)), 'expected_qty')
+            return_detail = return_details.get(goods_code)
+            if source_type == 'OUTBOUND_RETURN' and return_detail is None:
+                raise ValidationError({'detail': 'Return SKU does not belong to the canceled delivery note: %s' % goods_code})
+            default_expected_qty = int(return_detail.cancelled_qty or 0) if return_detail else 0
+            expected_qty = _integer(
+                raw.get('expected_qty', raw.get('goods_qty', default_expected_qty)),
+                'expected_qty',
+            )
             actual_qty = _integer(raw.get('actual_qty', raw.get('received_qty', 0)), 'actual_qty')
             damage_qty = _integer(raw.get('damage_qty', 0), 'damage_qty')
             if damage_qty > actual_qty:
                 raise ValidationError({'detail': 'Damage quantity cannot exceed actual quantity'})
+            if return_detail and actual_qty > int(return_detail.cancelled_qty or 0):
+                raise ValidationError({'detail': 'Returned quantity exceeds canceled quantity for %s' % goods_code})
             ReceivingDetail.objects.create(
                 receipt=record,
                 openid=openid,
@@ -333,6 +371,15 @@ class ReceivingQcCompleteView(APIView):
             expected_serials = [str(value).strip() for value in (raw.get('expected_serials') or []) if str(value).strip()]
             serial_exception = False
             accepted_qty = actual_qty - damage_qty
+            returned_serials = set()
+            if record.source_type == 'OUTBOUND_RETURN' and serials:
+                returned_serials = set(DnSerialAllocation.objects.filter(
+                    openid=openid,
+                    dn_code=record.source_reference,
+                    goods_code=goods_code,
+                    serial_number__in=[item['serial_number'] for item in serials],
+                    status__in=(DnSerialAllocation.SHIPPED, DnSerialAllocation.RELEASED),
+                ).values_list('serial_number', flat=True))
             if serials is not None:
                 ReceivingSerial.objects.filter(detail=detail).delete()
                 seen_serials = set()
@@ -356,7 +403,7 @@ class ReceivingQcCompleteView(APIView):
                         status=AsnSerialRecord.ACCEPTED,
                         is_received=True,
                     ).exists()
-                    if duplicate_serial and status == ReceivingSerial.ACCEPTED:
+                    if duplicate_serial and serial_number not in returned_serials and status == ReceivingSerial.ACCEPTED:
                         status = ReceivingSerial.DUPLICATE
                         serial_exception = True
                     if serial_number in expected_serials and status == ReceivingSerial.ACCEPTED:

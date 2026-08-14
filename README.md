@@ -151,6 +151,13 @@ node tools/greaterwms.mjs transport assign --data-file assignment.json --dry-run
 node tools/greaterwms.mjs transport transition --data-file transition.json --dry-run --json
 ~~~
 
+When an in-transit outbound delivery is canceled, the system records the
+canceled quantity and clears `intransit_qty` without adding stock back
+automatically. If the goods physically return, create a receiving record with
+`source_type: OUTBOUND_RETURN` and `source_reference` set to the canceled DN;
+the returned goods then follow QC and Putaway before they become available
+inventory again.
+
 Repeat the reviewed command with `--confirm` to execute it. The CLI calls the
 API and never writes directly to the database.
 

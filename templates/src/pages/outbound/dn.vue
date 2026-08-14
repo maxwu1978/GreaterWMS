@@ -1874,7 +1874,7 @@ export default {
           this.getList()
           if (!res.detail) {
             this.$q.notify({
-              message: 'In-transit DN canceled and staging released',
+              message: 'In-transit DN canceled. Returned goods must go through Receiving.',
               icon: 'check',
               color: 'green'
             })

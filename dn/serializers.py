@@ -14,6 +14,7 @@ class SannerDnDetailGetSerializer(serializers.ModelSerializer):
     delivery_shortage_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_more_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_damage_qty = serializers.IntegerField(read_only=True, required=False)
+    cancelled_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_note = serializers.CharField(read_only=True, required=False)
     requested_serials = serializers.ListField(read_only=True, required=False)
     picked_serials = serializers.ListField(read_only=True, required=False)
@@ -102,7 +103,8 @@ class DNListGetSerializer(serializers.ModelSerializer):
         )
         exceptions = []
         if obj.dn_status == 7:
-            return 'Cancelled'
+            cancelled_qty = sum(int(item.cancelled_qty or 0) for item in details)
+            return 'Cancelled (%s)' % cancelled_qty if cancelled_qty else 'Cancelled'
         if details.filter(delivery_shortage_qty__gt=0).exists():
             exceptions.append('Shortage')
         if details.filter(delivery_more_qty__gt=0).exists():
@@ -165,6 +167,7 @@ class DNDetailGetSerializer(serializers.ModelSerializer):
     delivery_shortage_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_more_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_damage_qty = serializers.IntegerField(read_only=True, required=False)
+    cancelled_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_note = serializers.CharField(read_only=True, required=False)
     requested_serials = serializers.ListField(read_only=True, required=False)
     picked_serials = serializers.ListField(read_only=True, required=False)
@@ -193,7 +196,7 @@ class DNDetailPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnDetailModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'cancelled_qty']
 
 class DNDetailUpdateSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
@@ -205,7 +208,7 @@ class DNDetailUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnDetailModel
         exclude = ['openid', 'is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'cancelled_qty']
 
 class DNDetailPartialUpdateSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
@@ -217,7 +220,7 @@ class DNDetailPartialUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnDetailModel
         exclude = ['openid', 'is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = ['id', 'create_time', 'update_time', 'cancelled_qty']
 
 class DNPickingListGetSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=True, required=False)
@@ -281,6 +284,7 @@ class FileDetailRenderSerializer(serializers.ModelSerializer):
     delivery_shortage_qty = serializers.IntegerField(read_only=False, required=False)
     delivery_more_qty = serializers.IntegerField(read_only=False, required=False)
     delivery_damage_qty = serializers.IntegerField(read_only=False, required=False)
+    cancelled_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_note = serializers.CharField(read_only=False, required=False)
     goods_weight = serializers.FloatField(read_only=False, required=False)
     goods_volume = serializers.FloatField(read_only=False, required=False)
