@@ -380,9 +380,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         ).exclude(
             linked_asn_code='',
         ).values_list('linked_asn_code', flat=True))
+        history_statuses = (5,) if history else tuple(status_map.keys())
         rows = list(AsnDetailModel.objects.filter(
             openid=openid,
-            asn_status__in=status_map.keys(),
+            asn_status__in=history_statuses,
             is_delete=False,
         ).exclude(asn_code__in=linked_receipt_asns).order_by('-update_time', '-id'))
         supplier_names = {row.supplier for row in rows if row.supplier}
@@ -690,9 +691,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 7: ('Cancelled', 'Dock', 'neworder', False),
             })
         grouped = {}
+        history_statuses = (6, 7) if history else tuple(status_map.keys())
         rows = list(DnDetailModel.objects.filter(
             openid=openid,
-            dn_status__in=status_map.keys(),
+            dn_status__in=history_statuses,
             is_delete=False,
         ).order_by('-update_time', '-id'))
         dispatch_context = {}

@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from asn.models import AsnDetailModel, AsnListModel
 from asnserial.models import AsnSerialRecord
+from dn.models import DnDetailModel
 from receiving.models import ReceivingDetail, ReceivingRecord
 
 from .views import OperationsBoardViewSet
@@ -193,5 +194,72 @@ class OperationsBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['view'], 'history')
         self.assertEqual(response.data['items'][0]['business_status'], ReceivingRecord.MATCHED)
+
+    def test_history_excludes_in_progress_inbound_and_outbound(self):
+        openid = 'dashboard-history-terminal-tenant'
+        AsnDetailModel.objects.create(
+            asn_code='ASN-DASHBOARD-IN-PROGRESS',
+            asn_status=2,
+            supplier='Test Customer',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            creater='tester',
+            openid=openid,
+        )
+        DnDetailModel.objects.create(
+            dn_code='DN-DASHBOARD-IN-PROGRESS',
+            dn_status=3,
+            customer='Test Customer',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            creater='tester',
+            openid=openid,
+        )
+        AsnDetailModel.objects.create(
+            asn_code='ASN-DASHBOARD-COMPLETED',
+            asn_status=5,
+            supplier='Test Customer',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            creater='tester',
+            openid=openid,
+        )
+        for dn_code, dn_status in (
+            ('DN-DASHBOARD-COMPLETED', 6),
+            ('DN-DASHBOARD-CANCELLED', 7),
+        ):
+            DnDetailModel.objects.create(
+                dn_code=dn_code,
+                dn_status=dn_status,
+                customer='Test Customer',
+                goods_code='702-S',
+                goods_desc='Test SKU',
+                goods_qty=1,
+                creater='tester',
+                openid=openid,
+            )
+
+        view = OperationsBoardViewSet()
+        active_references = {
+            item['reference']
+            for item in view._inbound_items(openid, timezone.now())
+            + view._outbound_items(openid, timezone.now())
+        }
+        history_references = {
+            item['reference']
+            for item in view._inbound_items(openid, timezone.now(), history=True)
+            + view._outbound_items(openid, timezone.now(), history=True)
+        }
+
+        self.assertIn('ASN-DASHBOARD-IN-PROGRESS', active_references)
+        self.assertIn('DN-DASHBOARD-IN-PROGRESS', active_references)
+        self.assertNotIn('ASN-DASHBOARD-IN-PROGRESS', history_references)
+        self.assertNotIn('DN-DASHBOARD-IN-PROGRESS', history_references)
+        self.assertIn('ASN-DASHBOARD-COMPLETED', history_references)
+        self.assertIn('DN-DASHBOARD-COMPLETED', history_references)
+        self.assertIn('DN-DASHBOARD-CANCELLED', history_references)
 
 # Create your tests here.
