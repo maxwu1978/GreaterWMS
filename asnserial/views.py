@@ -1875,13 +1875,16 @@ class PackListPreviewView(APIView):
         upload = request.FILES.get('file')
         asn_code = _clean(request.data.get('asn_code'))
         if not upload:
-            raise APIException({'detail': 'Pack List Excel file is required'})
+            raise ValidationError({'detail': 'Pack List Excel file is required'})
         if upload.size > 20 * 1024 * 1024:
-            raise APIException({'detail': 'Pack List file is too large'})
+            raise ValidationError({'detail': 'Pack List file is too large'})
         if not asn_code:
-            raise APIException({'detail': 'ASN Code is required'})
-        rows, content_hash = _pack_list_rows_from_workbook(upload)
-        validation = _validate_pack_list_rows(openid, asn_code, rows)
+            raise ValidationError({'detail': 'ASN Code is required'})
+        try:
+            rows, content_hash = _pack_list_rows_from_workbook(upload)
+            validation = _validate_pack_list_rows(openid, asn_code, rows)
+        except APIException as exc:
+            raise ValidationError(exc.detail)
         current_document = PackListDocument.objects.filter(
             openid=openid,
             asn_code=asn_code,
@@ -2030,24 +2033,26 @@ class SerialImportPreviewView(APIView):
         upload = request.FILES.get('file')
         asn_code = _clean(request.data.get('asn_code'))
         if not upload:
-            raise APIException({'detail': 'Excel file is required'})
+            raise ValidationError({'detail': 'Excel file is required'})
         if upload.size > 10 * 1024 * 1024:
-            raise APIException({'detail': 'Excel file is too large'})
+            raise ValidationError({'detail': 'Excel file is too large'})
         mode = 'receive' if inspection else str(request.data.get('mode') or 'expected').lower()
         inbound_po = _clean(request.data.get('inbound_po'))
         shipout_ref = _clean(request.data.get('shipout_ref'))
         allow_all = str(request.data.get('allow_all', '')).lower() == 'true'
         if not asn_code:
-            raise APIException({'detail': 'ASN Code is required'})
+            raise ValidationError({'detail': 'ASN Code is required'})
         if not inbound_po and not shipout_ref and not allow_all:
-            raise APIException({'detail': 'Provide inbound_po or shipout_ref before importing a mixed scan sheet'})
+            raise ValidationError({'detail': 'Provide inbound_po or shipout_ref before importing a mixed scan sheet'})
         try:
             file_bytes = upload.read()
             candidate_rows = _serial_rows_from_workbook(file_bytes, inbound_po, shipout_ref)
+        except APIException as exc:
+            raise ValidationError(exc.detail)
         except Exception as exc:
-            raise APIException({'detail': 'Unable to read Excel file: ' + str(exc)})
+            raise ValidationError({'detail': 'Unable to read Excel file: ' + str(exc)})
         if not candidate_rows:
-            raise APIException({
+            raise ValidationError({
                 'detail': 'No matching SKU/SN rows were found in the acceptance workbook; import was not created',
                 'code': 'QC_IMPORT_NO_MATCH',
             })

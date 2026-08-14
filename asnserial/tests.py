@@ -2,6 +2,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 from django.db import IntegrityError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from openpyxl import Workbook
@@ -28,6 +29,8 @@ from .views import (
     SerialExceptionResolveView,
     SerialExceptionMoveView,
     AgentCommandPreviewView,
+    PackListPreviewView,
+    SerialImportPreviewView,
     _create_pack_list,
     _receiving_started,
     _scan,
@@ -97,6 +100,20 @@ class PackListWorkflowTests(TestCase):
             'goods_volume': 1,
             'source_row': 2,
         }]
+
+    def workbook_upload(self, headers, rows):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(headers)
+        for row in rows:
+            sheet.append(row)
+        payload = BytesIO()
+        workbook.save(payload)
+        return SimpleUploadedFile(
+            'inbound-smoke.xlsx',
+            payload.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
 
     def test_pack_list_import_is_one_current_record_and_idempotent(self):
         document, batch, created = _create_pack_list(
@@ -331,6 +348,32 @@ class PackListWorkflowTests(TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn('remaining received quantity', str(raised.exception.detail))
+
+    def test_pack_list_preview_returns_client_error_for_unknown_sku(self):
+        request = self.request()
+        request.data = {'asn_code': self.asn_code}
+        request.FILES = {
+            'file': self.workbook_upload(['SKU', 'Item Qty'], [['UNKNOWN-SKU', 1]]),
+        }
+
+        with self.assertRaises(Exception) as raised:
+            PackListPreviewView().post(request)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn('Goods Code is not part of this ASN', str(raised.exception.detail))
+
+    def test_inspection_preview_returns_client_error_for_unscoped_scan_sheet(self):
+        request = self.request()
+        request.data = {'asn_code': self.asn_code}
+        request.FILES = {
+            'file': self.workbook_upload(['SKU#', 'SN#'], [['702-S', 'SN-001']]),
+        }
+
+        with self.assertRaises(Exception) as raised:
+            SerialImportPreviewView().post(request, inspection=True)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn('inbound_po or shipout_ref', str(raised.exception.detail))
 
     def test_summary_exposes_pending_pack_list_reconciliation(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
