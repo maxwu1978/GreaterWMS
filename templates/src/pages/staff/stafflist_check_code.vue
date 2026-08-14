@@ -153,6 +153,12 @@ export default {
                 item.staff_type = '发货组'
               } else if (item.staff_type === 'StockControl') {
                 item.staff_type = '库存管理'
+              } else if (item.staff_type === 'Warehouse') {
+                item.staff_type = '仓管员'
+              } else if (item.staff_type === 'QC') {
+                item.staff_type = '质检员'
+              } else if (item.staff_type === 'Driver') {
+                item.staff_type = '司机'
               }
             })
           }
@@ -167,17 +173,17 @@ export default {
         })
       }
     },
-    changePageEnter(e) {
+    changePageEnter (e) {
       if (Number(this.paginationIpt) < 1) {
-        this.current = 1;
-        this.paginationIpt = 1;
+        this.current = 1
+        this.paginationIpt = 1
       } else if (Number(this.paginationIpt) > this.max) {
-        this.current = this.max;
-        this.paginationIpt = this.max;
+        this.current = this.max
+        this.paginationIpt = this.max
       } else {
-        this.current = Number(this.paginationIpt);
+        this.current = Number(this.paginationIpt)
       }
-      this.getList();
+      this.getList()
     },
     getSearchList () {
       var _this = this
@@ -215,6 +221,12 @@ export default {
                 item.staff_type = '发货组'
               } else if (item.staff_type === 'StockControl') {
                 item.staff_type = '库存管理'
+              } else if (item.staff_type === 'Warehouse') {
+                item.staff_type = '仓管员'
+              } else if (item.staff_type === 'QC') {
+                item.staff_type = '质检员'
+              } else if (item.staff_type === 'Driver') {
+                item.staff_type = '司机'
               }
             })
           }
@@ -254,6 +266,12 @@ export default {
                 item.staff_type = '发货组'
               } else if (item.staff_type === 'StockControl') {
                 item.staff_type = '库存管理'
+              } else if (item.staff_type === 'Warehouse') {
+                item.staff_type = '仓管员'
+              } else if (item.staff_type === 'QC') {
+                item.staff_type = '质检员'
+              } else if (item.staff_type === 'Driver') {
+                item.staff_type = '司机'
               }
             })
           }
@@ -293,6 +311,12 @@ export default {
                 item.staff_type = '发货组'
               } else if (item.staff_type === 'StockControl') {
                 item.staff_type = '库存管理'
+              } else if (item.staff_type === 'Warehouse') {
+                item.staff_type = '仓管员'
+              } else if (item.staff_type === 'QC') {
+                item.staff_type = '质检员'
+              } else if (item.staff_type === 'Driver') {
+                item.staff_type = '司机'
               }
             })
           }

@@ -26,6 +26,7 @@ import re
 from django.utils import timezone
 from staging.models import StagingAssignment
 from asnserial.views import _summary as receiving_summary
+from driver.models import DispatchListModel
 
 class ReceiptsViewSet(viewsets.ModelViewSet):
     """
@@ -209,16 +210,21 @@ class SalesViewSet(viewsets.ModelViewSet):
 class OperationsBoardViewSet(viewsets.ViewSet):
     """Return the active warehouse work queue for the GreaterWMS dashboard."""
 
+    MANAGEMENT_ROLES = {'admin', 'manager', 'supervisor'}
+
     def list(self, request, *args, **kwargs):
         auth = getattr(request, 'auth', None)
         openid = getattr(auth, 'openid', None)
         if not openid:
             return Response({'detail': 'auth required'}, status=401)
 
+        viewer_role = str(getattr(auth, 'staff_type', '') or '').strip().casefold()
+        viewer_name = str(getattr(auth, 'staff_name', '') or '').strip()
         now = timezone.now()
         items = []
         items.extend(self._inbound_items(openid, now))
         items.extend(self._outbound_items(openid, now))
+        items = self._filter_for_identity(items, viewer_role, viewer_name)
         lane_order = {'blocked': 0, 'delayed': 1, 'now': 2, 'next': 3}
         items.sort(key=lambda item: (lane_order[item['lane']], item['sort_time']))
 
@@ -233,9 +239,36 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             item.pop('sort_time', None)
         return Response({
             'generated_at': now.isoformat(),
+            'viewer': {
+                'staff_name': viewer_name,
+                'staff_type': getattr(auth, 'staff_type', '') or '',
+                'scope': 'all' if viewer_role in self.MANAGEMENT_ROLES else 'role',
+            },
             'items': items[:100],
             'counts': counts,
         })
+
+    def _filter_for_identity(self, items, viewer_role, viewer_name):
+        """Keep the dashboard server-side scoped to the logged-in role."""
+        if viewer_role in self.MANAGEMENT_ROLES:
+            return items
+        if viewer_role == 'driver':
+            return [
+                item for item in items
+                if item.get('assigned_role') == 'DRIVER'
+                and str(item.get('assignee_name') or '').casefold() == viewer_name.casefold()
+            ]
+        if viewer_role == 'qc':
+            return [item for item in items if item.get('assigned_role') == 'QC']
+        if viewer_role == 'warehouse':
+            return [item for item in items if item.get('assigned_role') == 'WAREHOUSE']
+        if viewer_role == 'inbound':
+            return [item for item in items if item.get('category') == 'inbound']
+        if viewer_role == 'outbound':
+            return [item for item in items if item.get('category') == 'outbound']
+        if viewer_role == 'stockcontrol':
+            return [item for item in items if item.get('assigned_role') in ('WAREHOUSE', 'QC')]
+        return []
 
     @staticmethod
     def _lane(eta, *, blocked, planned):
@@ -261,7 +294,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             row['asn_code']: row for row in AsnListModel.objects.filter(
             openid=openid,
             is_delete=False,
-        ).values('asn_code', 'expected_arrival_at', 'actual_arrival_at', 'package_qty')
+        ).values(
+            'asn_code', 'expected_arrival_at', 'actual_arrival_at', 'package_qty',
+            'unload_driver', 'putaway_driver',
+        )
         }
         staging_context = {}
         for assignment in StagingAssignment.objects.filter(
@@ -304,6 +340,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'timestamp': self._timestamp(row),
                 'eta': intake.get('expected_arrival_at'),
                 'actual_arrival_at': intake.get('actual_arrival_at'),
+                'unload_driver': intake.get('unload_driver') or '',
+                'putaway_driver': intake.get('putaway_driver') or '',
                 'staging_reserved_qty': staging['reserved'],
                 'staging_occupied_qty': staging['occupied'],
                 'package_qty': intake.get('package_qty') or 0,
@@ -322,6 +360,14 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                     current.update({'operation': 'Unload', 'planned': False})
                 elif current['staging_reserved_qty']:
                     current['operation'] = 'Await Arrival'
+            if current['status'] == 1 and current['actual_arrival_at'] and current['unload_driver']:
+                current.update({'assigned_role': 'DRIVER', 'assignee_name': current['unload_driver']})
+            elif current['status'] == 3:
+                current.update({'assigned_role': 'QC', 'assignee_name': ''})
+            elif current['status'] == 4 and current['putaway_driver']:
+                current.update({'assigned_role': 'DRIVER', 'assignee_name': current['putaway_driver']})
+            else:
+                current.update({'assigned_role': 'WAREHOUSE', 'assignee_name': ''})
             current['quantity'] += int(row.goods_qty or 0)
             current['progress_quantity'] += int(row.goods_actual_qty or row.sorted_qty or 0)
             current['blocked'] = current['blocked'] or any([
@@ -341,6 +387,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                         'action_route': 'asn',
                         'planned': False,
                         'blocked': True,
+                        'assigned_role': 'QC',
+                        'assignee_name': '',
                     })
 
         return [self._format_item(item, now) for item in grouped.values()]
@@ -359,6 +407,13 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             dn_status__in=status_map.keys(),
             is_delete=False,
         ).order_by('-update_time', '-id'))
+        dispatch_context = {}
+        for dn_code, driver_name in DispatchListModel.objects.filter(
+            openid=openid,
+            dn_code__in={row.dn_code for row in rows},
+        ).order_by('dn_code', 'id').values_list('dn_code', 'driver_name'):
+            # Keep the latest dispatch record when a DN was reassigned.
+            dispatch_context[dn_code] = driver_name
         for row in rows:
             customer_name = row.customer or ''
             current = grouped.setdefault(row.dn_code, {
@@ -375,6 +430,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'blocked': False,
                 'timestamp': self._timestamp(row),
                 'eta': None,
+                'driver_name': dispatch_context.get(row.dn_code, ''),
             })
             if row.dn_status < current['status']:
                 current['status'] = row.dn_status
@@ -385,6 +441,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'action_route': route,
                 'planned': planned,
             })
+            if current['status'] == 5 and current['driver_name']:
+                current.update({'assigned_role': 'DRIVER', 'assignee_name': current['driver_name']})
+            else:
+                current.update({'assigned_role': 'WAREHOUSE', 'assignee_name': ''})
             current['quantity'] += int(row.goods_qty or 0)
             current['progress_quantity'] += int(row.picked_qty or row.delivery_actual_qty or 0)
             current['blocked'] = current['blocked'] or bool(
@@ -419,6 +479,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'arrival_status': 'ARRIVED' if item.get('actual_arrival_at') else 'PRE_ARRIVAL',
             'staging_reserved_qty': item.get('staging_reserved_qty', 0),
             'staging_occupied_qty': item.get('staging_occupied_qty', 0),
+            'assigned_role': item.get('assigned_role', 'WAREHOUSE'),
+            'assignee_name': item.get('assignee_name', ''),
+            'assigned_to': item.get('assignee_name') or item.get('assigned_role', 'WAREHOUSE'),
             'action_route': item['action_route'],
             'sort_time': timestamp or now,
         }

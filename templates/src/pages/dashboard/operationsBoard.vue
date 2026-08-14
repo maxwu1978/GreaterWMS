@@ -5,6 +5,9 @@
         {{ label('operations_board.title', 'Warehouse Operations') }}
       </div>
       <q-space />
+      <div v-if="viewerLabel" class="operations-board__viewer">
+        {{ viewerLabel }}
+      </div>
       <div class="operations-board__live">LIVE</div>
       <q-btn
         flat
@@ -72,6 +75,11 @@
           </span>
         </q-td>
       </template>
+      <template v-slot:body-cell-assigned_to="props">
+        <q-td :props="props">
+          {{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}
+        </q-td>
+      </template>
       <template v-slot:body-cell-operation="props">
         <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
       </template>
@@ -117,6 +125,7 @@ export default {
     return {
       activeFilter: 'all',
       items: [],
+      viewer: { staff_name: '', staff_type: '', scope: '' },
       loading: false,
       refreshTimer: null,
       pagination: { rowsPerPage: 10 }
@@ -136,10 +145,17 @@ export default {
       if (this.activeFilter === 'all') return this.items
       return this.items.filter(item => item.lane === this.activeFilter)
     },
+    viewerLabel () {
+      if (!this.viewer.staff_type) return ''
+      const name = this.viewer.staff_name || ''
+      const role = this.viewer.staff_type
+      return name ? `${name} · ${role}` : role
+    },
     columns () {
       return [
         { name: 'eta', label: this.label('operations_board.eta', 'ETA'), field: 'eta', align: 'left' },
         { name: 'customer', label: this.label('operations_board.customer', 'Owner / Customer'), field: 'customer', align: 'left' },
+        { name: 'assigned_to', label: this.label('operations_board.assigned_to', 'Assigned To'), field: 'assigned_to', align: 'left' },
         { name: 'category', label: this.label('operations_board.type', 'Type'), field: 'category', align: 'left' },
         { name: 'operation', label: this.label('operations_board.operation', 'Next Step'), field: 'operation', align: 'left' },
         { name: 'reference', label: this.label('operations_board.reference', 'Reference'), field: 'reference', align: 'left' },
@@ -168,6 +184,7 @@ export default {
       getauth('dashboard/operations/')
         .then(res => {
           this.items = res.items || []
+          this.viewer = res.viewer || { staff_name: '', staff_type: '', scope: '' }
         })
         .catch(() => {})
         .finally(() => {
@@ -188,6 +205,14 @@ export default {
     locationLabel (location) {
       const key = String(location || '').toLowerCase()
       return this.label(`operations_board.${key}`, location)
+    },
+    assignedRoleLabel (role) {
+      const labels = {
+        DRIVER: this.label('operations_board.driver', 'Driver'),
+        QC: this.label('operations_board.qc', 'QC'),
+        WAREHOUSE: this.label('operations_board.warehouse', 'Warehouse')
+      }
+      return labels[String(role || '').toUpperCase()] || role || ''
     },
     laneColor (lane) {
       return {
@@ -233,6 +258,13 @@ export default {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
+}
+
+.operations-board__viewer {
+  margin-right: 16px;
+  color: #e8edf7;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .operations-board__controls {

@@ -11,6 +11,8 @@ MASTER_DATA_MODULES = {
 INBOUND_MODULES = {'asn', 'asnserial', 'staging', 'scanner', 'uploadfile'}
 OUTBOUND_MODULES = {'dn', 'driver', 'staging', 'scanner'}
 INVENTORY_MODULES = {'stock', 'cyclecount', 'asnserial', 'staging', 'scanner'}
+WAREHOUSE_MODULES = INBOUND_MODULES | OUTBOUND_MODULES | INVENTORY_MODULES
+QC_MODULES = {'asnserial', 'scanner'}
 
 
 ROLE_MODULES = {
@@ -19,6 +21,11 @@ ROLE_MODULES = {
     'inbound': INBOUND_MODULES,
     'outbound': OUTBOUND_MODULES,
     'stockcontrol': INVENTORY_MODULES,
+    'warehouse': WAREHOUSE_MODULES,
+    'qc': QC_MODULES,
+    # Drivers receive a read-only dashboard queue.  Operational writes remain
+    # with warehouse staff and are protected by the existing role checks.
+    'driver': set(),
 }
 
 
