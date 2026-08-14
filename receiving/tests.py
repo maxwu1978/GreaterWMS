@@ -5,11 +5,16 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
+from asn.views import AsnDetailViewSet
 from binset.models import ListModel as BinModel
 from driver.models import ListModel as DriverModel
 from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from goods.models import ListModel as GoodsModel
+from staff.models import ListModel as StaffModel
 from stock.models import StockListModel
+from supplier.models import ListModel as SupplierModel
+from userprofile.models import Users
+from warehouse.models import ListModel as WarehouseModel
 
 from .models import ReceivingDetail, ReceivingRecord, ReceivingSerial
 from .views import (
@@ -129,6 +134,146 @@ class ReceivingFlowTests(TestCase):
         self.assertEqual(reconciled.data['variance'], {})
         self.assertEqual(reconciled.data['record']['status'], ReceivingRecord.CLOSED)
         self.assertEqual(reconciled.data['record']['reconciliation_status'], ReceivingRecord.MATCHED)
+
+    def test_linked_asn_receiving_does_not_double_total_or_asn_stock(self):
+        supplier = SupplierModel.objects.create(
+            supplier_name='Customer A',
+            supplier_city='Dallas',
+            supplier_address='Test address',
+            supplier_contact='test',
+            supplier_manager='test',
+            creater='tester',
+            openid=self.openid,
+        )
+        WarehouseModel.objects.create(
+            warehouse_name='Test Warehouse',
+            warehouse_city='Dallas',
+            warehouse_address='Test address',
+            warehouse_contact='test',
+            warehouse_manager='test',
+            creater='tester',
+            openid=self.openid,
+        )
+        operator = StaffModel.objects.create(
+            staff_name='ASN Operator',
+            staff_type='Manager',
+            openid=self.openid,
+        )
+        Users.objects.create(
+            user_id=operator.id,
+            name=operator.staff_name,
+            openid=self.openid,
+            appid='receiving-test-app',
+            t_code='receiving-test-code',
+            ip='127.0.0.1',
+        )
+        AsnListModel.objects.create(
+            asn_code='ASN-INVENTORY-001',
+            asn_status=1,
+            supplier='Customer A',
+            creater='tester',
+            bar_code='ASN-INVENTORY-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        asn_request = SimpleNamespace(
+            auth=SimpleNamespace(openid=self.openid),
+            user=SimpleNamespace(is_authenticated=True),
+            META={'HTTP_OPERATOR': str(operator.id)},
+            data={
+                'asn_code': 'ASN-INVENTORY-001',
+                'supplier': supplier.supplier_name,
+                'goods_code': [self.goods_code],
+                'goods_qty': [2],
+            },
+        )
+        asn_view = AsnDetailViewSet()
+        asn_view.request = asn_request
+        asn_view.action = 'create'
+        asn_view.format_kwarg = None
+        asn_response = asn_view.create(asn_request)
+        self.assertEqual(asn_response.status_code, 200)
+        stock = StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code)
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.asn_stock, 2)
+        created = self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-INVENTORY-001',
+            'customer': 'Customer A',
+            'linked_asn_code': 'ASN-INVENTORY-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        self.assertEqual(created.status_code, 201)
+        self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-INVENTORY-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        stock = StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code)
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.asn_stock, 0)
+
+        putaway = self.call(ReceivingPutawayView, {
+            'receipt_no': 'RC-INVENTORY-001',
+            'goods_code': self.goods_code,
+            'quantity': 2,
+            'bin_name': 'A1-01',
+            'driver_name': 'Tom',
+        })
+        self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_COMPLETE)
+        stock.refresh_from_db()
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.onhand_stock, 2)
+        self.assertEqual(stock.can_order_stock, 2)
+
+    def test_reconcile_after_unlinked_receiving_removes_late_asn_reservation(self):
+        self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-LATE-ASN-001',
+            'customer': 'Customer A',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-LATE-ASN-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        self.call(ReceivingPutawayView, {
+            'receipt_no': 'RC-LATE-ASN-001',
+            'goods_code': self.goods_code,
+            'quantity': 2,
+            'bin_name': 'A1-01',
+            'driver_name': 'Tom',
+        })
+        stock = StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code)
+        self.assertEqual(stock.goods_qty, 2)
+
+        AsnListModel.objects.create(
+            asn_code='ASN-LATE-001',
+            asn_status=1,
+            supplier='Customer A',
+            creater='tester',
+            bar_code='ASN-LATE-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        AsnDetailModel.objects.create(
+            asn_code='ASN-LATE-001',
+            asn_status=1,
+            supplier='Customer A',
+            goods_code=self.goods_code,
+            goods_desc='Receiving test SKU',
+            goods_qty=2,
+            creater='tester',
+            openid=self.openid,
+        )
+        stock.goods_qty += 2
+        stock.asn_stock = 2
+        stock.save()
+        reconciled = self.call(ReceivingReconcileView, {
+            'receipt_no': 'RC-LATE-ASN-001',
+            'asn_code': 'ASN-LATE-001',
+        })
+        self.assertEqual(reconciled.data['variance'], {})
+        stock.refresh_from_db()
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.asn_stock, 0)
 
     def test_receiving_claims_an_asn_once_and_blocks_started_legacy_asn(self):
         AsnListModel.objects.create(

@@ -164,6 +164,67 @@ def _stock_for_update(openid, goods_code, goods_master):
     return stock
 
 
+def _apply_linked_asn_inventory(record, detail, actual_qty):
+    """Move a linked ASN reservation to the received total exactly once."""
+    if not record.linked_asn_code:
+        return
+    asn_detail = AsnDetailModel.objects.select_for_update().filter(
+        openid=record.openid,
+        asn_code=record.linked_asn_code,
+        goods_code=detail.goods_code,
+        is_delete=False,
+    ).first()
+    if asn_detail is None:
+        raise ValidationError({'detail': 'Linked ASN SKU does not exist: %s' % detail.goods_code})
+    goods_master = _goods_master(record.openid, detail.goods_code)
+    stock = _stock_for_update(record.openid, detail.goods_code, goods_master)
+    expected_qty = int(detail.asn_expected_qty or asn_detail.goods_qty or 0)
+    if not detail.asn_stock_released:
+        reserved_qty = min(max(int(stock.asn_stock or 0), 0), expected_qty)
+        stock.goods_qty = max(
+            0,
+            int(stock.goods_qty or 0) + int(actual_qty) - reserved_qty,
+        )
+        stock.asn_stock = max(int(stock.asn_stock or 0) - reserved_qty, 0)
+        detail.asn_expected_qty = expected_qty
+        detail.asn_stock_released = True
+    else:
+        stock.goods_qty = max(
+            0,
+            int(stock.goods_qty or 0) + int(actual_qty) - int(detail.inventory_qty_applied or 0),
+        )
+    detail.inventory_qty_applied = int(actual_qty)
+    stock.save(update_fields=['goods_qty', 'asn_stock', 'update_time'])
+
+
+def _release_arrived_asn_reservation(record, asn_code):
+    """Remove an ASN reservation when a prior unlinked receipt is reconciled."""
+    asn_details = {
+        detail.goods_code: detail
+        for detail in AsnDetailModel.objects.select_for_update().filter(
+            openid=record.openid,
+            asn_code=asn_code,
+            is_delete=False,
+        )
+    }
+    for receiving_detail in record.details.select_for_update():
+        asn_detail = asn_details.get(receiving_detail.goods_code)
+        if asn_detail is None:
+            raise ValidationError({'detail': 'ASN SKU does not match receiving SKU: %s' % receiving_detail.goods_code})
+        if receiving_detail.asn_stock_released:
+            continue
+        goods_master = _goods_master(record.openid, receiving_detail.goods_code)
+        stock = _stock_for_update(record.openid, receiving_detail.goods_code, goods_master)
+        expected_qty = int(asn_detail.goods_qty or 0)
+        reserved_qty = min(max(int(stock.asn_stock or 0), 0), expected_qty)
+        stock.goods_qty = max(int(stock.goods_qty or 0) - reserved_qty, 0)
+        stock.asn_stock = max(int(stock.asn_stock or 0) - reserved_qty, 0)
+        stock.save(update_fields=['goods_qty', 'asn_stock', 'update_time'])
+        receiving_detail.asn_expected_qty = expected_qty
+        receiving_detail.asn_stock_released = True
+        receiving_detail.save(update_fields=['asn_expected_qty', 'asn_stock_released', 'update_time'])
+
+
 def _validate_storage_bin(openid, bin_name):
     bin_detail = BinModel.objects.filter(
         openid=openid,
@@ -252,8 +313,16 @@ class ReceivingRecordListView(APIView):
         source_reference = str(data.get('source_reference') or '').strip()
         return_details = {}
         returned_qty = {}
+        linked_asn_expected_qty = {}
         if source_type != 'OUTBOUND_RETURN':
             assert_receiving_can_claim_asn(openid, customer, raw_goods_codes, linked_asn_code)
+            if linked_asn_code:
+                linked_asn_expected_qty = dict(AsnDetailModel.objects.filter(
+                    openid=openid,
+                    asn_code=linked_asn_code,
+                    goods_code__in=raw_goods_codes,
+                    is_delete=False,
+                ).values_list('goods_code', 'goods_qty'))
         if source_type == 'OUTBOUND_RETURN':
             if not source_reference:
                 raise ValidationError({'detail': 'Outbound return requires source_reference'})
@@ -344,6 +413,7 @@ class ReceivingRecordListView(APIView):
                 accepted_qty=actual_qty - damage_qty,
                 damage_qty=damage_qty,
                 hold_qty=damage_qty,
+                asn_expected_qty=int(linked_asn_expected_qty.get(goods_code, 0)),
                 exception_note=str(raw.get('exception_note') or '').strip(),
             )
             if return_detail:
@@ -510,6 +580,7 @@ class ReceivingQcCompleteView(APIView):
             detail.exception_note = exception_note
             if (detail.expected_qty and actual_qty != detail.expected_qty or damage_qty or serial_exception) and not exception_note:
                 detail.exception_note = 'QC variance requires review'
+            _apply_linked_asn_inventory(record, detail, actual_qty)
             detail.save()
         missing = set(details) - submitted
         if missing:
@@ -662,9 +733,12 @@ class ReceivingPutawayView(APIView):
             replay = ReceivingPutaway.objects.filter(openid=openid, idempotency_key=idempotency_key).first()
             if replay:
                 return Response(_record_data(record))
+        if record.linked_asn_code and not detail.asn_stock_released:
+            _apply_linked_asn_inventory(record, detail, int(detail.actual_qty or 0))
         goods_master = _goods_master(openid, goods_code)
         stock = _stock_for_update(openid, goods_code, goods_master)
-        stock.goods_qty = int(stock.goods_qty or 0) + quantity
+        if not record.linked_asn_code:
+            stock.goods_qty = int(stock.goods_qty or 0) + quantity
         stock.onhand_stock = int(stock.onhand_stock or 0) + quantity
         stock.can_order_stock = int(stock.can_order_stock or 0) + quantity
         stock.save()
@@ -702,6 +776,8 @@ class ReceivingPutawayView(APIView):
             idempotency_key=idempotency_key,
         )
         detail.putaway_qty = int(detail.putaway_qty or 0) + quantity
+        if not record.linked_asn_code:
+            detail.inventory_qty_applied = int(detail.inventory_qty_applied or 0) + quantity
         detail.bin_name = bin_name
         detail.save()
         bin_detail.empty_label = False
@@ -747,6 +823,8 @@ class ReceivingReconcileView(APIView):
             asn_code,
             exclude_receipt_no=record.receipt_no,
         )
+        if not record.linked_asn_code:
+            _release_arrived_asn_reservation(record, asn_code)
         actual = defaultdict(int)
         for detail in record.details.all():
             actual[detail.goods_code] += int(detail.actual_qty or 0)
