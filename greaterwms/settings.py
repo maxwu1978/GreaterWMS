@@ -77,6 +77,8 @@ INSTALLED_APPS = [
     'asn.apps.AsnConfig',
     'asnserial.apps.AsnserialConfig',
     'dn.apps.DnConfig',
+    'receiving.apps.ReceivingConfig',
+    'transport.apps.TransportConfig',
     'binset.apps.BinsetConfig',
     'staging.apps.StagingConfig',
     'binsize.apps.BinsizeConfig',

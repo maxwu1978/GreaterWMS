@@ -210,7 +210,8 @@ export default {
       const labels = {
         DRIVER: this.label('operations_board.driver', 'Driver'),
         QC: this.label('operations_board.qc', 'QC'),
-        WAREHOUSE: this.label('operations_board.warehouse', 'Warehouse')
+        WAREHOUSE: this.label('operations_board.warehouse', 'Warehouse'),
+        LOGISTICS: this.label('operations_board.logistics', 'Logistics')
       }
       return labels[String(role || '').toUpperCase()] || role || ''
     },

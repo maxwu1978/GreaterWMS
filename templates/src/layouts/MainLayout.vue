@@ -343,6 +343,18 @@
           </q-item>
           <q-item
             clickable
+            :to="{ name: 'receiving' }"
+            @click="linkChange('receiving')"
+            v-ripple
+            exact
+            :active="link === 'receiving' && link !== ''"
+            :class="{ 'my-menu-link': link === 'receiving' && link !== '' }"
+          >
+            <q-item-section avatar><q-icon name="fact_check" /></q-item-section>
+            <q-item-section>{{ $t("menuItem.receiving") }}</q-item-section>
+          </q-item>
+          <q-item
+            clickable
             :to="{ name: 'stocklist' }"
             @click="linkChange('stock')"
             v-ripple
@@ -434,6 +446,18 @@
               ><q-icon name="transfer_within_a_station"
             /></q-item-section>
             <q-item-section>{{ $t("menuItem.driver") }}</q-item-section>
+          </q-item>
+          <q-item
+            clickable
+            :to="{ name: 'transport' }"
+            @click="linkChange('transport')"
+            v-ripple
+            exact
+            :active="link === 'transport' && link !== ''"
+            :class="{ 'my-menu-link': link === 'transport' && link !== '' }"
+          >
+            <q-item-section avatar><q-icon name="local_shipping" /></q-item-section>
+            <q-item-section>{{ $t("menuItem.transport") }}</q-item-section>
           </q-item>
           <q-separator />
           <q-item

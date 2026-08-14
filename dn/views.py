@@ -1,6 +1,7 @@
+from collections import defaultdict
 from dateutil.relativedelta import relativedelta
 from rest_framework import viewsets
-from .models import DnListModel, DnDetailModel, PickingListModel
+from .models import DnListModel, DnDetailModel, PickingListModel, DnSerialAllocation
 from . import serializers
 from .page import MyPageNumberPaginationDNList
 from utils.page import MyPageNumberPagination
@@ -35,6 +36,289 @@ from rest_framework.settings import api_settings
 from staff.models import ListModel as staff
 from staging.models import StagingAssignment
 from staging.services import StagingError, occupy_staging_slot, release_staging_slot, reserve_staging_slot
+from asnserial.models import AsnSerialRecord
+from receiving.models import ReceivingRecord, ReceivingSerial
+from transport.models import TransportOrder
+
+
+def _requested_serials_for_line(data, index):
+    serial_numbers = data.get('serial_numbers')
+    if serial_numbers is None:
+        serial_numbers = data.get('requested_serials')
+    if serial_numbers is None:
+        return []
+    if not isinstance(serial_numbers, list):
+        raise APIException({'detail': 'serial_numbers must be a list of lists'})
+    if len(serial_numbers) != len(data.get('goods_code', [])):
+        raise APIException({'detail': 'serial_numbers must align with goods_code'})
+    values = serial_numbers[index]
+    if not isinstance(values, list):
+        raise APIException({'detail': 'Each serial_numbers entry must be a list'})
+    normalized = [str(value).strip() for value in values if str(value).strip()]
+    if len(normalized) != len(set(normalized)):
+        raise APIException({'detail': 'Duplicate serial number in outbound request'})
+    return normalized
+
+
+def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, serial_numbers):
+    if dn.picking_mode != DnListModel.SN:
+        return
+    if len(serial_numbers) != len(goods_codes):
+        raise APIException({'detail': 'SN picking requires serial_numbers for every SKU'})
+    seen = set()
+    for goods_code, quantity, values in zip(goods_codes, quantities, serial_numbers):
+        detail = DnDetailModel.objects.filter(
+            openid=openid, dn_code=dn.dn_code, goods_code=goods_code, is_delete=False,
+        ).first()
+        if detail is None:
+            raise APIException({'detail': 'Outbound SKU does not exist: %s' % goods_code})
+        expected = set(detail.requested_serials or [])
+        if len(values) != int(quantity):
+            raise APIException({'detail': 'SN count must equal quantity for %s' % goods_code})
+        if not set(values).issubset(expected):
+            raise APIException({'detail': 'SN is not listed on the pick ticket for %s' % goods_code})
+        overlap = seen.intersection(values)
+        if overlap:
+            raise APIException({'detail': 'Duplicate SN in pick request: %s' % sorted(overlap)[0]})
+        seen.update(values)
+        available_asn = set(AsnSerialRecord.objects.filter(
+            openid=openid,
+            goods_code=goods_code,
+            serial_number__in=values,
+            status=AsnSerialRecord.ACCEPTED,
+            is_received=True,
+        ).values_list('serial_number', flat=True))
+        available_receiving = set(ReceivingSerial.objects.filter(
+            openid=openid,
+            goods_code=goods_code,
+            serial_number__in=values,
+            status=ReceivingSerial.ACCEPTED,
+            receipt__status__in=(ReceivingRecord.PUTAWAY_COMPLETE, ReceivingRecord.CLOSED),
+        ).values_list('serial_number', flat=True))
+        unavailable = set(values) - available_asn - available_receiving
+        if unavailable:
+            raise APIException({'detail': 'SN is not available in received inventory: %s' % sorted(unavailable)[0]})
+        allocated = set(DnSerialAllocation.objects.filter(
+            openid=openid,
+            serial_number__in=values,
+            status__in=[DnSerialAllocation.REQUESTED, DnSerialAllocation.PICKED, DnSerialAllocation.IN_TRANSIT],
+        ).exclude(dn_code=dn.dn_code).values_list('serial_number', flat=True))
+        if allocated:
+            raise APIException({'detail': 'SN is already allocated: %s' % sorted(allocated)[0]})
+
+
+def _mark_picked_serials(openid, dn, serials_by_goods):
+    if dn.picking_mode != DnListModel.SN:
+        return
+    for goods_code, serials in serials_by_goods.items():
+        for serial_number in serials:
+            allocation = DnSerialAllocation.objects.select_for_update().filter(
+                openid=openid,
+                dn_code=dn.dn_code,
+                goods_code=goods_code,
+                serial_number=serial_number,
+                status=DnSerialAllocation.REQUESTED,
+            ).first()
+            if allocation is None:
+                raise APIException({'detail': 'SN is not available for picking: %s' % serial_number})
+            allocation.status = DnSerialAllocation.PICKED
+            allocation.save(update_fields=['status', 'update_time'])
+        detail = DnDetailModel.objects.select_for_update().get(
+            openid=openid, dn_code=dn.dn_code, goods_code=goods_code, is_delete=False,
+        )
+        detail.picked_serials = sorted(set(detail.picked_serials or []).union(serials))
+        detail.save(update_fields=['picked_serials', 'update_time'])
+
+
+def _require_all_picked_serials(openid, dn):
+    if dn.picking_mode != DnListModel.SN:
+        return
+    if DnSerialAllocation.objects.filter(
+        openid=openid,
+        dn_code=dn.dn_code,
+    ).exclude(status=DnSerialAllocation.PICKED).exists():
+        raise APIException({'detail': 'All ticket SNs must be picked before dispatch'})
+
+
+def _mark_serials(openid, dn_code, from_status, to_status):
+    DnSerialAllocation.objects.filter(
+        openid=openid, dn_code=dn_code, status=from_status,
+    ).update(status=to_status, update_time=timezone.now())
+
+
+def _mark_shipped_serials(openid, dn_code):
+    allocations = list(DnSerialAllocation.objects.filter(
+        openid=openid,
+        dn_code=dn_code,
+        status=DnSerialAllocation.IN_TRANSIT,
+    ))
+    DnSerialAllocation.objects.filter(
+        openid=openid,
+        dn_code=dn_code,
+        status=DnSerialAllocation.IN_TRANSIT,
+    ).update(status=DnSerialAllocation.SHIPPED, update_time=timezone.now())
+    by_goods = defaultdict(list)
+    for allocation in allocations:
+        by_goods[allocation.goods_code].append(allocation.serial_number)
+    for goods_code, serials in by_goods.items():
+        detail = DnDetailModel.objects.filter(
+            openid=openid, dn_code=dn_code, goods_code=goods_code, is_delete=False,
+        ).first()
+        if detail:
+            detail.shipped_serials = sorted(set(detail.shipped_serials or []).union(serials))
+            detail.save(update_fields=['shipped_serials', 'update_time'])
+
+
+def _serials_from_pick_payload(goods_data):
+    serials_by_goods = defaultdict(list)
+    for row in goods_data:
+        goods_code = str(row.get('goods_code') or '').strip()
+        values = row.get('serial_numbers')
+        if values is None:
+            values = row.get('serials')
+        if values is None:
+            values = []
+        if not isinstance(values, list):
+            raise APIException({'detail': 'Pick serial_numbers must be a list'})
+        normalized = [str(value).strip() for value in values if str(value).strip()]
+        if len(normalized) != len(set(normalized)):
+            raise APIException({'detail': 'Duplicate serial number in pick request'})
+        serials_by_goods[goods_code].extend(normalized)
+    return serials_by_goods
+
+
+def _validate_pick_serials(openid, dn, goods_data):
+    if dn.picking_mode != DnListModel.SN:
+        return {}
+    serials_by_goods = _serials_from_pick_payload(goods_data)
+    goods_codes = [str(row.get('goods_code') or '').strip() for row in goods_data]
+    goods_codes = list(dict.fromkeys(goods_codes))
+    if not goods_codes or any(not serials_by_goods.get(code) for code in goods_codes):
+        raise APIException({'detail': 'SN picking requires scanned serials for every SKU'})
+    quantities = [len(serials_by_goods[code]) for code in goods_codes]
+    _validate_outbound_serial_request(
+        openid,
+        dn,
+        goods_codes,
+        quantities,
+        [serials_by_goods[code] for code in goods_codes],
+    )
+    return serials_by_goods
+
+
+def _ensure_outbound_transport(request, dn, driver_name):
+    if not dn.transport_required:
+        return None
+    transport_no = str(request.data.get('transport_order_no') or dn.transport_order_no or '').strip()
+    if not transport_no:
+        transport_no = 'TR-' + str(dn.dn_code)
+    order, _ = TransportOrder.objects.get_or_create(
+        openid=dn.openid,
+        transport_no=transport_no,
+        defaults={
+            'direction': TransportOrder.OUTBOUND,
+            'reference_type': 'DN',
+            'reference_no': dn.dn_code,
+            'customer': dn.customer,
+            'delivery_location': dn.ship_to,
+            'driver_name': driver_name,
+            'status': TransportOrder.DRIVER_ASSIGNED,
+            'created_by': str(getattr(request.auth, 'staff_name', '') or request.META.get('HTTP_OPERATOR', '')),
+        },
+    )
+    if order.direction != TransportOrder.OUTBOUND or order.reference_no not in ('', dn.dn_code):
+        raise APIException({'detail': 'Transport order does not match this delivery note'})
+    if order.status == TransportOrder.CANCELLED:
+        raise APIException({'detail': 'The linked transport order is cancelled'})
+    if order.status not in (
+        TransportOrder.REQUESTED,
+        TransportOrder.SCHEDULED,
+        TransportOrder.DRIVER_ASSIGNED,
+    ):
+        raise APIException({'detail': 'The linked transport order is not ready for dispatch'})
+    if order.driver_name and order.driver_name.casefold() != driver_name.casefold():
+        raise APIException({'detail': 'The linked transport order has a different driver'})
+    if order.reference_no == '':
+        order.reference_type = 'DN'
+        order.reference_no = dn.dn_code
+        order.customer = dn.customer
+        order.delivery_location = dn.ship_to
+    order.driver_name = driver_name
+    order.status = TransportOrder.DRIVER_ASSIGNED
+    order.save(update_fields=[
+        'reference_type', 'reference_no', 'customer', 'delivery_location',
+        'driver_name', 'status', 'update_time',
+    ])
+    if dn.transport_order_no != transport_no:
+        dn.transport_order_no = transport_no
+        dn.save(update_fields=['transport_order_no', 'update_time'])
+    return order
+
+
+def _mark_outbound_transport_in_transit(dn):
+    if not dn.transport_order_no:
+        return
+    order = TransportOrder.objects.select_for_update().filter(
+        openid=dn.openid,
+        transport_no=dn.transport_order_no,
+    ).first()
+    if order is None:
+        raise APIException({'detail': 'Linked transport order does not exist'})
+    if order.status != TransportOrder.DRIVER_ASSIGNED:
+        raise APIException({'detail': 'Linked transport order is not assigned to a driver'})
+    order.status = TransportOrder.IN_TRANSIT
+    order.save(update_fields=['status', 'update_time'])
+
+
+def _complete_outbound_transport(request, dn):
+    if not dn.transport_order_no:
+        return
+    order = TransportOrder.objects.select_for_update().filter(
+        openid=dn.openid,
+        transport_no=dn.transport_order_no,
+    ).first()
+    if order is None:
+        raise APIException({'detail': 'Linked transport order does not exist'})
+    if order.status == TransportOrder.CANCELLED:
+        raise APIException({'detail': 'The linked transport order is cancelled'})
+    if order.status == TransportOrder.COMPLETED:
+        return
+    if order.status not in (
+        TransportOrder.DRIVER_ASSIGNED,
+        TransportOrder.IN_TRANSIT,
+        TransportOrder.ARRIVED,
+    ):
+        raise APIException({'detail': 'Linked transport order is not ready for POD'})
+    pod_reference = str(
+        request.data.get('transport_pod_reference')
+        or request.data.get('pod_reference')
+        or dn.dn_code
+    ).strip()
+    order.status = TransportOrder.COMPLETED
+    order.pod_reference = pod_reference
+    order.pod_note = str(request.data.get('transport_pod_note') or '').strip()
+    order.completed_by = str(
+        getattr(request.auth, 'staff_name', '') or request.META.get('HTTP_OPERATOR', '')
+    )
+    order.completed_at = timezone.now()
+    order.save(update_fields=[
+        'status', 'pod_reference', 'pod_note', 'completed_by',
+        'completed_at', 'update_time',
+    ])
+
+
+def _cancel_outbound_transport(request, dn, note):
+    if not dn.transport_order_no:
+        return
+    order = TransportOrder.objects.select_for_update().filter(
+        openid=dn.openid,
+        transport_no=dn.transport_order_no,
+    ).first()
+    if order is None or order.status in (TransportOrder.COMPLETED, TransportOrder.CANCELLED):
+        return
+    order.status = TransportOrder.CANCELLED
+    order.note = note
+    order.save(update_fields=['status', 'note', 'update_time'])
 
 class DnListViewSet(viewsets.ModelViewSet):
     """
@@ -96,7 +380,11 @@ class DnListViewSet(viewsets.ModelViewSet):
             return self.http_method_not_allowed(request=self.request)
 
     def create(self, request, *args, **kwargs):
-        data = self.request.data
+        data = self.request.data.copy()
+        picking_mode = str(data.get('picking_mode') or DnListModel.SKU_QTY).strip().upper()
+        if picking_mode not in dict(DnListModel.PICKING_MODE_CHOICES):
+            raise APIException({'detail': 'Unsupported picking_mode'})
+        data['picking_mode'] = picking_mode
         data['openid'] = self.request.auth.openid
         custom_dn = self.request.GET.get('custom_dn', '')
         if custom_dn:
@@ -188,10 +476,31 @@ class DnDetailViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
         if DnListModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']), is_delete=False).exists():
             if customer.objects.filter(openid=self.request.auth.openid, customer_name=str(data['customer']), is_delete=False).exists():
+                dn = DnListModel.objects.select_for_update().get(
+                    openid=self.request.auth.openid,
+                    dn_code=str(data['dn_code']),
+                    is_delete=False,
+                )
+                serial_numbers = [
+                    _requested_serials_for_line(data, index)
+                    for index in range(len(data['goods_code']))
+                ]
+                goods_codes = [str(value) for value in data['goods_code']]
+                quantities = [int(value) for value in data['goods_qty']]
+                if dn.picking_mode == DnListModel.SN and len(goods_codes) != len(set(goods_codes)):
+                    raise APIException({'detail': 'SN picking requires one line per SKU'})
+                _validate_outbound_serial_request(
+                    self.request.auth.openid,
+                    dn,
+                    goods_codes,
+                    quantities,
+                    serial_numbers,
+                )
                 staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                                   id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
                 for i in range(len(data['goods_code'])):
@@ -241,6 +550,7 @@ class DnDetailViewSet(viewsets.ModelViewSet):
                                               goods_weight=goods_weight,
                                               goods_volume=goods_volume,
                                               goods_cost=goods_cost,
+                                              requested_serials=serial_numbers[j],
                                               creater=str(staff_name))
                     weight_list.append(goods_weight)
                     volume_list.append(goods_volume)
@@ -275,6 +585,18 @@ class DnDetailViewSet(viewsets.ModelViewSet):
                         transportation_list.append(transportation_detail)
                     transportation_res['detail'] = transportation_list
                 DnDetailModel.objects.bulk_create(post_data_list, batch_size=100)
+                if dn.picking_mode == DnListModel.SN:
+                    DnSerialAllocation.objects.bulk_create([
+                        DnSerialAllocation(
+                            openid=self.request.auth.openid,
+                            dn_code=dn.dn_code,
+                            goods_code=post_data.goods_code,
+                            serial_number=serial_number,
+                            created_by=staff_name,
+                        )
+                        for post_data in post_data_list
+                        for serial_number in post_data.requested_serials
+                    ])
                 check_data = DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=data['dn_code'], is_delete=False)
                 for k in range(len(check_data)):
                     res_check_data = check_data.filter(goods_code=check_data[k].goods_code)
@@ -1612,6 +1934,7 @@ class DnPickedViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         delete_data = stockbin.objects.filter(openid=self.request.auth.openid,
                                                    goods_qty=0,
@@ -1625,6 +1948,11 @@ class DnPickedViewSet(viewsets.ModelViewSet):
             raise APIException({"detail": "This dn Status Not Pre Pick"})
         else:
             data = self.request.data
+            serials_by_goods = _validate_pick_serials(
+                self.request.auth.openid,
+                qs,
+                data.get('goodsData') or [],
+            )
             for i in range(len(data['goodsData'])):
                 pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
                                                                   dn_code=str(data['dn_code']),
@@ -1706,8 +2034,10 @@ class DnPickedViewSet(viewsets.ModelViewSet):
                 dn_detail.save()
             if DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']), dn_status=3).exists() is False:
                 qs.save()
+            _mark_picked_serials(self.request.auth.openid, qs, serials_by_goods)
             return Response({"Detail": "success"}, status=200)
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         delete_data = stockbin.objects.filter(openid=self.request.auth.openid,
                                               goods_qty=0,
@@ -1721,6 +2051,11 @@ class DnPickedViewSet(viewsets.ModelViewSet):
         if qs.dn_status != 3:
             raise APIException({"detail": "This dn Status Not Pre Pick"})
         else:
+            serials_by_goods = _validate_pick_serials(
+                self.request.auth.openid,
+                qs,
+                data.get('goodsData') or [],
+            )
             for i in range(len(data['goodsData'])):
                 pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
                                                                   dn_code=str(data['dn_code']),
@@ -1815,6 +2150,7 @@ class DnPickedViewSet(viewsets.ModelViewSet):
                     qs.save()
                     dn_detail.dn_status = 4
                     dn_detail.save()
+            _mark_picked_serials(self.request.auth.openid, qs, serials_by_goods)
             return Response({"Detail": "success"}, status=200)
 
 class DnDispatchViewSet(viewsets.ModelViewSet):
@@ -1856,6 +2192,7 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
         if qs.dn_status != 4:
             raise APIException({"detail": "This DN Status Not Picked"})
         else:
+            _require_all_picked_serials(self.request.auth.openid, qs)
             data = self.request.data
             staging_bin = data.get('staging_bin')
             if not staging_bin:
@@ -1899,6 +2236,8 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                     raise APIException({"detail": "No picked DN detail exists for this delivery note"})
                 if not pick_qty_change:
                     raise APIException({"detail": "No picking record exists for this delivery note"})
+
+                _ensure_outbound_transport(request, qs, driver_name)
 
                 stock_by_goods = {}
                 picked_by_goods = {}
@@ -1984,6 +2323,13 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                                               creater=str(operator.staff_name))
                 qs.save()
                 occupy_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
+                _mark_outbound_transport_in_transit(qs)
+                _mark_serials(
+                    self.request.auth.openid,
+                    qs.dn_code,
+                    DnSerialAllocation.PICKED,
+                    DnSerialAllocation.IN_TRANSIT,
+                )
                 return Response({"detail": "success"}, status=200)
             else:
                 raise APIException({"detail": "Driver Does Not Exists"})
@@ -2080,7 +2426,9 @@ class DnPODViewSet(viewsets.ModelViewSet):
             goods_detail.save()
         qs.dn_status = 6
         qs.save()
+        _complete_outbound_transport(request, qs)
         release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
+        _mark_shipped_serials(self.request.auth.openid, qs.dn_code)
         return Response({"detail": "success"}, status=200)
 
 
@@ -2132,6 +2480,13 @@ class DnCancelInTransitViewSet(viewsets.ModelViewSet):
             dn_status=5,
             is_delete=False,
         ).update(dn_status=7, update_time=now)
+        _mark_serials(
+            request.auth.openid,
+            qs.dn_code,
+            DnSerialAllocation.IN_TRANSIT,
+            DnSerialAllocation.RELEASED,
+        )
+        _cancel_outbound_transport(request, qs, note)
         released = release_staging_slot(request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
         return Response({'detail': 'success', 'released': released}, status=200)
 

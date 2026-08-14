@@ -118,6 +118,8 @@ node tools/greaterwms.mjs sku list --env production --query '{"goods_code__icont
 node tools/greaterwms.mjs warehouse list --env production --json
 node tools/greaterwms.mjs asn list --env production --query '{"asn_status":1}' --json
 node tools/greaterwms.mjs staging-slots list --env production --json
+node tools/greaterwms.mjs receiving list --env production --json
+node tools/greaterwms.mjs transport list --env production --json
 node tools/greaterwms.mjs packlist list --env production --asn-code ASN202608123 --json
 node tools/greaterwms.mjs sku create --env production --data '{"goods_code":"702-S"}' --dry-run --json
 node tools/greaterwms.mjs sku delete --env production --id 123 --dry-run --json
@@ -134,6 +136,23 @@ Master-data create/update and enabled single-record deletes require explicit
 `--dry-run`/`--confirm` handling. Pack List import, confirmation, replacement,
 and QC import are CLI/AI Agent operations; the web page only displays their
 results. Pack List deletion and bulk cleanup are not supported.
+
+Physical receiving and local transport are also controlled through the CLI.
+Production CLI requests use `https://api.maxsmartwms.online`; the browser UI
+continues to use `https://maxsmartwms.online`:
+
+~~~shell
+node tools/greaterwms.mjs receiving create --data-file receipt.json --dry-run --json
+node tools/greaterwms.mjs receiving qc --data-file qc.json --dry-run --json
+node tools/greaterwms.mjs receiving putaway --data-file putaway.json --dry-run --json
+node tools/greaterwms.mjs receiving reconcile --data-file reconcile.json --dry-run --json
+node tools/greaterwms.mjs transport create --data-file transport.json --dry-run --json
+node tools/greaterwms.mjs transport assign --data-file assignment.json --dry-run --json
+node tools/greaterwms.mjs transport transition --data-file transition.json --dry-run --json
+~~~
+
+Repeat the reviewed command with `--confirm` to execute it. The CLI calls the
+API and never writes directly to the database.
 
 <h4>
   <a href="https://www.56yhz.com/win_10.html">Windows X64</a>

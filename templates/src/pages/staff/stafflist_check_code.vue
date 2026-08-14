@@ -99,7 +99,7 @@ export default {
       loading: false,
       height: '',
       table_list: [],
-      staff_type_list: ['Manager', 'Inbound', 'Outbound', 'Supervisor', 'StockControl', 'Customer', 'Supplier'],
+      staff_type_list: ['Manager', 'Inbound', 'Outbound', 'Supervisor', 'StockControl', 'Warehouse', 'QC', 'Driver', 'Logistics', 'Customer', 'Supplier'],
       columns: [
         { name: 'staff_name', required: true, label: this.$t('staff.view_staff.staff_name'), align: 'left', field: 'staff_name' },
         { name: 'staff_type', label: this.$t('staff.view_staff.staff_type'), field: 'staff_type', align: 'center' },

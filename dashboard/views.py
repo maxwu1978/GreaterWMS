@@ -27,6 +27,8 @@ from django.utils import timezone
 from staging.models import StagingAssignment
 from asnserial.views import _summary as receiving_summary
 from driver.models import DispatchListModel
+from receiving.models import ReceivingRecord
+from transport.models import TransportOrder
 
 class ReceiptsViewSet(viewsets.ModelViewSet):
     """
@@ -223,7 +225,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         now = timezone.now()
         items = []
         items.extend(self._inbound_items(openid, now))
+        items.extend(self._receiving_items(openid, now))
         items.extend(self._outbound_items(openid, now))
+        items.extend(self._transport_items(openid, now))
         items = self._filter_for_identity(items, viewer_role, viewer_name)
         lane_order = {'blocked': 0, 'delayed': 1, 'now': 2, 'next': 3}
         items.sort(key=lambda item: (lane_order[item['lane']], item['sort_time']))
@@ -263,9 +267,15 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         if viewer_role == 'warehouse':
             return [item for item in items if item.get('assigned_role') == 'WAREHOUSE']
         if viewer_role == 'inbound':
-            return [item for item in items if item.get('category') == 'inbound']
+            return [item for item in items if item.get('category') in ('inbound', 'receiving')]
         if viewer_role == 'outbound':
             return [item for item in items if item.get('category') == 'outbound']
+        if viewer_role == 'logistics':
+            return [
+                item for item in items
+                if item.get('assigned_role') == 'LOGISTICS'
+                or item.get('category') == 'transport'
+            ]
         if viewer_role == 'stockcontrol':
             return [item for item in items if item.get('assigned_role') in ('WAREHOUSE', 'QC')]
         return []
@@ -310,11 +320,18 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 summary['reserved'] += 1
             else:
                 summary['occupied'] += 1
+        linked_receipt_asns = set(ReceivingRecord.objects.filter(
+            openid=openid,
+        ).exclude(
+            status=ReceivingRecord.CANCELLED,
+        ).exclude(
+            linked_asn_code='',
+        ).values_list('linked_asn_code', flat=True))
         rows = list(AsnDetailModel.objects.filter(
             openid=openid,
             asn_status__in=status_map.keys(),
             is_delete=False,
-        ).order_by('-update_time', '-id'))
+        ).exclude(asn_code__in=linked_receipt_asns).order_by('-update_time', '-id'))
         supplier_names = {row.supplier for row in rows if row.supplier}
         supplier_short_names = dict(SupplierModel.objects.filter(
             openid=openid,
@@ -393,6 +410,84 @@ class OperationsBoardViewSet(viewsets.ViewSet):
 
         return [self._format_item(item, now) for item in grouped.values()]
 
+    def _receiving_items(self, openid, now):
+        records = ReceivingRecord.objects.filter(
+            openid=openid,
+        ).exclude(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
+        items = []
+        for record in records:
+            details = list(record.details.all())
+            total = sum(int(detail.actual_qty or 0) for detail in details)
+            progress = sum(int(detail.putaway_qty or 0) for detail in details)
+            if record.status == ReceivingRecord.QC_PENDING:
+                operation, role, blocked, planned = 'Inspect', 'QC', False, False
+            elif record.status == ReceivingRecord.QC_EXCEPTION:
+                operation, role, blocked, planned = 'Resolve QC Exception', 'QC', True, False
+            elif record.status == ReceivingRecord.PUTAWAY_PENDING:
+                operation, role, blocked, planned = 'Putaway', 'WAREHOUSE', False, False
+            elif record.reconciliation_status in (ReceivingRecord.EXCEPTION, ReceivingRecord.DISPUTED):
+                operation, role, blocked, planned = 'Resolve Reconciliation', 'WAREHOUSE', True, False
+            elif record.reconciliation_status == ReceivingRecord.NO_ASN:
+                operation, role, blocked, planned = 'Await ASN', 'WAREHOUSE', False, True
+            elif record.reconciliation_status == ReceivingRecord.PENDING:
+                operation, role, blocked, planned = 'Reconcile ASN', 'WAREHOUSE', False, False
+            else:
+                operation, role, blocked, planned = 'Close Receipt', 'WAREHOUSE', False, False
+            items.append(self._format_item({
+                'category': 'receiving',
+                'reference': record.receipt_no,
+                'customer': generated_supplier_short_name(record.customer),
+                'customer_full_name': record.customer,
+                'operation': operation,
+                'location': 'Stage' if progress < total else 'Storage',
+                'action_route': 'receiving',
+                'status': record.status,
+                'reconciliation_status': record.reconciliation_status,
+                'quantity': total,
+                'progress_quantity': progress,
+                'blocked': blocked,
+                'planned': planned,
+                'timestamp': record.update_time or record.create_time,
+                'eta': None,
+                'assigned_role': role,
+                'assignee_name': '',
+                'exception_note': record.exception_note,
+            }, now))
+        return items
+
+    def _transport_items(self, openid, now):
+        orders = TransportOrder.objects.filter(openid=openid).exclude(
+            status__in=(TransportOrder.COMPLETED, TransportOrder.CANCELLED),
+        )
+        items = []
+        for order in orders:
+            if order.status in (TransportOrder.REQUESTED, TransportOrder.SCHEDULED):
+                operation, role, assignee, planned = 'Assign Driver', 'LOGISTICS', order.logistics_coordinator, False
+            elif order.status in (TransportOrder.DRIVER_ASSIGNED, TransportOrder.IN_TRANSIT):
+                operation, role, assignee, planned = 'Transport', 'DRIVER', order.driver_name, False
+            else:
+                operation, role, assignee, planned = 'Confirm Delivery', 'LOGISTICS', order.logistics_coordinator, False
+            items.append(self._format_item({
+                'category': 'transport',
+                'reference': order.transport_no,
+                'customer': generated_supplier_short_name(order.customer),
+                'customer_full_name': order.customer,
+                'operation': operation,
+                'location': order.delivery_location or order.pickup_location or 'Dock',
+                'action_route': 'transport',
+                'status': order.status,
+                'quantity': 0,
+                'progress_quantity': 0,
+                'blocked': False,
+                'planned': planned,
+                'timestamp': order.update_time or order.create_time,
+                'eta': order.eta,
+                'assigned_role': role,
+                'assignee_name': assignee or '',
+                'exception_note': order.note,
+            }, now))
+        return items
+
     def _outbound_items(self, openid, now):
         status_map = {
             1: ('Release', 'Shipping', 'freshorder', True),
@@ -467,6 +562,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'id': '%s-%s' % (item['category'], item['reference']),
             'category': item['category'],
             'operation': item['operation'],
+            'status': item.get('status', ''),
+            'reconciliation_status': item.get('reconciliation_status', ''),
+            'exception_note': item.get('exception_note', ''),
             'lane': lane,
             'reference': item['reference'],
             'customer': item.get('customer', ''),

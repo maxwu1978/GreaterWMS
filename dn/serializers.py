@@ -15,6 +15,9 @@ class SannerDnDetailGetSerializer(serializers.ModelSerializer):
     delivery_more_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_damage_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_note = serializers.CharField(read_only=True, required=False)
+    requested_serials = serializers.ListField(read_only=True, required=False)
+    picked_serials = serializers.ListField(read_only=True, required=False)
+    shipped_serials = serializers.ListField(read_only=True, required=False)
     goods_weight = serializers.FloatField(read_only=True, required=False)
     goods_volume = serializers.FloatField(read_only=True, required=False)
     goods_cost = serializers.FloatField(read_only=True, required=False)
@@ -163,6 +166,9 @@ class DNDetailGetSerializer(serializers.ModelSerializer):
     delivery_more_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_damage_qty = serializers.IntegerField(read_only=True, required=False)
     delivery_note = serializers.CharField(read_only=True, required=False)
+    requested_serials = serializers.ListField(read_only=True, required=False)
+    picked_serials = serializers.ListField(read_only=True, required=False)
+    shipped_serials = serializers.ListField(read_only=True, required=False)
     goods_weight = serializers.FloatField(read_only=True, required=False)
     goods_volume = serializers.FloatField(read_only=True, required=False)
     goods_cost = serializers.FloatField(read_only=True, required=False)
@@ -182,6 +188,7 @@ class DNDetailPostSerializer(serializers.ModelSerializer):
     goods_code = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     goods_desc = serializers.CharField(read_only=False, required=False)
     goods_qty = serializers.IntegerField(read_only=False, required=True, validators=[datasolve.qty_0_data_validate])
+    requested_serials = serializers.ListField(read_only=False, required=False)
     creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     class Meta:
         model = DnDetailModel

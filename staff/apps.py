@@ -9,7 +9,7 @@ class StaffConfig(AppConfig):
 
 DEFAULT_STAFF_TYPES = (
     'Manager', 'Supplier', 'Customer', 'Supervisor', 'Inbound',
-    'Outbound', 'StockControl', 'Warehouse', 'QC', 'Driver',
+    'Outbound', 'StockControl', 'Warehouse', 'QC', 'Driver', 'Logistics',
 )
 
 

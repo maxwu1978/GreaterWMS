@@ -86,6 +86,11 @@ const routes = [{
         path: 'packlist',
         name: 'packlist',
         component: () => import('pages/inbound/packlist.vue')
+      },
+      {
+        path: 'receiving',
+        name: 'receiving',
+        component: () => import('pages/inbound/receiving.vue')
       }
       ]
     },
@@ -331,6 +336,11 @@ const routes = [{
         component: () => import('pages/driverlist/dispatchlist.vue')
       }
       ]
+    },
+    {
+      path: 'transport',
+      name: 'transport',
+      component: () => import('pages/transport/transport.vue')
     },
     {
       path: 'customerdn',

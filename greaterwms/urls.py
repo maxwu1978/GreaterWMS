@@ -22,6 +22,8 @@ urlpatterns = [
     path('asn/', include('asn.urls')),
     path('asn/serial/', include('asnserial.urls')),
     path('dn/', include('dn.urls')),
+    path('receiving/', include('receiving.urls')),
+    path('transport/', include('transport.urls')),
     path('staff/', include('staff.urls')),
     path('binset/', include('binset.urls')),
     path('staging/', include('staging.urls')),
