@@ -8,7 +8,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
 from binset.models import ListModel as Bin
@@ -102,27 +102,32 @@ class AgentCommandPreviewView(APIView):
     """Create a short-lived, tenant-scoped preview token for CLI mutations."""
 
     def post(self, request):
+        def reject(detail, **extra):
+            payload = {'detail': detail}
+            payload.update(extra)
+            raise ValidationError(payload)
+
         require_agent_role(request)
         operation = _clean(request.data.get('operation')).lower()
         if operation not in SUPPORTED_OPERATIONS:
-            raise APIException({'detail': 'Unsupported agent operation', 'operation': operation})
+            reject('Unsupported agent operation', operation=operation)
         payload = request.data.get('payload') or {}
         if isinstance(payload, str):
             try:
                 import json
                 payload = json.loads(payload)
             except Exception:
-                raise APIException({'detail': 'payload must be a JSON object'})
+                reject('payload must be a JSON object')
         if not isinstance(payload, dict):
-            raise APIException({'detail': 'payload must be a JSON object'})
+            reject('payload must be a JSON object')
         resource_id = _text(request.data.get('resource_id'))
         asn_code = _clean(request.data.get('asn_code'))
         if operation in {'asn.eta', 'asn.arrival', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.receive'} and not resource_id:
-            raise APIException({'detail': 'resource_id is required for %s' % operation})
+            reject('resource_id is required for %s' % operation)
         if operation in {'asn.putaway', 'packlist.confirm', 'serial.resolve', 'serial.exception_move'} and not resource_id:
-            raise APIException({'detail': 'resource_id is required for %s' % operation})
-        if operation in {'asn.receive', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.putaway_bulk', 'serial.resolve_quantity', 'serial.exception_move', 'serial.exception_move_quantity', 'packlist.import', 'serial.import', 'inspection.import'} and not asn_code:
-            raise APIException({'detail': 'asn_code is required for %s' % operation})
+            reject('resource_id is required for %s' % operation)
+        if operation in {'asn.receive', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.putaway', 'asn.putaway_bulk', 'serial.resolve_quantity', 'serial.exception_move', 'serial.exception_move_quantity', 'packlist.import', 'serial.import', 'inspection.import'} and not asn_code:
+            reject('asn_code is required for %s' % operation)
         if operation in {'asn.eta', 'asn.arrival', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.receive'}:
             asn = AsnListModel.objects.filter(
                 openid=request.auth.openid,
@@ -130,9 +135,9 @@ class AgentCommandPreviewView(APIView):
                 is_delete=False,
             ).first()
             if asn is None:
-                raise APIException({'detail': 'ASN does not exist'})
+                reject('ASN does not exist')
             if asn_code and asn.asn_code != asn_code:
-                raise APIException({'detail': 'ASN code does not match the selected ASN'})
+                reject('ASN code does not match the selected ASN')
             expected_status = {
                 'asn.arrival': 1,
                 'asn.reserve_staging': 1,
@@ -141,21 +146,35 @@ class AgentCommandPreviewView(APIView):
                 'asn.receive': 3,
             }.get(operation)
             if expected_status is not None and int(asn.asn_status or 0) != expected_status:
-                raise APIException({'detail': '%s requires ASN status %s' % (operation, expected_status)})
+                reject('%s requires ASN status %s' % (operation, expected_status))
             if operation == 'asn.unload_start' and not asn.actual_arrival_at:
-                raise APIException({'detail': 'Mark the ASN as arrived before starting unloading'})
+                reject('Mark the ASN as arrived before starting unloading')
         if operation == 'asn.eta' and not AsnListModel.objects.filter(
             openid=request.auth.openid, id=resource_id, is_delete=False,
         ).exists():
-            raise APIException({'detail': 'ASN does not exist'})
+            reject('ASN does not exist')
         if operation == 'asn.putaway':
             detail = AsnDetailModel.objects.filter(
-                openid=request.auth.openid, id=resource_id, asn_status=4, is_delete=False,
+                openid=request.auth.openid, id=resource_id, is_delete=False,
             ).first()
-            if detail is None:
-                raise APIException({'detail': 'ASN detail is not ready for putaway'})
+            if detail is None or detail.asn_status != 4:
+                reject('ASN detail is not ready for putaway')
             if asn_code and detail.asn_code != asn_code:
-                raise APIException({'detail': 'ASN code does not match the selected ASN detail'})
+                reject('ASN code does not match the selected ASN detail')
+            from asn.views import MoveToBinViewSet
+            try:
+                with transaction.atomic():
+                    validator = MoveToBinViewSet()
+                    validator.request = request
+                    validator._validate_putaway_request(
+                        detail.asn_code,
+                        detail,
+                        payload.get('qty'),
+                        payload.get('bin_name'),
+                        payload.get('putaway_driver') or payload.get('driver'),
+                    )
+            except APIException as exc:
+                reject(exc.detail)
         if operation == 'asn.putaway_bulk':
             asn = AsnListModel.objects.filter(
                 openid=request.auth.openid,
@@ -164,15 +183,15 @@ class AgentCommandPreviewView(APIView):
                 is_delete=False,
             ).first()
             if asn is None:
-                raise APIException({'detail': 'ASN is not ready for putaway'})
+                reject('ASN is not ready for putaway')
         if operation == 'packlist.confirm':
             if not PackListDocument.objects.filter(
                 openid=request.auth.openid, id=resource_id, is_current=True,
             ).exists():
-                raise APIException({'detail': 'Pack List does not exist'})
+                reject('Pack List does not exist')
         if operation == 'serial.resolve':
             if not AsnSerialRecord.objects.filter(openid=request.auth.openid, id=resource_id).exists():
-                raise APIException({'detail': 'Serial record does not exist'})
+                reject('Serial record does not exist')
         if operation == 'serial.exception_move':
             if not AsnSerialRecord.objects.filter(
                 openid=request.auth.openid,
@@ -181,7 +200,7 @@ class AgentCommandPreviewView(APIView):
                 exception_resolved=True,
                 exception_moved=False,
             ).exists():
-                raise APIException({'detail': 'Serial exception is not ready for physical movement'})
+                reject('Serial exception is not ready for physical movement')
         if operation == 'serial.resolve_quantity':
             if not AsnDetailModel.objects.filter(
                 openid=request.auth.openid,
@@ -189,7 +208,7 @@ class AgentCommandPreviewView(APIView):
                 goods_code=_clean(payload.get('goods_code')),
                 is_delete=False,
             ).exists():
-                raise APIException({'detail': 'ASN detail does not exist'})
+                reject('ASN detail does not exist')
         if operation == 'serial.exception_move_quantity':
             if not AsnDetailModel.objects.filter(
                 openid=request.auth.openid,
@@ -198,7 +217,7 @@ class AgentCommandPreviewView(APIView):
                 exception_resolved=True,
                 is_delete=False,
             ).exists():
-                raise APIException({'detail': 'Quantity exception is not ready for physical movement'})
+                reject('Quantity exception is not ready for physical movement')
         return Response(create_preview(
             request,
             operation,

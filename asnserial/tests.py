@@ -10,6 +10,7 @@ from rest_framework.exceptions import APIException
 from asn.models import AsnDetailModel, AsnListModel
 from asn.serializers import ASNListGetSerializer
 from binset.models import ListModel as Bin
+from driver.models import ListModel as Driver
 from stock.models import StockBinModel, StockListModel
 from staff.models import ListModel as Staff
 
@@ -26,6 +27,7 @@ from .models import (
 from .views import (
     SerialExceptionResolveView,
     SerialExceptionMoveView,
+    AgentCommandPreviewView,
     _create_pack_list,
     _receiving_started,
     _scan,
@@ -277,6 +279,58 @@ class PackListWorkflowTests(TestCase):
             )
 
         self.assertEqual(raised.exception.status_code, 400)
+
+    def test_putaway_preview_reuses_final_putaway_gates(self):
+        asn = AsnListModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        asn.asn_status = 4
+        asn.save(update_fields=['asn_status'])
+        detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
+        detail.asn_status = 4
+        detail.goods_actual_qty = 2
+        detail.sorted_qty = 2
+        detail.save(update_fields=['asn_status', 'goods_actual_qty', 'sorted_qty'])
+        Driver.objects.create(
+            openid=self.openid,
+            driver_name='Tom',
+            license_plate='TEST-001',
+            contact='555-0001',
+            creater='tester',
+        )
+        Bin.objects.create(
+            openid=self.openid,
+            bin_name='A1-01',
+            bin_size='STD',
+            bin_property='Normal',
+            location_role='STORAGE',
+            staging_flow='NONE',
+            creater='tester',
+            bar_code='A1-01',
+        )
+        StockListModel.objects.create(
+            openid=self.openid,
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=2,
+            sorted_stock=0,
+        )
+        request = self.agent_request({
+            'operation': 'asn.putaway',
+            'resource_id': str(detail.id),
+            'asn_code': self.asn_code,
+            'payload': {
+                'asn_code': self.asn_code,
+                'goods_code': '702-S',
+                'qty': 1,
+                'bin_name': 'A1-01',
+                'putaway_driver': 'Tom',
+            },
+        })
+
+        with self.assertRaises(Exception) as raised:
+            AgentCommandPreviewView().post(request)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn('remaining received quantity', str(raised.exception.detail))
 
     def test_summary_exposes_pending_pack_list_reconciliation(self):
         detail = AsnDetailModel.objects.get(asn_code=self.asn_code, openid=self.openid)
