@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.exceptions import APIException, PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from driver.models import DispatchListModel, ListModel as Driver
 from staff.models import ListModel as Staff
@@ -13,7 +13,13 @@ from asnserial.models import AsnSerialRecord
 
 from .models import DnDetailModel, DnListModel, DnSerialAllocation, PickingListModel
 from .serializers import DNListGetSerializer
-from .views import DnCancelInTransitViewSet, DnDispatchViewSet, DnPODViewSet, _validate_outbound_serial_request
+from .views import (
+    DnCancelInTransitViewSet,
+    DnDispatchViewSet,
+    DnPODViewSet,
+    _validate_outbound_detail_payload,
+    _validate_outbound_serial_request,
+)
 
 
 class DnDispatchSafetyTests(TestCase):
@@ -337,3 +343,42 @@ class SerialAllocationSafetyTests(TestCase):
                 [['SN-SHIPPED-001']],
             )
         self.assertIn('already allocated', raised.exception.detail['detail'])
+
+
+class OutboundPayloadValidationTests(TestCase):
+    def test_scalar_parallel_fields_are_rejected_before_legacy_indexing(self):
+        with self.assertRaises(ValidationError) as raised:
+            _validate_outbound_detail_payload({
+                'dn_code': 'DN-TEST-01',
+                'customer': 'Customer A',
+                'goods_code': 'SKU-01',
+                'goods_qty': 1,
+            })
+
+        self.assertEqual(raised.exception.detail['goods_code'][0], 'Expected a non-empty list.')
+        self.assertEqual(raised.exception.detail['goods_qty'][0], 'Expected a non-empty list.')
+
+    def test_parallel_fields_must_have_matching_lengths(self):
+        with self.assertRaises(ValidationError) as raised:
+            _validate_outbound_detail_payload({
+                'dn_code': 'DN-TEST-01',
+                'customer': 'Customer A',
+                'goods_code': ['SKU-01', 'SKU-02'],
+                'goods_qty': [1],
+            })
+
+        self.assertEqual(
+            raised.exception.detail['goods_qty'][0],
+            'Must contain the same number of entries as goods_code.',
+        )
+
+    def test_parallel_fields_reject_non_integer_quantity(self):
+        with self.assertRaises(ValidationError) as raised:
+            _validate_outbound_detail_payload({
+                'dn_code': 'DN-TEST-01',
+                'customer': 'Customer A',
+                'goods_code': ['SKU-01'],
+                'goods_qty': ['two'],
+            })
+
+        self.assertEqual(raised.exception.detail['goods_qty'][0], 'Entry 0 must be an integer.')

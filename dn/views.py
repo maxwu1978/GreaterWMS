@@ -10,7 +10,7 @@ from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
 from .filter import DnListFilter, DnDetailFilter, DnPickingListFilter
-from rest_framework.exceptions import APIException, PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from customer.models import ListModel as customer
 from warehouse.models import ListModel as warehouse
 from binset.models import ListModel as binset
@@ -39,6 +39,44 @@ from staging.services import StagingError, occupy_staging_slot, release_staging_
 from asnserial.models import AsnSerialRecord
 from receiving.models import ReceivingRecord, ReceivingSerial
 from transport.models import TransportOrder
+from asnserial.agent import complete_preview, consume_preview, is_agent_request, request_payload
+
+
+def _validate_outbound_detail_payload(data):
+    """Reject malformed parallel arrays before legacy indexing can raise 500."""
+    errors = {}
+    for field in ('dn_code', 'customer'):
+        if not str(data.get(field) or '').strip():
+            errors[field] = ['This field is required.']
+
+    goods_codes = data.get('goods_code')
+    goods_qty = data.get('goods_qty')
+    if not isinstance(goods_codes, list) or not goods_codes:
+        errors['goods_code'] = ['Expected a non-empty list.']
+    if not isinstance(goods_qty, list) or not goods_qty:
+        errors['goods_qty'] = ['Expected a non-empty list.']
+    if isinstance(goods_codes, list) and isinstance(goods_qty, list) and len(goods_codes) != len(goods_qty):
+        errors['goods_qty'] = ['Must contain the same number of entries as goods_code.']
+    if errors:
+        raise ValidationError(errors)
+
+    for index, value in enumerate(goods_qty):
+        try:
+            int(value)
+        except (TypeError, ValueError):
+            raise ValidationError({'goods_qty': ['Entry %s must be an integer.' % index]})
+
+
+def _agent_preview(request, operation, resource_id='', asn_code=''):
+    if not is_agent_request(request):
+        return None, None
+    return consume_preview(
+        request,
+        operation,
+        request_payload(request),
+        resource_id=str(resource_id or ''),
+        asn_code=str(asn_code or ''),
+    )
 
 
 def _requested_serials_for_line(data, index):
@@ -388,8 +426,12 @@ class DnListViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data.copy()
+        command, replay = _agent_preview(request, 'outbound.create')
+        if replay is not None:
+            return Response(replay)
         picking_mode = str(data.get('picking_mode') or DnListModel.SKU_QTY).strip().upper()
         if picking_mode not in dict(DnListModel.PICKING_MODE_CHOICES):
             raise APIException({'detail': 'Unsupported picking_mode'})
@@ -416,8 +458,10 @@ class DnListViewSet(viewsets.ModelViewSet):
         serializer.save()
         scanner.objects.create(openid=self.request.auth.openid, mode="DN", code=data['dn_code'],
                                bar_code=data['bar_code'])
+        result = serializer.data
+        complete_preview(command, result)
         headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=200, headers=headers)
+        return Response(result, status=200, headers=headers)
 
     def destroy(self, request, pk):
         qs = self.get_object()
@@ -488,6 +532,14 @@ class DnDetailViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
+        _validate_outbound_detail_payload(data)
+        command, replay = _agent_preview(
+            request,
+            'outbound.detail.create',
+            resource_id=data.get('dn_code'),
+        )
+        if replay is not None:
+            return Response(replay)
         if DnListModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']), is_delete=False).exists():
             if customer.objects.filter(openid=self.request.auth.openid, customer_name=str(data['customer']), is_delete=False).exists():
                 dn = DnListModel.objects.select_for_update().get(
@@ -637,7 +689,9 @@ class DnDetailViewSet(viewsets.ModelViewSet):
                 DnListModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code'])).update(
                     customer=str(data['customer']), total_weight=total_weight, total_volume=total_volume,
                     total_cost=total_cost, transportation_fee=transportation_res)
-                return Response({"detail": "success"}, status=200)
+                result = {"detail": "success"}
+                complete_preview(command, result)
+                return Response(result, status=200)
             else:
                 raise APIException({"detail": "customer does not exists"})
         else:
@@ -645,6 +699,7 @@ class DnDetailViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         data = self.request.data
+        _validate_outbound_detail_payload(data)
         if DnListModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']),
                                        dn_status=1, is_delete=False).exists():
             if customer.objects.filter(openid=self.request.auth.openid, customer_name=str(data['customer']),
@@ -892,6 +947,7 @@ class DnNewOrderViewSet(viewsets.ModelViewSet):
         else:
             return self.http_method_not_allowed(request=self.request)
 
+    @transaction.atomic
     def create(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
@@ -901,6 +957,9 @@ class DnNewOrderViewSet(viewsets.ModelViewSet):
                 dn_detail_list = DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=qs.dn_code,
                                                               dn_status=1, is_delete=False)
                 if dn_detail_list.exists():
+                    command, replay = _agent_preview(request, 'outbound.release', resource_id=pk)
+                    if replay is not None:
+                        return Response(replay)
                     qs.dn_status = 2
                     for i in range(len(dn_detail_list)):
                         if stocklist.objects.filter(openid=self.request.auth.openid,
@@ -925,7 +984,9 @@ class DnNewOrderViewSet(viewsets.ModelViewSet):
                     qs.save()
                     serializer = self.get_serializer(qs, many=False)
                     headers = self.get_success_headers(serializer.data)
-                    return Response(serializer.data, status=200, headers=headers)
+                    result = serializer.data
+                    complete_preview(command, result)
+                    return Response(result, status=200, headers=headers)
                 else:
                     raise APIException({"detail": "Please Enter The DN Detail"})
             else:
@@ -1407,12 +1468,16 @@ class DnOrderReleaseViewSet(viewsets.ModelViewSet):
                 continue
         return Response({"detail": "success"}, status=200)
 
+    @transaction.atomic
     def update(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
             raise APIException({"detail": "Cannot Release Order Data Which Not Yours"})
         else:
             if qs.dn_status == 2:
+                command, replay = _agent_preview(request, 'outbound.order_release', resource_id=pk)
+                if replay is not None:
+                    return Response(replay)
                 staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                                   id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
                 dn_detail_list = DnDetailModel.objects.filter(openid=self.request.auth.openid,
@@ -1849,7 +1914,9 @@ class DnOrderReleaseViewSet(viewsets.ModelViewSet):
                         qs.is_delete = True
                         qs.dn_status = 3
                         qs.save()
-                return Response({"detail": "success"}, status=200)
+                result = {"detail": "success"}
+                complete_preview(command, result)
+                return Response(result, status=200)
             else:
                 raise APIException({"detail": "This Order Does Not in Release Status"})
 
@@ -1960,6 +2027,9 @@ class DnPickedViewSet(viewsets.ModelViewSet):
         if qs.dn_status != 3:
             raise APIException({"detail": "This dn Status Not Pre Pick"})
         else:
+            command, replay = _agent_preview(request, 'outbound.pick', resource_id=pk)
+            if replay is not None:
+                return Response(replay)
             data = self.request.data
             serials_by_goods = _validate_pick_serials(
                 self.request.auth.openid,
@@ -2048,7 +2118,9 @@ class DnPickedViewSet(viewsets.ModelViewSet):
             if DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']), dn_status=3).exists() is False:
                 qs.save()
             _mark_picked_serials(self.request.auth.openid, qs, serials_by_goods)
-            return Response({"Detail": "success"}, status=200)
+            result = {"Detail": "success"}
+            complete_preview(command, result)
+            return Response(result, status=200)
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
@@ -2205,6 +2277,9 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
         if qs.dn_status != 4:
             raise APIException({"detail": "This DN Status Not Picked"})
         else:
+            command, replay = _agent_preview(request, 'outbound.dispatch', resource_id=pk)
+            if replay is not None:
+                return Response(replay)
             _require_all_picked_serials(self.request.auth.openid, qs)
             data = self.request.data
             staging_bin = data.get('staging_bin')
@@ -2343,7 +2418,9 @@ class DnDispatchViewSet(viewsets.ModelViewSet):
                     DnSerialAllocation.PICKED,
                     DnSerialAllocation.IN_TRANSIT,
                 )
-                return Response({"detail": "success"}, status=200)
+                result = {"detail": "success"}
+                complete_preview(command, result)
+                return Response(result, status=200)
             else:
                 raise APIException({"detail": "Driver Does Not Exists"})
 
@@ -2382,6 +2459,9 @@ class DnPODViewSet(viewsets.ModelViewSet):
         qs = self.get_object()
         if qs.dn_status != 5:
             raise APIException({"detail": "This DN Status Not Intran-Sit"})
+        command, replay = _agent_preview(request, 'outbound.pod', resource_id=pk)
+        if replay is not None:
+            return Response(replay)
         data = self.request.data
         dn_code = str(data.get('dn_code') or qs.dn_code)
         if dn_code != str(qs.dn_code):
@@ -2442,7 +2522,9 @@ class DnPODViewSet(viewsets.ModelViewSet):
         _complete_outbound_transport(request, qs)
         release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
         _mark_shipped_serials(self.request.auth.openid, qs.dn_code)
-        return Response({"detail": "success"}, status=200)
+        result = {"detail": "success"}
+        complete_preview(command, result)
+        return Response(result, status=200)
 
 
 class DnCancelInTransitViewSet(viewsets.ModelViewSet):
@@ -2474,6 +2556,9 @@ class DnCancelInTransitViewSet(viewsets.ModelViewSet):
         qs = self.get_object()
         if qs.dn_status != 5:
             raise APIException({'detail': 'Only in-transit delivery notes can be canceled'})
+        command, replay = _agent_preview(request, 'outbound.cancel_intransit', resource_id=pk)
+        if replay is not None:
+            return Response(replay)
 
         note = str(request.data.get('cancellation_note') or '').strip()
         if not note:
@@ -2509,12 +2594,14 @@ class DnCancelInTransitViewSet(viewsets.ModelViewSet):
         )
         _cancel_outbound_transport(request, qs, note)
         released = release_staging_slot(request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
-        return Response({
+        result = {
             'detail': 'success',
             'released': released,
             'cancelled_qty': canceled_quantities,
             'inventory_action': 'Return goods must be processed through Receiving, QC and Putaway.',
-        }, status=200)
+        }
+        complete_preview(command, result)
+        return Response(result, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileListRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

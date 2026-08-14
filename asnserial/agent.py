@@ -14,6 +14,7 @@ from .models import AgentCommandPreview
 
 AGENT_CLIENT = 'greaterwms-cli'
 WORKFLOW_ROLES = frozenset({'admin', 'manager', 'supervisor', 'inbound', 'stockcontrol'})
+OUTBOUND_WORKFLOW_ROLES = frozenset({'admin', 'manager', 'supervisor', 'outbound', 'warehouse'})
 SUPPORTED_OPERATIONS = frozenset({
     'asn.create',
     'asn.detail.create',
@@ -33,11 +34,28 @@ SUPPORTED_OPERATIONS = frozenset({
     'packlist.import',
     'serial.import',
     'inspection.import',
+    'outbound.create',
+    'outbound.detail.create',
+    'outbound.release',
+    'outbound.order_release',
+    'outbound.pick',
+    'outbound.dispatch',
+    'outbound.pod',
+    'outbound.cancel_intransit',
 })
 
 
 def is_agent_request(request):
     return str(request.META.get('HTTP_X_AGENT_CLIENT') or '').strip().lower() == AGENT_CLIENT
+
+
+def agent_roles_for_operation(operation):
+    operation = str(operation or '').strip().lower()
+    if operation == 'outbound.cancel_intransit':
+        return frozenset({'admin'})
+    if operation.startswith('outbound.'):
+        return OUTBOUND_WORKFLOW_ROLES
+    return WORKFLOW_ROLES
 
 
 def require_agent_role(request, roles=WORKFLOW_ROLES):
@@ -90,7 +108,7 @@ def _control_value(request, name):
 def create_preview(request, operation, payload, resource_id='', asn_code=''):
     if operation not in SUPPORTED_OPERATIONS:
         raise APIException({'detail': 'Unsupported agent operation', 'operation': operation})
-    require_agent_role(request)
+    require_agent_role(request, agent_roles_for_operation(operation))
     token = secrets.token_urlsafe(32)
     now = timezone.now()
     command = AgentCommandPreview.objects.create(
@@ -119,7 +137,7 @@ def consume_preview(request, operation, payload, resource_id='', asn_code=''):
     """Validate a CLI preview token and return (command, replay_result)."""
     if not is_agent_request(request):
         return None, None
-    require_agent_role(request)
+    require_agent_role(request, agent_roles_for_operation(operation))
     token = _control_value(request, 'confirmation_token')
     idempotency_key = _control_value(request, 'idempotency_key')
     if not token or not idempotency_key:

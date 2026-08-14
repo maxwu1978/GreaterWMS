@@ -417,6 +417,26 @@ async function runProtectedJsonCommand ({ operation, endpoint, method = 'POST', 
   print(await request(endpoint, { method, json: agentPayload(data) }), json)
 }
 
+function validateOutboundCreateData (data) {
+  if (!data.customer) throw new Error('outbound create requires customer in --data')
+  if (!data.creater) throw new Error('outbound create requires creater in --data')
+  return data
+}
+
+function validateOutboundDetailData (data) {
+  if (!data.dn_code) throw new Error('outbound-detail create requires dn_code in --data')
+  if (!Array.isArray(data.goods_code) || data.goods_code.length === 0) {
+    throw new Error('outbound-detail create requires goods_code as a non-empty JSON array')
+  }
+  if (!Array.isArray(data.goods_qty) || data.goods_qty.length === 0) {
+    throw new Error('outbound-detail create requires goods_qty as a non-empty JSON array')
+  }
+  if (data.goods_code.length !== data.goods_qty.length) {
+    throw new Error('outbound-detail create requires goods_code and goods_qty arrays with the same length')
+  }
+  return data
+}
+
 async function readResource (resource, action, options, json) {
   if (resource === 'receiving' && !['list', 'get'].includes(action)) return false
   if (resource === 'transport' && !['list', 'get'].includes(action)) return false
@@ -549,6 +569,7 @@ function help () {
   process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE [--evidence-url URL] --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
   process.stdout.write('Receiving: receiving create|qc|resolve|putaway|reconcile|resolve-reconciliation --data JSON --dry-run|--confirm; receiving exceptions\n')
   process.stdout.write('Transport: transport create|assign|transition --data JSON --dry-run|--confirm; transport list\n')
+  process.stdout.write('Outbound: outbound create; outbound-detail create; outbound release|order-release|pick|dispatch|pod|cancel-intransit --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
   process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
@@ -752,6 +773,56 @@ async function main () {
       json,
       resourceId: options.id,
       asnCode: data.asn_code || ''
+    })
+    return
+  }
+
+  const outboundActions = {
+    release: { operation: 'outbound.release', endpoint: (id) => `/dn/neworder/${encodeURIComponent(String(id))}/`, method: 'POST' },
+    'order-release': { operation: 'outbound.order_release', endpoint: (id) => `/dn/orderrelease/${encodeURIComponent(String(id))}/`, method: 'PUT' },
+    pick: { operation: 'outbound.pick', endpoint: (id) => `/dn/picked/${encodeURIComponent(String(id))}/`, method: 'POST' },
+    dispatch: { operation: 'outbound.dispatch', endpoint: (id) => `/dn/dispatch/${encodeURIComponent(String(id))}/`, method: 'POST' },
+    pod: { operation: 'outbound.pod', endpoint: (id) => `/dn/pod/${encodeURIComponent(String(id))}/`, method: 'POST' },
+    'cancel-intransit': { operation: 'outbound.cancel_intransit', endpoint: (id) => `/dn/cancel-intransit/${encodeURIComponent(String(id))}/`, method: 'POST' },
+  }
+  if (resource === 'outbound' && action === 'create') {
+    const data = validateOutboundCreateData(parseData(options))
+    requireConfirmation(options, 'outbound create')
+    await runAgentJsonCommand({
+      operation: 'outbound.create',
+      endpoint: '/dn/list/',
+      data,
+      options,
+      json,
+    })
+    return
+  }
+  if (resource === 'outbound-detail' && action === 'create') {
+    const data = validateOutboundDetailData(parseData(options))
+    requireConfirmation(options, 'outbound-detail create')
+    await runAgentJsonCommand({
+      operation: 'outbound.detail.create',
+      endpoint: '/dn/detail/',
+      data,
+      options,
+      json,
+      resourceId: data.dn_code,
+    })
+    return
+  }
+  if (resource === 'outbound' && outboundActions[action]) {
+    if (!options.id) throw new Error('--id is required')
+    const data = parseData(options)
+    requireConfirmation(options, `outbound ${action}`)
+    const definition = outboundActions[action]
+    await runAgentJsonCommand({
+      operation: definition.operation,
+      endpoint: definition.endpoint(options.id),
+      method: definition.method,
+      data,
+      options,
+      json,
+      resourceId: options.id,
     })
     return
   }

@@ -12,7 +12,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .filter import AsnListFilter, AsnDetailFilter
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 from supplier.models import ListModel as supplier
 from warehouse.models import ListModel as warehouse
 from goods.models import ListModel as goods
@@ -84,6 +84,31 @@ def _asn_response(request, asn):
         asn,
         context={'request': request},
     ).data
+
+
+def _validate_asn_detail_payload(data):
+    """Reject malformed parallel arrays before legacy indexing can raise 500."""
+    errors = {}
+    for field in ('asn_code', 'supplier'):
+        if not str(data.get(field) or '').strip():
+            errors[field] = ['This field is required.']
+
+    goods_codes = data.get('goods_code')
+    goods_qty = data.get('goods_qty')
+    if not isinstance(goods_codes, list) or not goods_codes:
+        errors['goods_code'] = ['Expected a non-empty list.']
+    if not isinstance(goods_qty, list) or not goods_qty:
+        errors['goods_qty'] = ['Expected a non-empty list.']
+    if isinstance(goods_codes, list) and isinstance(goods_qty, list) and len(goods_codes) != len(goods_qty):
+        errors['goods_qty'] = ['Must contain the same number of entries as goods_code.']
+    if errors:
+        raise ValidationError(errors)
+
+    for index, value in enumerate(goods_qty):
+        try:
+            int(value)
+        except (TypeError, ValueError):
+            raise ValidationError({'goods_qty': ['Entry %s must be an integer.' % index]})
 
 class AsnListViewSet(viewsets.ModelViewSet):
     """
@@ -538,6 +563,7 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
+        _validate_asn_detail_payload(data)
         command, replay = consume_preview(
             request,
             'asn.detail.create',
@@ -663,6 +689,7 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         data = self.request.data
+        _validate_asn_detail_payload(data)
         if AsnListModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']),
                                        asn_status=1, is_delete=False).exists():
             if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=str(data['supplier']),

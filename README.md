@@ -149,7 +149,17 @@ node tools/greaterwms.mjs receiving reconcile --data-file reconcile.json --dry-r
 node tools/greaterwms.mjs transport create --data-file transport.json --dry-run --json
 node tools/greaterwms.mjs transport assign --data-file assignment.json --dry-run --json
 node tools/greaterwms.mjs transport transition --data-file transition.json --dry-run --json
+node tools/greaterwms.mjs outbound create --data-file outbound.json --dry-run --json
+node tools/greaterwms.mjs outbound-detail create --data-file outbound-detail.json --dry-run --json
+node tools/greaterwms.mjs outbound release --id 123 --data '{}' --dry-run --json
+node tools/greaterwms.mjs outbound pod --id 123 --data-file pod.json --dry-run --json
 ~~~
+
+Outbound CLI commands use the same preview/confirmation flow as inbound
+commands. `outbound-detail` requires parallel JSON arrays for `goods_code` and
+`goods_qty`; scalar values are rejected before they reach the legacy detail
+logic. See `docs/outbound-cli.md` for the complete status sequence and payload
+examples.
 
 When an in-transit outbound delivery is canceled, the system records the
 canceled quantity and clears `intransit_qty` without adding stock back

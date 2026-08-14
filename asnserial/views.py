@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import APIException, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
+from dn.models import DnDetailModel, DnListModel
 from binset.models import ListModel as Bin
 from stock.models import StockBinModel, StockListModel
 from utils.md5 import Md5
@@ -41,6 +42,7 @@ from .agent import (
     is_agent_request,
     request_payload,
     require_agent_role,
+    agent_roles_for_operation,
 )
 
 
@@ -108,10 +110,10 @@ class AgentCommandPreviewView(APIView):
             payload.update(extra)
             raise ValidationError(payload)
 
-        require_agent_role(request)
         operation = _clean(request.data.get('operation')).lower()
         if operation not in SUPPORTED_OPERATIONS:
             reject('Unsupported agent operation', operation=operation)
+        require_agent_role(request, agent_roles_for_operation(operation))
         payload = request.data.get('payload') or {}
         if isinstance(payload, str):
             try:
@@ -185,6 +187,54 @@ class AgentCommandPreviewView(APIView):
             ).first()
             if asn is None:
                 reject('ASN is not ready for putaway')
+        if operation.startswith('outbound.'):
+            if operation == 'outbound.create':
+                for field in ('customer', 'creater'):
+                    if not _clean(payload.get(field)):
+                        reject('%s is required' % field)
+            elif operation == 'outbound.detail.create':
+                dn_code = _clean(payload.get('dn_code'))
+                if not dn_code:
+                    reject('dn_code is required for outbound.detail.create')
+                dn = DnListModel.objects.filter(
+                    openid=request.auth.openid,
+                    dn_code=dn_code,
+                    is_delete=False,
+                ).first()
+                if dn is None:
+                    reject('Delivery note does not exist')
+                if int(dn.dn_status or 0) != 1:
+                    reject('Outbound detail can only be added to a pre-order delivery note')
+                goods_codes = payload.get('goods_code')
+                goods_qty = payload.get('goods_qty')
+                if not isinstance(goods_codes, list) or not goods_codes:
+                    reject('goods_code must be a non-empty list')
+                if not isinstance(goods_qty, list) or not goods_qty:
+                    reject('goods_qty must be a non-empty list')
+                if len(goods_codes) != len(goods_qty):
+                    reject('goods_code and goods_qty must have the same length')
+            else:
+                try:
+                    dn_id = int(resource_id)
+                except (TypeError, ValueError):
+                    reject('resource_id must be a delivery note id')
+                dn = DnListModel.objects.filter(
+                    openid=request.auth.openid,
+                    id=dn_id,
+                    is_delete=False,
+                ).first()
+                if dn is None:
+                    reject('Delivery note does not exist')
+                expected_status = {
+                    'outbound.release': 1,
+                    'outbound.order_release': 2,
+                    'outbound.pick': 3,
+                    'outbound.dispatch': 4,
+                    'outbound.pod': 5,
+                    'outbound.cancel_intransit': 5,
+                }.get(operation)
+                if expected_status is not None and int(dn.dn_status or 0) != expected_status:
+                    reject('%s requires delivery note status %s' % (operation, expected_status))
         if operation == 'packlist.confirm':
             if not PackListDocument.objects.filter(
                 openid=request.auth.openid, id=resource_id, is_current=True,

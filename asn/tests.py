@@ -1,13 +1,13 @@
 from types import SimpleNamespace
 
 from django.test import TestCase
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 
 from supplier.models import ListModel as Supplier
 from utils.my_exceptions import custom_exception_handler
 
 from .models import AsnDetailModel, AsnListModel
-from .views import AsnDetailViewSet, MoveToBinViewSet
+from .views import AsnDetailViewSet, MoveToBinViewSet, _validate_asn_detail_payload
 
 
 class AsnInputSafetyTests(TestCase):
@@ -84,3 +84,29 @@ class AsnInputSafetyTests(TestCase):
         response = custom_exception_handler(raised.exception, {'request': request})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data['detail'], 'Putaway ASN code does not match the selected ASN detail')
+
+    def test_asn_detail_rejects_scalar_parallel_fields(self):
+        with self.assertRaises(ValidationError) as raised:
+            _validate_asn_detail_payload({
+                'asn_code': 'ASN-TEST-01',
+                'supplier': 'Customer A',
+                'goods_code': 'SKU-01',
+                'goods_qty': 1,
+            })
+
+        self.assertEqual(raised.exception.detail['goods_code'][0], 'Expected a non-empty list.')
+        self.assertEqual(raised.exception.detail['goods_qty'][0], 'Expected a non-empty list.')
+
+    def test_asn_detail_rejects_mismatched_parallel_fields(self):
+        with self.assertRaises(ValidationError) as raised:
+            _validate_asn_detail_payload({
+                'asn_code': 'ASN-TEST-01',
+                'supplier': 'Customer A',
+                'goods_code': ['SKU-01', 'SKU-02'],
+                'goods_qty': [1],
+            })
+
+        self.assertEqual(
+            raised.exception.detail['goods_qty'][0],
+            'Must contain the same number of entries as goods_code.',
+        )

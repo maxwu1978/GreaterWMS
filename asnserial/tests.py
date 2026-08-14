@@ -280,6 +280,32 @@ class PackListWorkflowTests(TestCase):
         self.assertEqual(replay, {'detail': 'success'})
         self.assertEqual(replay_command.id, command.id)
 
+    def test_outbound_role_can_confirm_outbound_preview(self):
+        operator = Staff.objects.create(
+            openid=self.openid,
+            staff_name='Outbound Operator',
+            staff_type='Outbound',
+        )
+        payload = {
+            'customer': 'Test Customer',
+            'creater': 'Outbound Operator',
+        }
+        preview_request = self.agent_request(operator_id=operator.id)
+        preview = create_preview(preview_request, 'outbound.create', payload)
+        execute_request = self.agent_request({
+            **payload,
+            'confirmation_token': preview['confirmation_token'],
+            'idempotency_key': 'outbound-create-test-1',
+        }, operator_id=operator.id)
+
+        command, replay = consume_preview(
+            execute_request,
+            'outbound.create',
+            request_payload(execute_request),
+        )
+        self.assertIsNone(replay)
+        complete_preview(command, {'detail': 'success'})
+
     def test_invalid_agent_token_is_a_client_error(self):
         request = self.agent_request({
             'id': 123,
