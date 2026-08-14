@@ -48,7 +48,7 @@
           <q-tr :props="props">
             <q-td key="dn_code" :props="props" class="outbound-nowrap">{{ props.row.dn_code }}</q-td>
             <q-td key="dn_status" :props="props">
-              <q-badge color="primary" outline>{{ props.row.dn_status }}</q-badge>
+              <q-badge :color="props.row.dn_status_code === 7 ? 'negative' : 'primary'" outline>{{ props.row.dn_status }}</q-badge>
             </q-td>
             <q-td key="customer" :props="props" class="outbound-nowrap">{{ props.row.customer || '-' }}</q-td>
             <q-td key="sku_summary" :props="props" class="outbound-nowrap">{{ props.row.sku_summary || '-' }}</q-td>
@@ -58,7 +58,10 @@
               <div class="text-caption text-grey-6">{{ props.row.staging_status || 'Not assigned' }}</div>
             </q-td>
             <q-td key="delivery_exception" :props="props" class="outbound-nowrap">
-              <q-badge v-if="props.row.delivery_exception" color="negative">{{ props.row.delivery_exception }}</q-badge>
+              <q-badge v-if="props.row.delivery_exception" color="negative">
+                {{ props.row.delivery_exception }}
+                <q-tooltip v-if="props.row.cancellation_note">{{ props.row.cancellation_note }}</q-tooltip>
+              </q-badge>
               <span v-else class="text-grey-6">-</span>
             </q-td>
             <q-td key="next_step" :props="props" class="outbound-nowrap">{{ props.row.next_step }}</q-td>
@@ -93,6 +96,9 @@
                   </q-item>
                   <q-item v-if="canAction(props.row, 'pod')" clickable v-close-popup @click="PODData(props.row)">
                     <q-item-section>{{ $t('outbound.pod') }}</q-item-section>
+                  </q-item>
+                  <q-item v-if="canAction(props.row, 'cancel_intransit')" clickable v-close-popup @click="cancelInTransitData(props.row)">
+                    <q-item-section>Cancel In Transit</q-item-section>
                   </q-item>
                   <q-item v-if="canAction(props.row, 'edit')" clickable v-close-popup @click="editData(props.row)">
                     <q-item-section>{{ $t('edit') }}</q-item-section>
@@ -810,6 +816,33 @@
         </div>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="cancelInTransitForm">
+      <q-card class="shadow-24 outbound-pod-card">
+        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>Cancel In Transit: {{ cancelInTransitFormData.dn_code }}</div>
+          <q-space />
+          <q-btn dense flat icon="close" v-close-popup>
+            <q-tooltip content-class="bg-amber text-black shadow-4" :offset="[10, 10]">{{ $t('index.close') }}</q-tooltip>
+          </q-btn>
+        </q-bar>
+        <q-card-section style="max-height: 325px; width: 400px" class="scroll">
+          <div class="text-caption text-grey-7 q-mb-sm">This closes the in-transit DN and releases its outbound staging slot.</div>
+          <q-input
+            v-model="cancelInTransitFormData.cancellation_note"
+            type="textarea"
+            outlined
+            square
+            autofocus
+            label="Cancellation reason"
+            :rules="[val => !!String(val || '').trim() || 'A cancellation reason is required']"
+          />
+        </q-card-section>
+        <div style="float: right; padding: 15px 15px 15px 0">
+          <q-btn color="white" text-color="black" style="margin-right: 25px" @click="cancelInTransitDataCancel()">{{ $t('cancel') }}</q-btn>
+          <q-btn color="negative" @click="cancelInTransitDataSubmit()">Cancel In Transit</q-btn>
+        </div>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 <router-view />
@@ -920,6 +953,12 @@ export default {
         customer: '',
         goodsData: []
       },
+      cancelInTransitForm: false,
+      cancelInTransitId: 0,
+      cancelInTransitFormData: {
+        dn_code: '',
+        cancellation_note: ''
+      },
       printObj: {
         id: 'printMe',
         popTitle: this.$t('outbound.dn')
@@ -946,7 +985,8 @@ export default {
         3: this.$t('outbound.pickstock'),
         4: this.$t('outbound.pickedstock'),
         5: this.$t('outbound.shippedstock'),
-        6: this.$t('outbound.received')
+        6: this.$t('outbound.received'),
+        7: 'Cancelled'
       }
       return labels[Number(status)] || 'N/A'
     },
@@ -957,7 +997,8 @@ export default {
         3: this.$t('confirmpicked'),
         4: this.$t('dispatch'),
         5: this.$t('outbound.pod'),
-        6: 'Complete'
+        6: 'Complete',
+        7: 'Cancelled'
       }
       return nextSteps[Number(status)] || 'Review'
     },
@@ -980,6 +1021,9 @@ export default {
       if (action === 'pick') return status === 3
       if (action === 'dispatch') return status === 4
       if (action === 'pod') return status === 5
+      if (action === 'cancel_intransit') {
+        return status === 5 && LocalStorage.getItem('staff_type') === 'Admin'
+      }
       return false
     },
     validate1 (val) {
@@ -1787,6 +1831,62 @@ export default {
             })
           })
       }
+    },
+    cancelInTransitData (row) {
+      if (!this.canAction(row, 'cancel_intransit')) {
+        this.$q.notify({
+          message: 'Only an administrator can cancel an in-transit DN',
+          icon: 'close',
+          color: 'negative'
+        })
+        return
+      }
+      this.cancelInTransitId = row.id
+      this.cancelInTransitFormData = {
+        dn_code: row.dn_code,
+        cancellation_note: ''
+      }
+      this.cancelInTransitForm = true
+    },
+    cancelInTransitDataCancel () {
+      this.cancelInTransitForm = false
+      this.cancelInTransitId = 0
+      this.cancelInTransitFormData = {
+        dn_code: '',
+        cancellation_note: ''
+      }
+    },
+    cancelInTransitDataSubmit () {
+      const note = String(this.cancelInTransitFormData.cancellation_note || '').trim()
+      if (!note) {
+        this.$q.notify({
+          message: 'A cancellation reason is required',
+          icon: 'close',
+          color: 'negative'
+        })
+        return
+      }
+      postauth(this.pathname + 'cancel-intransit/' + this.cancelInTransitId + '/', {
+        cancellation_note: note
+      })
+        .then(res => {
+          this.cancelInTransitDataCancel()
+          this.getList()
+          if (!res.detail) {
+            this.$q.notify({
+              message: 'In-transit DN canceled and staging released',
+              icon: 'check',
+              color: 'green'
+            })
+          }
+        })
+        .catch(err => {
+          this.$q.notify({
+            message: err.detail,
+            icon: 'close',
+            color: 'negative'
+          })
+        })
     }
   },
   created () {

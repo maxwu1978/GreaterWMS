@@ -9,7 +9,7 @@ from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
 from .filter import DnListFilter, DnDetailFilter, DnPickingListFilter
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, PermissionDenied
 from customer.models import ListModel as customer
 from warehouse.models import ListModel as warehouse
 from binset.models import ListModel as binset
@@ -2082,6 +2082,58 @@ class DnPODViewSet(viewsets.ModelViewSet):
         qs.save()
         release_staging_slot(self.request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
         return Response({"detail": "success"}, status=200)
+
+
+class DnCancelInTransitViewSet(viewsets.ModelViewSet):
+    """Cancel an in-transit delivery note and release its outbound staging slot."""
+
+    def get_project(self):
+        return self.kwargs.get('pk')
+
+    def get_queryset(self):
+        queryset = DnListModel.objects.filter(
+            openid=self.request.auth.openid,
+            id=self.get_project(),
+            is_delete=False,
+        )
+        if self.action == 'create':
+            queryset = queryset.select_for_update()
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return serializers.DNListUpdateSerializer
+        return self.http_method_not_allowed(request=self.request)
+
+    @transaction.atomic
+    def create(self, request, pk):
+        if not getattr(request.auth, 'is_admin', False):
+            raise PermissionDenied('Only administrators can cancel an in-transit delivery note')
+
+        qs = self.get_object()
+        if qs.dn_status != 5:
+            raise APIException({'detail': 'Only in-transit delivery notes can be canceled'})
+
+        note = str(request.data.get('cancellation_note') or '').strip()
+        if not note:
+            raise APIException({'detail': 'A cancellation reason is required'})
+        if len(note) > 2000:
+            raise APIException({'detail': 'Cancellation reason cannot exceed 2000 characters'})
+
+        now = timezone.now()
+        qs.dn_status = 7
+        qs.cancellation_note = note
+        qs.canceled_by = str(getattr(request.auth, 'staff_name', '') or request.META.get('HTTP_OPERATOR', ''))
+        qs.canceled_at = now
+        qs.save(update_fields=['dn_status', 'cancellation_note', 'canceled_by', 'canceled_at', 'update_time'])
+        DnDetailModel.objects.filter(
+            openid=request.auth.openid,
+            dn_code=qs.dn_code,
+            dn_status=5,
+            is_delete=False,
+        ).update(dn_status=7, update_time=now)
+        released = release_staging_slot(request.auth.openid, StagingAssignment.OUTBOUND, qs.dn_code)
+        return Response({'detail': 'success', 'released': released}, status=200)
 
 class FileListDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileListRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

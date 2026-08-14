@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, PermissionDenied
 
 from driver.models import DispatchListModel, ListModel as Driver
 from staff.models import ListModel as Staff
@@ -12,7 +12,7 @@ from staging.models import StagingAssignment
 
 from .models import DnDetailModel, DnListModel, PickingListModel
 from .serializers import DNListGetSerializer
-from .views import DnDispatchViewSet, DnPODViewSet
+from .views import DnCancelInTransitViewSet, DnDispatchViewSet, DnPODViewSet
 
 
 class DnDispatchSafetyTests(TestCase):
@@ -78,9 +78,13 @@ class DnDispatchSafetyTests(TestCase):
             openid=self.openid,
         )
 
-    def request(self, data=None, operator_id=None):
+    def request(self, data=None, operator_id=None, is_admin=False):
         return SimpleNamespace(
-            auth=SimpleNamespace(openid=self.openid),
+            auth=SimpleNamespace(
+                openid=self.openid,
+                is_admin=is_admin,
+                staff_name='Admin Operator' if is_admin else 'Dispatch Operator',
+            ),
             user=SimpleNamespace(is_authenticated=True),
             META={'HTTP_OPERATOR': str(operator_id or self.operator.id)},
             data=data or {},
@@ -100,6 +104,14 @@ class DnDispatchSafetyTests(TestCase):
         view.request = request
         view.action = 'create'
         view.get_object = lambda: DnListModel.objects.get(id=self.dn.id)
+        return view.create(request, self.dn.id)
+
+    def cancel_intransit(self, data=None, is_admin=False):
+        request = self.request(data, is_admin=is_admin)
+        view = DnCancelInTransitViewSet()
+        view.request = request
+        view.action = 'create'
+        view.get_object = lambda: DnListModel.objects.select_for_update().get(id=self.dn.id)
         return view.create(request, self.dn.id)
 
     def test_missing_dn_code_and_free_form_contact_dispatch_once(self):
@@ -195,6 +207,55 @@ class DnDispatchSafetyTests(TestCase):
                 }],
             })
         self.assertIn('between 0 and actual quantity', raised.exception.detail['detail'])
+        self.dn.refresh_from_db()
+        self.assertEqual(self.dn.dn_status, 5)
+
+    def test_admin_can_cancel_intransit_and_release_staging(self):
+        self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-RIGHT-01'})
+
+        response = self.cancel_intransit(
+            {'cancellation_note': 'Carrier returned before delivery'},
+            is_admin=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['released'], 1)
+        self.dn.refresh_from_db()
+        self.assertEqual(self.dn.dn_status, 7)
+        self.assertEqual(self.dn.cancellation_note, 'Carrier returned before delivery')
+        self.assertEqual(self.dn.canceled_by, 'Admin Operator')
+        self.assertIsNotNone(self.dn.canceled_at)
+        self.assertEqual(
+            DnDetailModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code).dn_status,
+            7,
+        )
+        assignment = StagingAssignment.objects.get(openid=self.openid, reference_code=self.dn.dn_code)
+        self.assertEqual(assignment.status, StagingAssignment.RELEASED)
+        self.assertEqual(DNListGetSerializer(self.dn).data['delivery_exception'], 'Cancelled')
+
+        with self.assertRaises(APIException):
+            self.cancel_intransit({'cancellation_note': 'Duplicate close'}, is_admin=True)
+
+    def test_non_admin_cannot_cancel_intransit(self):
+        self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-LEFT-01'})
+
+        with self.assertRaises(PermissionDenied):
+            self.cancel_intransit({'cancellation_note': 'Not authorized'}, is_admin=False)
+
+        self.dn.refresh_from_db()
+        self.assertEqual(self.dn.dn_status, 5)
+        self.assertTrue(StagingAssignment.objects.filter(
+            openid=self.openid,
+            reference_code=self.dn.dn_code,
+            status=StagingAssignment.ACTIVE,
+        ).exists())
+
+    def test_cancel_intransit_requires_reason(self):
+        self.dispatch({'driver': 'Tom', 'staging_bin': 'STAGE-LEFT-01'})
+
+        with self.assertRaises(APIException) as raised:
+            self.cancel_intransit({'cancellation_note': '  '}, is_admin=True)
+        self.assertEqual(raised.exception.detail['detail'], 'A cancellation reason is required')
         self.dn.refresh_from_db()
         self.assertEqual(self.dn.dn_status, 5)
 

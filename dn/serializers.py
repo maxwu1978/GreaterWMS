@@ -36,6 +36,9 @@ class DNListGetSerializer(serializers.ModelSerializer):
     bar_code = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
+    cancellation_note = serializers.CharField(read_only=True, required=False)
+    canceled_by = serializers.CharField(read_only=True, required=False)
+    canceled_at = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S', required=False)
     staging_bin = serializers.SerializerMethodField()
     staging_status = serializers.SerializerMethodField()
     dispatch_driver = serializers.SerializerMethodField()
@@ -95,6 +98,8 @@ class DNListGetSerializer(serializers.ModelSerializer):
             is_delete=False,
         )
         exceptions = []
+        if obj.dn_status == 7:
+            return 'Cancelled'
         if details.filter(delivery_shortage_qty__gt=0).exists():
             exceptions.append('Shortage')
         if details.filter(delivery_more_qty__gt=0).exists():
@@ -116,7 +121,10 @@ class DNListPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'cancellation_note', 'canceled_by', 'canceled_at',
+        ]
 
 class DNListPartialUpdateSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.dn_data_validate])
@@ -124,7 +132,10 @@ class DNListPartialUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'cancellation_note', 'canceled_by', 'canceled_at',
+        ]
 
 class DNListUpdateSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=False,  required=True, validators=[datasolve.dn_data_validate])
@@ -132,7 +143,10 @@ class DNListUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DnListModel
         exclude = ['is_delete', ]
-        read_only_fields = ['id', 'create_time', 'update_time', ]
+        read_only_fields = [
+            'id', 'create_time', 'update_time',
+            'cancellation_note', 'canceled_by', 'canceled_at',
+        ]
 
 class DNDetailGetSerializer(serializers.ModelSerializer):
     dn_code = serializers.CharField(read_only=True, required=False)

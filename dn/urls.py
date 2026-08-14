@@ -39,6 +39,9 @@ re_path(r'^dispatch/(?P<pk>\d+)/$', views.DnDispatchViewSet.as_view({
 re_path(r'^pod/(?P<pk>\d+)/$', views.DnPODViewSet.as_view({
     'post': 'create',
 }), name="pod_1"),
+re_path(r'^cancel-intransit/(?P<pk>\d+)/$', views.DnCancelInTransitViewSet.as_view({
+    'post': 'create',
+}), name="cancel_intransit_1"),
 path(r'filelist/', views.FileListDownloadView.as_view({"get": "list"}), name="dnfilelistdownload"),
 path(r'filedetail/', views.FileDetailDownloadView.as_view({"get": "list"}), name="dnfiledetaildownload"),
 
