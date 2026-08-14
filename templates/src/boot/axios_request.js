@@ -13,7 +13,17 @@ function getBaseUrl (name) {
   return xhr.status === okStatus ? xhr.responseText : null
 }
 
-const baseurl = getBaseUrl('baseurl.txt')
+const configuredBaseUrl = getBaseUrl('baseurl.txt')
+
+function resolveBaseUrl () {
+  const hostname = window.location.hostname
+  if (hostname.endsWith('.onrender.com')) {
+    return window.location.origin
+  }
+  return configuredBaseUrl || window.location.origin
+}
+
+const baseurl = resolveBaseUrl()
 
 const axiosInstance = axios.create({
   baseURL: baseurl,

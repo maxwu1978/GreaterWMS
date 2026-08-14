@@ -4,6 +4,8 @@ from django.urls import path, include, re_path
 from django.contrib.staticfiles.views import serve
 from django.views.static import serve as static_serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
+from rest_framework.permissions import IsAuthenticated
+from utils.auth import Authtication
 from . import views
 
 
@@ -15,6 +17,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', views.index, name='index'),
     path('myip/', views.myip, name='myip'),
+    path('health/', views.health, name='health'),
+    path('health', views.health, name='health-no-slash'),
     path('asn/', include('asn.urls')),
     path('asn/serial/', include('asnserial.urls')),
     path('dn/', include('dn.urls')),
@@ -57,8 +61,31 @@ urlpatterns = [
 ]
 
 urlpatterns += [
-    path('api/', SpectacularAPIView.as_view(), name='schema'),
+    path(
+        'api/',
+        SpectacularAPIView.as_view(
+            authentication_classes=[Authtication],
+            permission_classes=[IsAuthenticated],
+        ),
+        name='schema',
+    ),
     # Optional UI:
-    path('api/debug/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/docs/', SpectacularRedocView.as_view(url_name='schema'), name='docs'),
+    path(
+        'api/debug/',
+        SpectacularSwaggerView.as_view(
+            url_name='schema',
+            authentication_classes=[Authtication],
+            permission_classes=[IsAuthenticated],
+        ),
+        name='swagger-ui',
+    ),
+    path(
+        'api/docs/',
+        SpectacularRedocView.as_view(
+            url_name='schema',
+            authentication_classes=[Authtication],
+            permission_classes=[IsAuthenticated],
+        ),
+        name='docs',
+    ),
 ]

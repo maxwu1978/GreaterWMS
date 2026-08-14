@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from urllib.parse import parse_qs, unquote, urlparse
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -9,15 +10,47 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
 from django.core.management.utils import get_random_secret_key
 
-SECRET_KEY = os.environ.get('SECRET_KEY') or get_random_secret_key()
+
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _env_list(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return list(default)
+    return [item.strip() for item in value.split(',') if item.strip()]
+
+
+is_render_runtime = bool(
+    os.environ.get('RENDER')
+    or os.environ.get('RENDER_SERVICE_ID')
+    or os.environ.get('RENDER_EXTERNAL_URL')
+)
+
+configured_secret_key = os.environ.get('SECRET_KEY', '').strip()
+if is_render_runtime and not configured_secret_key:
+    raise ImproperlyConfigured('SECRET_KEY must be configured in the Render environment.')
+SECRET_KEY = configured_secret_key or get_random_secret_key()
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', [
+    'localhost',
+    '127.0.0.1',
+    'testserver',
+    'maxsmartwms.online',
+    'app.maxsmartwms.online',
+    'api.maxsmartwms.online',
+    'greaterwms-production.onrender.com',
+    'greaterwms-v2-test3-sn.onrender.com',
+])
 
 
 # Application definition
@@ -71,9 +104,11 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'utils.security.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    #'django.middleware.csrf.CsrfViewMiddleware',
+    'utils.security.TokenCsrfBypassMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -99,7 +134,25 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'greaterwms.wsgi.application'
-CSRF_COOKIE_SAMESITE = None
+
+# API calls use the custom Token header and do not create a browser session.
+# Session-backed views, including Django admin, remain CSRF protected.
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS = 'DENY'
+SECURE_HSTS_SECONDS = int(os.environ.get(
+    'SECURE_HSTS_SECONDS',
+    '31536000' if not DEBUG else '0',
+))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool(
+    'SECURE_HSTS_INCLUDE_SUBDOMAINS', default=not DEBUG
+)
+SECURE_HSTS_PRELOAD = _env_bool('SECURE_HSTS_PRELOAD', default=not DEBUG)
 
 # Database
 # Render provides DATABASE_URL for the managed PostgreSQL instance. SQLite is
@@ -110,12 +163,6 @@ if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = 'postgresql://' + DATABASE_URL[len('postgres://'):]
 
 database_url = urlparse(DATABASE_URL)
-is_render_runtime = bool(
-    os.environ.get('RENDER')
-    or os.environ.get('RENDER_SERVICE_ID')
-    or os.environ.get('RENDER_EXTERNAL_URL')
-)
-
 if database_url.scheme in ('postgres', 'postgresql'):
     database_options = {
         key: values[-1]
@@ -352,9 +399,17 @@ LOGGING = {
     },
 }
 
-CORS_ALLOW_CREDENTIALS = True
-CORS_ORIGIN_ALLOW_ALL = True
-CORS_ORIGIN_WHITELIST = ()
+CORS_ALLOW_CREDENTIALS = _env_bool('CORS_ALLOW_CREDENTIALS', default=False)
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS', [
+    'https://maxsmartwms.online',
+    'https://app.maxsmartwms.online',
+    'https://api.maxsmartwms.online',
+    'https://greaterwms-production.onrender.com',
+    'https://greaterwms-v2-test3-sn.onrender.com',
+    'http://localhost:5173',
+    'http://localhost:8080',
+])
+CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS', CORS_ALLOWED_ORIGINS)
 
 CORS_ALLOW_METHODS = (
     'DELETE',
@@ -363,7 +418,6 @@ CORS_ALLOW_METHODS = (
     'PATCH',
     'POST',
     'PUT',
-    'VIEW',
 )
 
 CORS_ALLOW_HEADERS = (

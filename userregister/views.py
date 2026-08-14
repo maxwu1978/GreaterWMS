@@ -4,7 +4,6 @@ from utils.fbmsg import FBMsg
 from utils.md5 import Md5
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-from django.contrib import auth
 from django.utils import timezone
 from django.contrib.auth.models import User
 from staff.models import ListModel as staff
@@ -103,7 +102,6 @@ def register(request, *args, **kwargs):
                                                  openid=transaction_code, appid=Md5.md5(data['name'] + '1'),
                                                  t_code=Md5.md5(str(timezone.now())),
                                                  developer=1, ip=ip)
-                            auth.login(request, user)
                             check_code = random.randint(1000, 9999)
                             staff.objects.create(staff_name=str(data['name']),
                                                  staff_type='Admin',

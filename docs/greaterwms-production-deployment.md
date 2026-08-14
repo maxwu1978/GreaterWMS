@@ -12,6 +12,24 @@
 | Database | `greaterwms-v2-test3-db` (`dpg-d9rhe27avr4c7399pjpg-a`) |
 | Plan | Render Free |
 
+## Required Render environment
+
+The service must define these variables before the first deployment of the
+security-hardened build. Values are kept in Render, never in Git:
+
+```text
+SECRET_KEY=<long random secret, shared by all instances of this service>
+DEBUG=False
+ALLOWED_HOSTS=greaterwms-production.onrender.com,maxsmartwms.online,app.maxsmartwms.online,api.maxsmartwms.online
+CORS_ALLOWED_ORIGINS=https://greaterwms-production.onrender.com,https://maxsmartwms.online,https://app.maxsmartwms.online
+CORS_ALLOW_CREDENTIALS=False
+SECURE_HSTS_SECONDS=31536000
+```
+
+Set the Render health-check path to `/health/`. The endpoint performs a small
+database readiness query and returns `{"status":"ok"}` only when the service
+can reach its configured database.
+
 The service uses the existing GreaterWMS PostgreSQL database so the production
 service and the current live service see the same business data during the
 cutover period. Do not run data migrations, cleanup, or test writes against
@@ -38,6 +56,7 @@ Verify the deployment before any domain change:
 ```bash
 render deploys list srv-d9v6ahvqj5pc73d4spp0 --output json
 curl -fsS https://greaterwms-production.onrender.com/
+curl -fsS https://greaterwms-production.onrender.com/health/
 ```
 
 The existing guarded deployment script targets the old service and must not be

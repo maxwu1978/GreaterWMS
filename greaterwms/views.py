@@ -3,6 +3,7 @@ from django.template.response import TemplateResponse
 from django.conf import settings
 from wsgiref.util import FileWrapper
 from rest_framework.exceptions import APIException
+from utils.health import health
 import mimetypes, os
 
 

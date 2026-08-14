@@ -242,9 +242,6 @@ export default defineComponent({
             message: _this.$t('notice.mobile_userlogin.notice2')
           })
         } else {
-          if (_this.adminlogin.name === '3' && _this.adminlogin.password === '3') {
-            _this.$store.commit('settings/Server', 'https://production.56yhz.com/')
-          }
           _this.$axios.post(_this.baseurl + '/login/', _this.adminlogin)
             .then((res) => {
               if (res.data.code === '200') {
