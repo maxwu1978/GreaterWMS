@@ -9,10 +9,11 @@ from driver.models import DispatchListModel, ListModel as Driver
 from staff.models import ListModel as Staff
 from stock.models import StockBinModel, StockListModel
 from staging.models import StagingAssignment
+from asnserial.models import AsnSerialRecord
 
-from .models import DnDetailModel, DnListModel, PickingListModel
+from .models import DnDetailModel, DnListModel, DnSerialAllocation, PickingListModel
 from .serializers import DNListGetSerializer
-from .views import DnCancelInTransitViewSet, DnDispatchViewSet, DnPODViewSet
+from .views import DnCancelInTransitViewSet, DnDispatchViewSet, DnPODViewSet, _validate_outbound_serial_request
 
 
 class DnDispatchSafetyTests(TestCase):
@@ -276,3 +277,63 @@ class DnDispatchSafetyTests(TestCase):
                 operator_id=999999,
             )
         self.assertEqual(raised.exception.detail['detail'], 'Operator does not exist')
+
+
+class SerialAllocationSafetyTests(TestCase):
+    def test_shipped_serial_cannot_be_allocated_to_another_delivery(self):
+        openid = 'dn-serial-allocation-test'
+        first = DnListModel.objects.create(
+            dn_code='DN-FIRST-001',
+            dn_status=6,
+            picking_mode=DnListModel.SN,
+            customer='Customer A',
+            creater='tester',
+            bar_code='DN-FIRST-BAR',
+            openid=openid,
+        )
+        DnSerialAllocation.objects.create(
+            openid=openid,
+            dn_code=first.dn_code,
+            goods_code='SKU-SN-01',
+            serial_number='SN-SHIPPED-001',
+            status=DnSerialAllocation.SHIPPED,
+            created_by='tester',
+        )
+        second = DnListModel.objects.create(
+            dn_code='DN-SECOND-001',
+            dn_status=4,
+            picking_mode=DnListModel.SN,
+            customer='Customer A',
+            creater='tester',
+            bar_code='DN-SECOND-BAR',
+            openid=openid,
+        )
+        DnDetailModel.objects.create(
+            dn_code=second.dn_code,
+            dn_status=4,
+            customer='Customer A',
+            goods_code='SKU-SN-01',
+            goods_desc='Serial SKU',
+            goods_qty=1,
+            requested_serials=['SN-SHIPPED-001'],
+            creater='tester',
+            openid=openid,
+        )
+        AsnSerialRecord.objects.create(
+            openid=openid,
+            asn_code='ASN-SN-001',
+            goods_code='SKU-SN-01',
+            scanned_goods_code='SKU-SN-01',
+            serial_number='SN-SHIPPED-001',
+            status=AsnSerialRecord.ACCEPTED,
+            is_received=True,
+        )
+        with self.assertRaises(APIException) as raised:
+            _validate_outbound_serial_request(
+                openid,
+                second,
+                ['SKU-SN-01'],
+                [1],
+                [['SN-SHIPPED-001']],
+            )
+        self.assertIn('already allocated', raised.exception.detail['detail'])

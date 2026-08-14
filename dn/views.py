@@ -25,7 +25,7 @@ from cyclecount.models import QTYRecorder as qtychangerecorder
 from cyclecount.models import CyclecountModeDayModel as cyclecount
 from django.db.models import Q
 from django.db.models import Sum
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from utils.md5 import Md5
 import re
 from .serializers import FileListRenderSerializer, FileDetailRenderSerializer
@@ -67,6 +67,8 @@ def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, seria
         raise APIException({'detail': 'SN picking requires serial_numbers for every SKU'})
     seen = set()
     for goods_code, quantity, values in zip(goods_codes, quantities, serial_numbers):
+        if int(quantity) <= 0:
+            raise APIException({'detail': 'SN picking quantity must be positive for %s' % goods_code})
         detail = DnDetailModel.objects.filter(
             openid=openid, dn_code=dn.dn_code, goods_code=goods_code, is_delete=False,
         ).first()
@@ -81,14 +83,14 @@ def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, seria
         if overlap:
             raise APIException({'detail': 'Duplicate SN in pick request: %s' % sorted(overlap)[0]})
         seen.update(values)
-        available_asn = set(AsnSerialRecord.objects.filter(
+        available_asn = set(AsnSerialRecord.objects.select_for_update().filter(
             openid=openid,
             goods_code=goods_code,
             serial_number__in=values,
             status=AsnSerialRecord.ACCEPTED,
             is_received=True,
         ).values_list('serial_number', flat=True))
-        available_receiving = set(ReceivingSerial.objects.filter(
+        available_receiving = set(ReceivingSerial.objects.select_for_update().filter(
             openid=openid,
             goods_code=goods_code,
             serial_number__in=values,
@@ -98,10 +100,16 @@ def _validate_outbound_serial_request(openid, dn, goods_codes, quantities, seria
         unavailable = set(values) - available_asn - available_receiving
         if unavailable:
             raise APIException({'detail': 'SN is not available in received inventory: %s' % sorted(unavailable)[0]})
-        allocated = set(DnSerialAllocation.objects.filter(
+        allocated = set(DnSerialAllocation.objects.select_for_update().filter(
             openid=openid,
             serial_number__in=values,
-            status__in=[DnSerialAllocation.REQUESTED, DnSerialAllocation.PICKED, DnSerialAllocation.IN_TRANSIT],
+            status__in=[
+                DnSerialAllocation.REQUESTED,
+                DnSerialAllocation.PICKED,
+                DnSerialAllocation.IN_TRANSIT,
+                DnSerialAllocation.SHIPPED,
+                DnSerialAllocation.RELEASED,
+            ],
         ).exclude(dn_code=dn.dn_code).values_list('serial_number', flat=True))
         if allocated:
             raise APIException({'detail': 'SN is already allocated: %s' % sorted(allocated)[0]})
@@ -141,22 +149,23 @@ def _require_all_picked_serials(openid, dn):
 
 
 def _mark_serials(openid, dn_code, from_status, to_status):
-    DnSerialAllocation.objects.filter(
+    allocations = list(DnSerialAllocation.objects.select_for_update().filter(
         openid=openid, dn_code=dn_code, status=from_status,
-    ).update(status=to_status, update_time=timezone.now())
+    ))
+    for allocation in allocations:
+        allocation.status = to_status
+        allocation.save(update_fields=['status', 'update_time'])
 
 
 def _mark_shipped_serials(openid, dn_code):
-    allocations = list(DnSerialAllocation.objects.filter(
+    allocations = list(DnSerialAllocation.objects.select_for_update().filter(
         openid=openid,
         dn_code=dn_code,
         status=DnSerialAllocation.IN_TRANSIT,
     ))
-    DnSerialAllocation.objects.filter(
-        openid=openid,
-        dn_code=dn_code,
-        status=DnSerialAllocation.IN_TRANSIT,
-    ).update(status=DnSerialAllocation.SHIPPED, update_time=timezone.now())
+    for allocation in allocations:
+        allocation.status = DnSerialAllocation.SHIPPED
+        allocation.save(update_fields=['status', 'update_time'])
     by_goods = defaultdict(list)
     for allocation in allocations:
         by_goods[allocation.goods_code].append(allocation.serial_number)
@@ -586,17 +595,21 @@ class DnDetailViewSet(viewsets.ModelViewSet):
                     transportation_res['detail'] = transportation_list
                 DnDetailModel.objects.bulk_create(post_data_list, batch_size=100)
                 if dn.picking_mode == DnListModel.SN:
-                    DnSerialAllocation.objects.bulk_create([
-                        DnSerialAllocation(
-                            openid=self.request.auth.openid,
-                            dn_code=dn.dn_code,
-                            goods_code=post_data.goods_code,
-                            serial_number=serial_number,
-                            created_by=staff_name,
-                        )
-                        for post_data in post_data_list
-                        for serial_number in post_data.requested_serials
-                    ])
+                    try:
+                        with transaction.atomic():
+                            DnSerialAllocation.objects.bulk_create([
+                                DnSerialAllocation(
+                                    openid=self.request.auth.openid,
+                                    dn_code=dn.dn_code,
+                                    goods_code=post_data.goods_code,
+                                    serial_number=serial_number,
+                                    created_by=staff_name,
+                                )
+                                for post_data in post_data_list
+                                for serial_number in post_data.requested_serials
+                            ])
+                    except IntegrityError:
+                        raise APIException({'detail': 'One or more serial numbers are already allocated'})
                 check_data = DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=data['dn_code'], is_delete=False)
                 for k in range(len(check_data)):
                     res_check_data = check_data.filter(goods_code=check_data[k].goods_code)

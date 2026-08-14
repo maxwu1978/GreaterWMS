@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
 from binset.models import ListModel as BinModel
@@ -11,7 +11,7 @@ from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from goods.models import ListModel as GoodsModel
 from stock.models import StockListModel
 
-from .models import ReceivingRecord, ReceivingSerial
+from .models import ReceivingDetail, ReceivingRecord, ReceivingSerial
 from .views import (
     ReceivingExceptionResolveView,
     ReceivingPutawayView,
@@ -19,6 +19,7 @@ from .views import (
     ReceivingRecordListView,
     ReceivingReconcileView,
 )
+from .services import assert_legacy_asn_putaway_allowed
 
 
 class ReceivingFlowTests(TestCase):
@@ -128,6 +129,79 @@ class ReceivingFlowTests(TestCase):
         self.assertEqual(reconciled.data['variance'], {})
         self.assertEqual(reconciled.data['record']['status'], ReceivingRecord.CLOSED)
         self.assertEqual(reconciled.data['record']['reconciliation_status'], ReceivingRecord.MATCHED)
+
+    def test_receiving_claims_an_asn_once_and_blocks_started_legacy_asn(self):
+        AsnListModel.objects.create(
+            asn_code='ASN-CLAIM-001',
+            asn_status=1,
+            supplier='Customer A',
+            creater='tester',
+            bar_code='ASN-CLAIM-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        AsnDetailModel.objects.create(
+            asn_code='ASN-CLAIM-001',
+            asn_status=1,
+            supplier='Customer A',
+            goods_code=self.goods_code,
+            goods_desc='Receiving test SKU',
+            goods_qty=2,
+            creater='tester',
+            openid=self.openid,
+        )
+        created = self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-CLAIM-001',
+            'customer': 'Customer A',
+            'linked_asn_code': 'ASN-CLAIM-001',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+        })
+        self.assertEqual(created.status_code, 201)
+        with self.assertRaises(APIException):
+            self.call(ReceivingRecordListView, {
+                'receipt_no': 'RC-CLAIM-002',
+                'customer': 'Customer A',
+                'linked_asn_code': 'ASN-CLAIM-001',
+                'details': [{'goods_code': self.goods_code, 'actual_qty': 2}],
+            })
+
+        legacy_asn = AsnListModel.objects.create(
+            asn_code='ASN-LEGACY-001',
+            asn_status=4,
+            supplier='Customer A',
+            creater='tester',
+            bar_code='ASN-LEGACY-BAR',
+            openid=self.openid,
+            transportation_fee={},
+        )
+        AsnDetailModel.objects.create(
+            asn_code=legacy_asn.asn_code,
+            asn_status=4,
+            supplier='Customer A',
+            goods_code=self.goods_code,
+            goods_desc='Receiving test SKU',
+            goods_qty=2,
+            creater='tester',
+            openid=self.openid,
+        )
+        ReceivingRecord.objects.create(
+            receipt_no='RC-CANONICAL-001',
+            customer='Customer A',
+            openid=self.openid,
+            received_at=timezone.now(),
+            status=ReceivingRecord.PUTAWAY_COMPLETE,
+        )
+        canonical = ReceivingRecord.objects.get(receipt_no='RC-CANONICAL-001')
+        ReceivingDetail.objects.create(
+            receipt=canonical,
+            openid=self.openid,
+            goods_code=self.goods_code,
+            actual_qty=2,
+            accepted_qty=2,
+            putaway_qty=2,
+        )
+        with self.assertRaises(APIException):
+            assert_legacy_asn_putaway_allowed(self.openid, legacy_asn.asn_code, self.goods_code)
 
     def test_qc_exception_requires_resolution_before_putaway(self):
         self.call(ReceivingRecordListView, {
@@ -245,6 +319,16 @@ class ReceivingFlowTests(TestCase):
             StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code).onhand_stock,
             2,
         )
+        detail = DnDetailModel.objects.get(dn_code='DN-RETURN-001', goods_code=self.goods_code)
+        self.assertEqual(detail.returned_qty, 2)
+        with self.assertRaises(ValidationError):
+            self.call(ReceivingRecordListView, {
+                'receipt_no': 'RC-RETURN-002',
+                'customer': 'Customer A',
+                'source_type': 'OUTBOUND_RETURN',
+                'source_reference': 'DN-RETURN-001',
+                'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+            })
 
     def test_outbound_return_allows_released_serial_to_be_received_again(self):
         self.call(ReceivingRecordListView, {
@@ -315,3 +399,52 @@ class ReceivingFlowTests(TestCase):
             serial_number='SN-RETURN-001',
             status=ReceivingSerial.ACCEPTED,
         ).exists())
+        self.assertEqual(
+            DnSerialAllocation.objects.get(
+                dn_code='DN-RETURN-SN-001',
+                serial_number='SN-RETURN-001',
+            ).status,
+            DnSerialAllocation.RETURNED,
+        )
+        with self.assertRaises(ValidationError):
+            self.call(ReceivingRecordListView, {
+                'receipt_no': 'RC-RETURN-SN-002',
+                'customer': 'Customer A',
+                'source_type': 'OUTBOUND_RETURN',
+                'source_reference': 'DN-RETURN-SN-001',
+                'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+            })
+
+    def test_duplicate_serial_is_not_counted_without_expected_serials(self):
+        self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-SN-DUP-001',
+            'customer': 'Customer A',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+        })
+        first = self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-SN-DUP-001',
+            'details': [{
+                'goods_code': self.goods_code,
+                'actual_qty': 1,
+                'serials': ['SN-DUP-001'],
+            }],
+        })
+        self.assertEqual(first.data['status'], ReceivingRecord.PUTAWAY_PENDING)
+
+        self.call(ReceivingRecordListView, {
+            'receipt_no': 'RC-SN-DUP-002',
+            'customer': 'Customer A',
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+        })
+        second = self.call(ReceivingQcCompleteView, {
+            'receipt_no': 'RC-SN-DUP-002',
+            'details': [{
+                'goods_code': self.goods_code,
+                'actual_qty': 1,
+                'serials': ['SN-DUP-001'],
+            }],
+        })
+        self.assertEqual(second.data['status'], ReceivingRecord.QC_EXCEPTION)
+        detail = ReceivingRecord.objects.get(receipt_no='RC-SN-DUP-002').details.get(goods_code=self.goods_code)
+        self.assertEqual(detail.accepted_qty, 0)
+        self.assertEqual(detail.hold_qty, 1)

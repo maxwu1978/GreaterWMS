@@ -51,6 +51,7 @@ from staging.services import (
     release_staging_slot,
     reserve_staging_slots,
 )
+from receiving.services import assert_legacy_asn_putaway_allowed
 from .services import inbound_package_quantity
 
 
@@ -1394,6 +1395,11 @@ class MoveToBinViewSet(viewsets.ModelViewSet):
             raise APIException({"detail": "ASN does not exist"})
         if asn.asn_status != 4:
             raise APIException({"detail": "ASN is not ready for putaway"})
+        assert_legacy_asn_putaway_allowed(
+            self.request.auth.openid,
+            asn_code,
+            detail.goods_code,
+        )
 
         putaway_driver = str(putaway_driver or '').strip()
         if not putaway_driver:

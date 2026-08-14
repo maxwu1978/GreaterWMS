@@ -16,6 +16,7 @@ from stock.models import StockBinModel, StockListModel
 from utils.md5 import Md5
 from staff.models import ListModel as Staff
 from supplier.shortname import generated_supplier_short_name
+from receiving.services import assert_legacy_asn_putaway_allowed
 
 from .models import (
     ACCEPT_FOR_PUTAWAY,
@@ -1167,6 +1168,7 @@ def _exception_bin(openid, action, requested_bin):
 
 
 def _move_exception_stock(openid, detail, quantity, bin_detail):
+    assert_legacy_asn_putaway_allowed(openid, detail.asn_code, detail.goods_code)
     stock = StockListModel.objects.select_for_update().filter(
         openid=openid,
         goods_code=detail.goods_code,

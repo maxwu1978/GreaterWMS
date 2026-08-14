@@ -56,6 +56,7 @@ class DnDetailModel(models.Model):
     delivery_more_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
     delivery_damage_qty = models.BigIntegerField(default=0, verbose_name="Delivery More QTY")
     cancelled_qty = models.BigIntegerField(default=0, verbose_name="Cancelled QTY")
+    returned_qty = models.BigIntegerField(default=0, verbose_name="Returned QTY")
     delivery_note = models.TextField(default='', blank=True, verbose_name="Delivery Exception Note")
     requested_serials = models.JSONField(default=list, verbose_name="Requested Serial Numbers")
     picked_serials = models.JSONField(default=list, verbose_name="Picked Serial Numbers")
@@ -102,6 +103,7 @@ class DnSerialAllocation(models.Model):
     IN_TRANSIT = 'IN_TRANSIT'
     SHIPPED = 'SHIPPED'
     RELEASED = 'RELEASED'
+    RETURNED = 'RETURNED'
 
     STATUS_CHOICES = (
         (REQUESTED, 'Requested'),
@@ -109,6 +111,7 @@ class DnSerialAllocation(models.Model):
         (IN_TRANSIT, 'In transit'),
         (SHIPPED, 'Shipped'),
         (RELEASED, 'Released'),
+        (RETURNED, 'Returned'),
     )
 
     openid = models.CharField(max_length=255)
@@ -127,6 +130,11 @@ class DnSerialAllocation(models.Model):
             models.UniqueConstraint(
                 fields=['openid', 'dn_code', 'serial_number'],
                 name='dn_serial_allocation_uniq',
+            ),
+            models.UniqueConstraint(
+                fields=['openid', 'serial_number'],
+                condition=models.Q(status__in=['REQUESTED', 'PICKED', 'IN_TRANSIT', 'SHIPPED', 'RELEASED']),
+                name='dn_serial_allocation_active_uniq',
             ),
         ]
         indexes = [
