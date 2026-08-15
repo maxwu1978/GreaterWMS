@@ -72,7 +72,7 @@
           <template v-slot:body-cell-eta="props">
             <q-td :props="props">
               <div class="operations-board__eta-value">
-                {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
+                {{ props.row.eta ? compactDateTime(props.row.eta) : label('operations_board.eta_not_provided', 'Not Provided') }}
                 <q-badge outline :color="etaStatusColor(props.row.eta_status)" class="operations-board__eta-status">
                   {{ etaStatusLabel(props.row.eta_status) }}
                 </q-badge>
@@ -82,19 +82,19 @@
           </template>
           <template v-slot:body-cell-customer="props">
             <q-td :props="props">
-              <span :title="props.row.customer_full_name || props.row.customer">{{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}</span>
+              <span :title="props.row.customer_full_name || props.row.customer">{{ compactOwnerName(props.row) }}</span>
             </q-td>
           </template>
           <template v-slot:body-cell-reference="props">
             <q-td :props="props">
               <button type="button" class="operations-board__reference" @click="showDetails(props.row)">
                 <q-badge outline color="primary">{{ categoryLabel(props.row.category) }}</q-badge>
-                <span>{{ props.row.reference }}</span>
+                <span :title="props.row.reference">{{ compactReference(props.row.reference) }}</span>
               </button>
             </q-td>
           </template>
           <template v-slot:body-cell-next_action="props">
-            <q-td :props="props"><span class="operations-board__next-action">{{ operationLabel(props.row.next_action || props.row.operation) }}</span></q-td>
+            <q-td :props="props"><span class="operations-board__next-action">{{ props.row.next_action_label || props.row.next_action || operationLabel(props.row.operation) }}</span></q-td>
           </template>
           <template v-slot:body-cell-assigned_to="props">
             <q-td :props="props">{{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}</q-td>
@@ -121,8 +121,8 @@
       <q-card v-if="selectedItem" class="operations-board__detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-subtitle1 text-weight-bold">{{ selectedItem.reference }}</div>
-            <div class="text-caption text-grey-7">{{ categoryLabel(selectedItem.category) }} · {{ selectedItem.customer }}</div>
+            <div class="text-subtitle1 text-weight-bold" :title="selectedItem.reference">{{ compactReference(selectedItem.reference) }}</div>
+            <div class="text-caption text-grey-7" :title="selectedItem.customer_full_name || selectedItem.customer">{{ categoryLabel(selectedItem.category) }} · {{ compactOwnerName(selectedItem) }}</div>
           </div>
           <q-space />
           <q-btn flat round dense icon="close" @click="detailOpen = false" />
@@ -132,7 +132,7 @@
           <div class="operations-board__detail-status row items-center q-mb-md">
             <q-badge :color="businessStatusColor(selectedItem.business_status)">{{ businessStatusLabel(selectedItem.business_status) }}</q-badge>
             <q-space />
-            <span class="text-caption text-grey-7">{{ operationLabel(selectedItem.next_action || selectedItem.operation) }}</span>
+            <span class="text-caption text-grey-7">{{ selectedItem.next_action_label || selectedItem.next_action || operationLabel(selectedItem.operation) }}</span>
           </div>
 
           <div class="operations-board__detail-grid">
@@ -143,7 +143,7 @@
             <div class="operations-board__detail-label">{{ label('operations_board.quantity', 'Qty') }}</div>
             <div>{{ selectedItem.quantity_label || '—' }}</div>
             <div class="operations-board__detail-label">{{ label('operations_board.eta', 'ETA') }}</div>
-            <div>{{ selectedItem.eta || label('operations_board.eta_not_provided', 'Not Provided') }}</div>
+            <div>{{ selectedItem.eta ? compactDateTime(selectedItem.eta) : label('operations_board.eta_not_provided', 'Not Provided') }}</div>
             <div v-if="selectedItem.linked_reference" class="operations-board__detail-label">Linked Ref</div>
             <div v-if="selectedItem.linked_reference">{{ selectedItem.linked_reference }}</div>
           </div>
@@ -310,6 +310,25 @@ export default {
       if (summary.shipped_serials !== undefined) rows.push({ label: 'SN Shipped', value: summary.shipped_serials })
       return rows
     },
+    compactReference (value) {
+      const code = String(value || '').trim()
+      if (code.length <= 10) return code || '-'
+      return code.slice(0, 4) + '...' + code.slice(-4)
+    },
+    compactOwnerName (row) {
+      const shortName = String((row && row.customer_short_name) || '').trim()
+      const fullName = String((row && (row.customer_full_name || row.customer)) || '').trim()
+      const value = shortName || fullName
+      if (!value) return '-'
+      if (value.length <= 8) return value
+      const firstWord = value.split(/\s+/)[0].replace(/[^a-zA-Z0-9&-]/g, '')
+      return (firstWord || value).slice(0, 8).toUpperCase()
+    },
+    compactDateTime (value) {
+      const normalized = String(value || '').replace('T', ' ')
+      const match = normalized.match(/^(?:\d{4}-)?(\d{2})[-/](\d{2})\s+(\d{2}:\d{2})/)
+      return match ? `${match[1]}/${match[2]} ${match[3]}` : normalized.slice(0, 16)
+    },
     compactLocation (row) {
       if (!row) return '—'
       const source = row.source_location || ''
@@ -328,9 +347,25 @@ export default {
     },
     businessStatusColor (status) {
       const value = String(status || '').toUpperCase()
-      if (value === 'COMPLETED' || value === 'MATCHED') return 'positive'
-      if (value === 'CANCELLED' || value.includes('EXCEPTION') || value === 'DISPUTED') return 'negative'
-      if (value.includes('PENDING') || value === 'PRE_ARRIVAL') return 'primary'
+      const inboundColors = {
+        PENDING_ARRIVAL: 'blue-2',
+        READY_TO_UNLOAD: 'primary',
+        UNLOADING: 'orange-3',
+        RECEIVING_REVIEW: 'amber-3',
+        QC_REVIEW_REQUIRED: 'negative',
+        QC_PARTIAL_HOLD: 'amber-3',
+        REPAIR_HOLD: 'orange-3',
+        PACK_LIST_REVIEW: 'orange-3',
+        READY_FOR_PUTAWAY: 'purple-3',
+        READY_FOR_PUTAWAY_PARTIAL: 'purple-3',
+        PUTAWAY_COMPLETE: 'positive'
+      }
+      if (inboundColors[value]) return inboundColors[value]
+      if (value === 'COMPLETED' || value === 'MATCHED' || value === 'PUTAWAY_COMPLETE') return 'positive'
+      if (value === 'CANCELLED' || value.includes('EXCEPTION') || value === 'DISPUTED' || value === 'REPAIR_HOLD') return 'negative'
+      if (value === 'QC_PARTIAL_HOLD' || value === 'PACK_LIST_REVIEW') return 'warning'
+      if (value.includes('PENDING') || value === 'PRE_ARRIVAL' || value === 'PENDING_ARRIVAL') return 'primary'
+      if (['READY_TO_UNLOAD', 'UNLOADING', 'RECEIVING_REVIEW', 'READY_FOR_PUTAWAY', 'READY_FOR_PUTAWAY_PARTIAL'].includes(value)) return 'primary'
       return 'grey-7'
     },
     categoryLabel (category) {

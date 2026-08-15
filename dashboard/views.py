@@ -499,6 +499,16 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             asn_status__in=history_statuses,
             is_delete=False,
         ).exclude(asn_code__in=linked_receipt_asns).order_by('-update_time', '-id'))
+        asn_codes = {row.asn_code for row in rows}
+        asn_models = {
+            asn.asn_code: asn
+            for asn in AsnListModel.objects.filter(
+                openid=openid,
+                asn_code__in=asn_codes,
+                is_delete=False,
+            )
+        }
+        asn_display_cache = {}
         supplier_names = {row.supplier for row in rows if row.supplier}
         supplier_short_names = dict(SupplierModel.objects.filter(
             openid=openid,
@@ -518,6 +528,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'category': 'inbound',
                 'reference': row.asn_code,
                 'customer': supplier_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
+                'customer_short_name': supplier_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
                 'customer_full_name': customer_name,
                 'operation': 'Reserve Stage',
                 'location': 'Stage',
@@ -694,6 +705,25 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                     })
                     item['blocking_reason'] = 'QC review required'
 
+            # Match the ASN page's authoritative display fields. Keep the
+            # legacy operation for role/action routing, but do not expose a
+            # second status or next-step vocabulary on the dashboard.
+            if not history:
+                asn_obj = asn_models.get(item['reference'])
+                if asn_obj:
+                    display = asn_display_cache.setdefault(
+                        item['reference'],
+                        asnserializers.ASNListGetSerializer(asn_obj, context={}).data,
+                    )
+                    item['customer_short_name'] = display.get('supplier_short_name') or item.get('customer_short_name', '')
+                    item['operational_status'] = display.get('operational_status') or item.get('business_status', '')
+                    item['operational_status_reason'] = display.get('operational_status_reason', '')
+                    item['next_action_code'] = display.get('next_action_code', '')
+                    item['next_action_label'] = display.get('next_action_label', '')
+                    item['pack_list_status'] = display.get('pack_list_status', 'NOT_RECEIVED')
+                    item['serial_acceptance'] = display.get('serial_acceptance') or {}
+                    item['business_status'] = item['operational_status']
+
             if item.get('blocked') and not item.get('blocking_reason'):
                 item['blocking_reason'] = 'Quantity or damage exception'
 
@@ -707,6 +737,13 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             records = records.filter(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
         else:
             records = records.exclude(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
+        records = list(records)
+        customer_names = {record.customer for record in records if record.customer}
+        customer_short_names = dict(SupplierModel.objects.filter(
+            openid=openid,
+            supplier_name__in=customer_names,
+            is_delete=False,
+        ).values_list('supplier_name', 'supplier_short_name'))
         items = []
         reconciliation_status_map = {
             ReceivingRecord.NO_ASN: 'AWAITING_ASN',
@@ -794,7 +831,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             items.append(self._format_item({
                 'category': 'receiving',
                 'reference': record.receipt_no,
-                'customer': generated_supplier_short_name(record.customer),
+                'customer': customer_short_names.get(record.customer) or generated_supplier_short_name(record.customer),
+                'customer_short_name': customer_short_names.get(record.customer) or generated_supplier_short_name(record.customer),
                 'customer_full_name': record.customer,
                 'operation': operation,
                 'location': 'Stage' if progress < total else 'Storage',
@@ -866,6 +904,13 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 openid=openid,
                 status__in=(TransportOrder.COMPLETED, TransportOrder.CANCELLED),
             )
+        orders = list(orders)
+        customer_names = {order.customer for order in orders if order.customer}
+        customer_short_names = dict(SupplierModel.objects.filter(
+            openid=openid,
+            supplier_name__in=customer_names,
+            is_delete=False,
+        ).values_list('supplier_name', 'supplier_short_name'))
         items = []
         for order in orders:
             if history:
@@ -889,7 +934,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             items.append(self._format_item({
                 'category': 'transport',
                 'reference': order.transport_no,
-                'customer': generated_supplier_short_name(order.customer),
+                'customer': customer_short_names.get(order.customer) or generated_supplier_short_name(order.customer),
+                'customer_short_name': customer_short_names.get(order.customer) or generated_supplier_short_name(order.customer),
                 'customer_full_name': order.customer,
                 'operation': operation,
                 'location': order.delivery_location or order.pickup_location or 'Dock',
@@ -947,6 +993,12 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             dn_status__in=history_statuses,
             is_delete=False,
         ).order_by('-update_time', '-id'))
+        customer_names = {row.customer for row in rows if row.customer}
+        customer_short_names = dict(SupplierModel.objects.filter(
+            openid=openid,
+            supplier_name__in=customer_names,
+            is_delete=False,
+        ).values_list('supplier_name', 'supplier_short_name'))
         dn_codes = {row.dn_code for row in rows}
         dn_context = {
             row.dn_code: row for row in DnListModel.objects.filter(
@@ -980,7 +1032,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             current = grouped.setdefault(row.dn_code, {
                 'category': 'outbound',
                 'reference': row.dn_code,
-                'customer': generated_supplier_short_name(customer_name),
+                'customer': customer_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
+                'customer_short_name': customer_short_names.get(customer_name) or generated_supplier_short_name(customer_name),
                 'customer_full_name': customer_name,
                 'operation': 'Release',
                 'location': 'Shipping',
@@ -1146,7 +1199,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         # Production runs with USE_TZ=False, while some API paths can still
         # return aware datetimes. Format both forms without crashing the board.
         if eta:
-            eta_text = eta.strftime('%m-%d %H:%M') if timezone.is_naive(eta) else timezone.localtime(eta).strftime('%m-%d %H:%M')
+            eta_text = eta.strftime('%m/%d %H:%M') if timezone.is_naive(eta) else timezone.localtime(eta).strftime('%m/%d %H:%M')
         else:
             eta_text = ''
         return {
@@ -1155,12 +1208,17 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'operation': item['operation'],
             'status': item.get('status', ''),
             'business_status': item.get('business_status', item.get('status', '')),
-            'next_action': item.get('operation', ''),
+            'next_action': item.get('next_action_label') or item.get('operation', ''),
+            'next_action_code': item.get('next_action_code', ''),
+            'next_action_label': item.get('next_action_label', ''),
+            'operational_status': item.get('operational_status', ''),
+            'operational_status_reason': item.get('operational_status_reason', ''),
             'reconciliation_status': item.get('reconciliation_status', ''),
             'exception_note': item.get('exception_note', ''),
             'lane': lane,
             'reference': item['reference'],
             'customer': item.get('customer', ''),
+            'customer_short_name': item.get('customer_short_name') or item.get('customer', ''),
             'customer_full_name': item.get('customer_full_name', ''),
             'location': item['location'],
             'source_location': source_location,

@@ -107,6 +107,10 @@ class OperationsBoardTests(TestCase):
         self.assertEqual(items[0]['task_total_qty'], 1)
         self.assertEqual(items[0]['quantity_label'], '1 / 1')
         self.assertEqual(items[0]['location_summary'], 'Dock -> Stage')
+        self.assertEqual(items[0]['customer_short_name'], 'Test Customer')
+        self.assertEqual(items[0]['business_status'], 'READY_TO_UNLOAD')
+        self.assertEqual(items[0]['next_action_label'], 'Start Unloading')
+        self.assertEqual(items[0]['next_action'], 'Start Unloading')
 
         request = SimpleNamespace(
             auth=SimpleNamespace(
@@ -322,7 +326,7 @@ class OperationsBoardTests(TestCase):
             'history': False,
         }, now)
 
-        self.assertEqual(item['eta'], now.strftime('%m-%d %H:%M'))
+        self.assertEqual(item['eta'], now.strftime('%m/%d %H:%M'))
 
     def test_format_item_exposes_eta_urgency_and_countdown(self):
         now = timezone.now()
