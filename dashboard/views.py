@@ -776,6 +776,12 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
         quantity = item['quantity']
         progress = min(item['progress_quantity'], quantity)
+        # Production runs with USE_TZ=False, while some API paths can still
+        # return aware datetimes. Format both forms without crashing the board.
+        if eta:
+            eta_text = eta.strftime('%m-%d %H:%M') if timezone.is_naive(eta) else timezone.localtime(eta).strftime('%m-%d %H:%M')
+        else:
+            eta_text = ''
         return {
             'id': '%s-%s' % (item['category'], item['reference']),
             'category': item['category'],
@@ -793,7 +799,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'quantity': max(quantity - progress, 0),
             'progress_quantity': progress,
             'total_quantity': quantity,
-            'eta': timezone.localtime(eta).strftime('%m-%d %H:%M') if eta else '',
+            'eta': eta_text,
             'arrival_status': 'ARRIVED' if item.get('actual_arrival_at') else 'PRE_ARRIVAL',
             'staging_reserved_qty': item.get('staging_reserved_qty', 0),
             'staging_occupied_qty': item.get('staging_occupied_qty', 0),

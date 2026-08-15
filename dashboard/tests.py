@@ -262,4 +262,25 @@ class OperationsBoardTests(TestCase):
         self.assertIn('DN-DASHBOARD-COMPLETED', history_references)
         self.assertIn('DN-DASHBOARD-CANCELLED', history_references)
 
+    def test_format_item_accepts_naive_eta(self):
+        now = timezone.now()
+        item = OperationsBoardViewSet()._format_item({
+            'category': 'inbound',
+            'reference': 'ASN-DASHBOARD-ETA-01',
+            'operation': 'Await Arrival',
+            'location': 'Stage',
+            'action_route': 'asn',
+            'status': 1,
+            'business_status': 'PRE_ARRIVAL',
+            'quantity': 1,
+            'progress_quantity': 0,
+            'blocked': False,
+            'planned': True,
+            'timestamp': now,
+            'eta': now.replace(tzinfo=None),
+            'history': False,
+        }, now)
+
+        self.assertEqual(item['eta'], now.strftime('%m-%d %H:%M'))
+
 # Create your tests here.
