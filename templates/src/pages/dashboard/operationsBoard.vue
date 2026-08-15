@@ -1,126 +1,172 @@
 <template>
-  <q-card class="operations-board shadow-11">
-    <q-card-section class="operations-board__header row items-center q-px-md q-py-sm">
-      <div class="operations-board__title">
-        {{ label('operations_board.title', 'Warehouse Operations') }}
-      </div>
-      <q-space />
-      <div v-if="viewerLabel" class="operations-board__viewer">
-        {{ viewerLabel }}
-      </div>
-      <div class="operations-board__live">LIVE</div>
-      <q-btn
-        flat
-        round
-        dense
-        color="white"
-        icon="refresh"
-        :loading="loading"
-        :aria-label="label('operations_board.refresh', 'Refresh')"
-        @click="getList"
-      />
-    </q-card-section>
-
-    <q-card-section class="operations-board__controls row items-center q-pa-none">
-      <q-tabs
-        v-model="activeFilter"
-        dense
-        align="left"
-        active-color="primary"
-        indicator-color="primary"
-        class="operations-board__filters"
-      >
-        <q-tab v-for="filter in filters" :key="filter.key" :name="filter.key" :label="filter.label" />
-      </q-tabs>
-      <q-space />
-    </q-card-section>
-
-    <q-table
-      class="operations-board__table"
-      table-class="operations-board__grid"
-      :data="filteredItems"
-      :columns="columns"
-      row-key="id"
-      dense
-      flat
-      bordered
-      separator="horizontal"
-      hide-bottom
-      :row-class="rowClass"
-      :loading="loading"
-      :pagination.sync="pagination"
-      :no-data-label="noDataLabel"
-    >
-      <template v-slot:body-cell-lane="props">
-        <q-td :props="props">
-          <q-badge :color="laneColor(props.value)" align="middle">
-            {{ laneLabel(props.value) }}
-          </q-badge>
-        </q-td>
-      </template>
-      <template v-slot:body-cell-quantity="props">
-        <q-td :props="props" class="text-weight-medium">
-          {{ props.row.quantity }} / {{ props.row.total_quantity }}
-        </q-td>
-      </template>
-      <template v-slot:body-cell-eta="props">
-        <q-td :props="props">
-          {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
-        </q-td>
-      </template>
-      <template v-slot:body-cell-customer="props">
-        <q-td :props="props">
-          <span :title="props.row.customer_full_name || props.row.customer">
-            {{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}
-          </span>
-        </q-td>
-      </template>
-      <template v-slot:body-cell-assigned_to="props">
-        <q-td :props="props">
-          {{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}
-        </q-td>
-      </template>
-      <template v-slot:body-cell-operation="props">
-        <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
-      </template>
-      <template v-slot:body-cell-business_status="props">
-        <q-td :props="props">
-          <q-badge :color="businessStatusColor(props.row.business_status)">
-            {{ businessStatusLabel(props.row.business_status) }}
-          </q-badge>
-        </q-td>
-      </template>
-      <template v-slot:body-cell-category="props">
-        <q-td :props="props">
-          <q-badge outline color="primary" class="operations-board__type">
-            {{ categoryLabel(props.value) }}
-          </q-badge>
-        </q-td>
-      </template>
-      <template v-slot:body-cell-location="props">
-        <q-td :props="props">
-          <span :title="label('operations_board.location_hint', 'Target area for this step, not current inventory location')">
-            {{ locationLabel(props.value) }}
-          </span>
-          <div v-if="props.row.category === 'inbound'" class="text-caption text-grey-6">
-            R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
+  <div
+    ref="fullscreenTarget"
+    class="operations-board-shell"
+    :class="{ 'operations-board-shell--fullscreen': isFullscreen }"
+    :style="{ '--board-scale': zoomPercent / 100 }"
+  >
+    <div class="operations-board__surface">
+      <q-card class="operations-board shadow-11">
+        <q-card-section class="operations-board__header row items-center q-px-md q-py-sm">
+          <div class="operations-board__title">
+            {{ label('operations_board.title', 'Warehouse Operations') }}
           </div>
-        </q-td>
-      </template>
-      <template v-slot:body-cell-action="props">
-        <q-td :props="props">
+          <q-space />
+          <div v-if="viewerLabel" class="operations-board__viewer">
+            {{ viewerLabel }}
+          </div>
+          <div class="operations-board__live">LIVE</div>
           <q-btn
             flat
+            round
             dense
-            color="primary"
-            icon="open_in_new"
-            :aria-label="label('operations_board.open', 'Open')"
-            @click="openItem(props.row)"
+            color="white"
+            icon="remove"
+            :aria-label="label('operations_board.zoom_out', 'Zoom out')"
+            @click="adjustZoom(-10)"
           />
-        </q-td>
-      </template>
-    </q-table>
-  </q-card>
+          <button
+            type="button"
+            class="operations-board__zoom-value"
+            :aria-label="label('operations_board.zoom_reset', 'Reset zoom')"
+            @click="resetZoom"
+          >
+            {{ zoomPercent }}%
+          </button>
+          <q-btn
+            flat
+            round
+            dense
+            color="white"
+            icon="add"
+            :aria-label="label('operations_board.zoom_in', 'Zoom in')"
+            @click="adjustZoom(10)"
+          />
+          <q-btn
+            flat
+            round
+            dense
+            color="white"
+            icon="refresh"
+            :loading="loading"
+            :aria-label="label('operations_board.refresh', 'Refresh')"
+            @click="getList"
+          />
+          <q-btn
+            flat
+            round
+            dense
+            color="white"
+            :icon="isFullscreen ? 'fullscreen_exit' : 'fullscreen'"
+            :aria-label="isFullscreen
+              ? label('operations_board.exit_fullscreen', 'Exit fullscreen')
+              : label('operations_board.fullscreen', 'Fullscreen')"
+            @click="toggleFullscreen"
+          />
+        </q-card-section>
+
+        <q-card-section class="operations-board__controls row items-center q-pa-none">
+          <q-tabs
+            v-model="activeFilter"
+            dense
+            align="left"
+            active-color="primary"
+            indicator-color="primary"
+            class="operations-board__filters"
+          >
+            <q-tab v-for="filter in filters" :key="filter.key" :name="filter.key" :label="filter.label" />
+          </q-tabs>
+          <q-space />
+        </q-card-section>
+
+        <q-table
+          class="operations-board__table"
+          table-class="operations-board__grid"
+          :data="filteredItems"
+          :columns="columns"
+          row-key="id"
+          dense
+          flat
+          bordered
+          separator="horizontal"
+          hide-bottom
+          :row-class="rowClass"
+          :loading="loading"
+          :pagination.sync="pagination"
+          :no-data-label="noDataLabel"
+        >
+          <template v-slot:body-cell-lane="props">
+            <q-td :props="props">
+              <q-badge :color="laneColor(props.value)" align="middle">
+                {{ laneLabel(props.value) }}
+              </q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-quantity="props">
+            <q-td :props="props" class="text-weight-medium">
+              {{ props.row.quantity }} / {{ props.row.total_quantity }}
+            </q-td>
+          </template>
+          <template v-slot:body-cell-eta="props">
+            <q-td :props="props">
+              {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
+            </q-td>
+          </template>
+          <template v-slot:body-cell-customer="props">
+            <q-td :props="props">
+              <span :title="props.row.customer_full_name || props.row.customer">
+                {{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}
+              </span>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-assigned_to="props">
+            <q-td :props="props">
+              {{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}
+            </q-td>
+          </template>
+          <template v-slot:body-cell-operation="props">
+            <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
+          </template>
+          <template v-slot:body-cell-business_status="props">
+            <q-td :props="props">
+              <q-badge :color="businessStatusColor(props.row.business_status)">
+                {{ businessStatusLabel(props.row.business_status) }}
+              </q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-category="props">
+            <q-td :props="props">
+              <q-badge outline color="primary" class="operations-board__type">
+                {{ categoryLabel(props.value) }}
+              </q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-location="props">
+            <q-td :props="props">
+              <span :title="label('operations_board.location_hint', 'Target area for this step, not current inventory location')">
+                {{ locationLabel(props.value) }}
+              </span>
+              <div v-if="props.row.category === 'inbound'" class="text-caption text-grey-6">
+                R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
+              </div>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-action="props">
+            <q-td :props="props">
+              <q-btn
+                flat
+                dense
+                color="primary"
+                icon="open_in_new"
+                :aria-label="label('operations_board.open', 'Open')"
+                @click="openItem(props.row)"
+              />
+            </q-td>
+          </template>
+        </q-table>
+      </q-card>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -135,7 +181,9 @@ export default {
       viewer: { staff_name: '', staff_type: '', scope: '' },
       loading: false,
       refreshTimer: null,
-      pagination: { rowsPerPage: 10 }
+      pagination: { rowsPerPage: 10 },
+      isFullscreen: false,
+      zoomPercent: 100
     }
   },
   computed: {
@@ -177,11 +225,16 @@ export default {
     }
   },
   mounted () {
+    this.loadZoom()
+    document.addEventListener('fullscreenchange', this.syncFullscreen)
+    document.addEventListener('webkitfullscreenchange', this.syncFullscreen)
     this.getList()
     this.refreshTimer = setInterval(() => this.getList(), 30000)
   },
   beforeDestroy () {
     if (this.refreshTimer) clearInterval(this.refreshTimer)
+    document.removeEventListener('fullscreenchange', this.syncFullscreen)
+    document.removeEventListener('webkitfullscreenchange', this.syncFullscreen)
   },
   methods: {
     label (key, fallback) {
@@ -249,6 +302,43 @@ export default {
     rowClass (row) {
       return `operations-board__row--${row.lane || 'default'}`
     },
+    loadZoom () {
+      const savedZoom = Number(window.localStorage.getItem('greaterwms.dashboard.zoom'))
+      if (savedZoom >= 80 && savedZoom <= 140 && savedZoom % 10 === 0) {
+        this.zoomPercent = savedZoom
+      }
+    },
+    adjustZoom (delta) {
+      this.zoomPercent = Math.min(140, Math.max(80, this.zoomPercent + delta))
+      window.localStorage.setItem('greaterwms.dashboard.zoom', String(this.zoomPercent))
+    },
+    resetZoom () {
+      this.zoomPercent = 100
+      window.localStorage.setItem('greaterwms.dashboard.zoom', '100')
+    },
+    syncFullscreen () {
+      this.isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement)
+    },
+    toggleFullscreen () {
+      const target = this.$refs.fullscreenTarget
+      const activeElement = document.fullscreenElement || document.webkitFullscreenElement
+      if (activeElement) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen
+        if (exit) exit.call(document)
+        return
+      }
+      const request = target && (target.requestFullscreen || target.webkitRequestFullscreen)
+      if (!request) {
+        this.$q.notify({
+          message: this.label('operations_board.fullscreen_unavailable', 'Fullscreen is not supported by this browser'),
+          color: 'negative',
+          icon: 'fullscreen'
+        })
+        return
+      }
+      const result = request.call(target)
+      if (result && result.catch) result.catch(() => {})
+    },
     openItem (item) {
       if (!item.action_route) return
       const query = { reference: item.reference }
@@ -263,6 +353,34 @@ export default {
 </script>
 
 <style scoped>
+.operations-board-shell {
+  width: 100%;
+}
+
+.operations-board__surface {
+  width: 100%;
+}
+
+.operations-board-shell--fullscreen {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  padding: 12px;
+  overflow: auto;
+  background: #edf1f5;
+}
+
+.operations-board-shell--fullscreen .operations-board__surface {
+  width: calc(100% / var(--board-scale, 1));
+  transform: scale(var(--board-scale, 1));
+  transform-origin: top left;
+}
+
+.operations-board-shell--fullscreen .operations-board {
+  min-height: calc(100vh - 24px);
+  border-radius: 0;
+}
+
 .operations-board {
   width: 100%;
   background: #ffffff;
@@ -288,6 +406,18 @@ export default {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
+}
+
+.operations-board__zoom-value {
+  min-width: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .operations-board__viewer {
