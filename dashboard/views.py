@@ -760,6 +760,23 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         else:
             records = records.exclude(status__in=(ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED))
         records = list(records)
+        receipt_nos = [record.receipt_no for record in records]
+        staging_assignments = {}
+        if receipt_nos:
+            for assignment in StagingAssignment.objects.filter(
+                openid=openid,
+                flow=StagingAssignment.INBOUND,
+                reference_code__in=receipt_nos,
+                status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
+            ):
+                staging_assignments.setdefault(assignment.reference_code, []).append(assignment)
+        putaway_bins = {}
+        if receipt_nos:
+            for row in QTYRecorder.objects.filter(
+                openid=openid,
+                mode_code__in=receipt_nos,
+            ).values('mode_code', 'bin_name').distinct():
+                putaway_bins.setdefault(row['mode_code'], set()).add(row['bin_name'])
         customer_names = {record.customer for record in records if record.customer}
         customer_short_names = dict(SupplierModel.objects.filter(
             openid=openid,
@@ -843,13 +860,29 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 exception_summary = 'QC exception requires resolution'
             if record.reconciliation_status in (ReceivingRecord.EXCEPTION, ReceivingRecord.DISPUTED) and not exception_summary:
                 exception_summary = 'ASN reconciliation requires resolution'
+            metadata = record.metadata or {}
+            assigned_staging = staging_assignments.get(record.receipt_no, [])
+            active_staging_bins = sorted({
+                item.bin_name for item in assigned_staging
+                if item.status == StagingAssignment.ACTIVE
+            })
+            reserved_staging_bins = sorted({
+                item.bin_name for item in assigned_staging
+                if item.status == StagingAssignment.RESERVED
+            })
+            staging_bin_names = active_staging_bins or reserved_staging_bins or sorted(metadata.get('staging_bins') or [])
+            actual_putaway_bins = sorted(putaway_bins.get(record.receipt_no, set()))
             if record.status in (ReceivingRecord.QC_PENDING, ReceivingRecord.QC_EXCEPTION):
-                source_location, target_location = 'Stage', 'Stage / QC'
+                source_location = ', '.join(staging_bin_names) or 'Stage'
+                target_location = 'Stage / QC'
             elif record.status == ReceivingRecord.PUTAWAY_PENDING:
-                target_bins = sorted({detail.bin_name for detail in details if detail.bin_name})
-                source_location, target_location = 'Stage', ', '.join(target_bins) or 'Storage'
+                source_location = ', '.join(staging_bin_names) or 'Stage'
+                target_location = 'Storage (bin pending)'
+            elif actual_putaway_bins:
+                source_location = ', '.join(staging_bin_names) or 'Stage'
+                target_location = ', '.join(actual_putaway_bins)
             else:
-                source_location, target_location = 'Dock', 'Stage'
+                source_location, target_location = ', '.join(staging_bin_names) or 'Stage', 'Storage'
             items.append(self._format_item({
                 'category': 'receiving',
                 'reference': record.receipt_no,
@@ -874,6 +907,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'exception_note': record.exception_note,
                 'exception_summary': exception_summary,
                 'blocking_reason': exception_summary if blocked else '',
+                'staging_reserved_bins': reserved_staging_bins,
+                'staging_occupied_bins': active_staging_bins,
+                'staging_bins': staging_bin_names,
+                'putaway_bins': actual_putaway_bins,
                 'source_location': source_location,
                 'target_location': target_location,
                 'location_summary': '%s -> %s' % (source_location, target_location),
@@ -1261,7 +1298,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'staging_occupied_qty': item.get('staging_occupied_qty', 0),
             'staging_reserved_bins': item.get('staging_reserved_bins', []),
             'staging_occupied_bins': item.get('staging_occupied_bins', []),
-            'staging_bins': item.get('staging_occupied_bins') or item.get('staging_reserved_bins', []),
+            'staging_bins': item.get('staging_bins') or item.get('staging_occupied_bins') or item.get('staging_reserved_bins', []),
             'putaway_bins': item.get('putaway_bins', []),
             'assigned_role': item.get('assigned_role', 'WAREHOUSE'),
             'assignee_name': item.get('assignee_name', ''),

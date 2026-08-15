@@ -38,6 +38,28 @@ from .views import (
     _summary,
 )
 from .agent import complete_preview, consume_preview, create_preview, request_payload
+from .permissions import AgentPreviewPermission
+
+
+class AgentPreviewPermissionTests(TestCase):
+    def request(self, staff_id=7, is_admin=False, operator='7', agent=True):
+        return SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True),
+            auth=SimpleNamespace(openid='tenant', staff_id=staff_id, is_admin=is_admin),
+            META={
+                'HTTP_OPERATOR': operator,
+                'HTTP_X_AGENT_CLIENT': 'greaterwms-cli' if agent else 'browser',
+            },
+        )
+
+    def test_authenticated_outbound_operator_can_reach_agent_preview(self):
+        self.assertTrue(AgentPreviewPermission().has_permission(self.request(), None))
+
+    def test_agent_preview_rejects_operator_impersonation(self):
+        self.assertFalse(AgentPreviewPermission().has_permission(self.request(operator='8'), None))
+
+    def test_agent_preview_rejects_non_agent_requests(self):
+        self.assertFalse(AgentPreviewPermission().has_permission(self.request(agent=False), None))
 
 
 class PackListWorkflowTests(TestCase):

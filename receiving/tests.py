@@ -12,6 +12,7 @@ from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from goods.models import ListModel as GoodsModel
 from staff.models import ListModel as StaffModel
 from stock.models import StockListModel
+from staging.models import StagingAssignment
 from supplier.models import ListModel as SupplierModel
 from userprofile.models import Users
 from warehouse.models import ListModel as WarehouseModel
@@ -24,6 +25,7 @@ from .views import (
     ReceivingQcCompleteView,
     ReceivingRecordListView,
     ReceivingReconcileView,
+    ReceivingStagingAssignView,
 )
 from .services import assert_legacy_asn_putaway_allowed
 
@@ -62,6 +64,7 @@ class ReceivingFlowTests(TestCase):
             bar_code='BIN-RECEIVE-01',
             openid=self.openid,
         )
+        self.next_staging_slot = 1
 
     def request(self, data):
         return SimpleNamespace(
@@ -77,7 +80,11 @@ class ReceivingFlowTests(TestCase):
             GET={},
         )
 
-    def call(self, view_class, data):
+    def call(self, view_class, data, add_staging=True):
+        data = dict(data)
+        if view_class is ReceivingRecordListView and add_staging and not data.get('staging_bins'):
+            data['staging_bins'] = ['STAGE-LEFT-%02d' % self.next_staging_slot]
+            self.next_staging_slot += 1
         request = self.request(data)
         view = view_class()
         view.request = request
@@ -113,6 +120,15 @@ class ReceivingFlowTests(TestCase):
         })
         self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_COMPLETE)
         self.assertEqual(putaway.data['putaway_driver'], 'Tom')
+        self.assertEqual(
+            StagingAssignment.objects.get(
+                openid=self.openid,
+                flow=StagingAssignment.INBOUND,
+                reference_code='RC-001',
+                bin_name='STAGE-LEFT-01',
+            ).status,
+            StagingAssignment.RELEASED,
+        )
         self.assertEqual(StockListModel.objects.get(openid=self.openid, goods_code=self.goods_code).onhand_stock, 2)
         self.assertEqual(putaway.data['reconciliation_status'], ReceivingRecord.NO_ASN)
 
@@ -394,7 +410,49 @@ class ReceivingFlowTests(TestCase):
             'bin_name': 'A1-01',
             'driver_name': 'Tom',
         })
-        self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_COMPLETE)
+        self.assertEqual(putaway.data['status'], ReceivingRecord.PUTAWAY_PENDING)
+        self.assertEqual(
+            StagingAssignment.objects.get(
+                openid=self.openid,
+                flow=StagingAssignment.INBOUND,
+                reference_code='RC-002',
+            ).status,
+            StagingAssignment.ACTIVE,
+        )
+
+    def test_receiving_requires_stage_and_can_repair_legacy_record(self):
+        with self.assertRaises(ValidationError):
+            self.call(ReceivingRecordListView, {
+                'receipt_no': 'RC-NO-STAGE-001',
+                'customer': 'Customer A',
+                'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+            }, add_staging=False)
+
+        record = ReceivingRecord.objects.create(
+            receipt_no='RC-LEGACY-STAGE-001',
+            customer='Customer A',
+            openid=self.openid,
+            received_at=timezone.now(),
+            status=ReceivingRecord.QC_PENDING,
+        )
+        ReceivingDetail.objects.create(
+            receipt=record,
+            openid=self.openid,
+            goods_code=self.goods_code,
+            actual_qty=1,
+            accepted_qty=1,
+        )
+        assigned = self.call(ReceivingStagingAssignView, {
+            'receipt_no': record.receipt_no,
+            'staging_bins': ['STAGE-RIGHT-01'],
+        })
+        self.assertEqual(assigned.data['staging_bins'], ['STAGE-RIGHT-01'])
+        self.assertEqual(assigned.data['staging_status'], StagingAssignment.ACTIVE)
+        qc = self.call(ReceivingQcCompleteView, {
+            'receipt_no': record.receipt_no,
+            'details': [{'goods_code': self.goods_code, 'actual_qty': 1}],
+        })
+        self.assertEqual(qc.data['status'], ReceivingRecord.PUTAWAY_PENDING)
 
     def test_reconciliation_cannot_bypass_qc_and_putaway(self):
         self.call(ReceivingRecordListView, {

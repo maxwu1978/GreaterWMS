@@ -94,19 +94,19 @@
             </q-td>
           </template>
           <template v-slot:body-cell-next_action="props">
-            <q-td :props="props"><span class="operations-board__next-action">{{ props.row.next_action_label || props.row.next_action || operationLabel(props.row.operation) }}</span></q-td>
+            <q-td :props="props" class="operations-board__next-action-cell"><span class="operations-board__next-action">{{ props.row.next_action_label || props.row.next_action || operationLabel(props.row.operation) }}</span></q-td>
           </template>
           <template v-slot:body-cell-assigned_to="props">
             <q-td :props="props">{{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}</q-td>
           </template>
           <template v-slot:body-cell-location="props">
-            <q-td :props="props"><span :title="props.row.location_summary || props.row.location">{{ compactLocation(props.row) }}</span></q-td>
+            <q-td :props="props" class="operations-board__move-cell"><span class="operations-board__move" :title="props.row.location_summary || props.row.location">{{ compactLocation(props.row) }}</span></q-td>
           </template>
           <template v-slot:body-cell-quantity="props">
             <q-td :props="props" class="text-weight-medium text-right">{{ props.row.quantity_label || `${props.row.quantity} / ${props.row.total_quantity}` }}</q-td>
           </template>
           <template v-slot:body-cell-business_status="props">
-            <q-td :props="props"><q-badge :color="businessStatusColor(props.row.business_status)">{{ businessStatusLabel(props.row.business_status) }}</q-badge></q-td>
+            <q-td :props="props" class="operations-board__status-cell"><q-badge class="operations-board__status-badge" :color="businessStatusColor(props.row.business_status)">{{ businessStatusLabel(props.row.business_status) }}</q-badge></q-td>
           </template>
           <template v-slot:body-cell-action="props">
             <q-td :props="props">
@@ -232,11 +232,11 @@ export default {
         { name: 'eta', label: this.label('operations_board.eta_urgency', 'ETA / Urgency'), field: 'eta', align: 'left' },
         { name: 'customer', label: this.label('operations_board.customer', 'Customer'), field: 'customer', align: 'left' },
         { name: 'reference', label: this.label('operations_board.reference_type', 'Ref / Type'), field: 'reference', align: 'left' },
-        { name: 'next_action', label: this.label('operations_board.next_action', 'Next Step'), field: 'next_action', align: 'left' },
+        { name: 'next_action', label: this.label('operations_board.next_action', 'Next Step'), field: 'next_action', align: 'left', style: 'min-width: 150px; width: 170px; max-width: 210px;', headerStyle: 'min-width: 150px; width: 170px; max-width: 210px;' },
         { name: 'assigned_to', label: this.label('operations_board.assigned_to', 'Assigned To'), field: 'assigned_to', align: 'left' },
-        { name: 'location', label: this.label('operations_board.location', 'Move'), field: 'location_summary', align: 'left' },
+        { name: 'location', label: this.label('operations_board.location', 'Move'), field: 'location_summary', align: 'left', style: 'min-width: 150px; width: 180px; max-width: 230px;', headerStyle: 'min-width: 150px; width: 180px; max-width: 230px;' },
         { name: 'quantity', label: this.label('operations_board.quantity_short', 'Qty'), field: 'quantity_label', align: 'right' },
-        { name: 'business_status', label: this.label('operations_board.status', 'Status'), field: 'business_status', align: 'left' },
+        { name: 'business_status', label: this.label('operations_board.status', 'Status'), field: 'business_status', align: 'left', style: 'min-width: 140px; width: 160px; max-width: 200px;', headerStyle: 'min-width: 140px; width: 160px; max-width: 200px;' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
@@ -334,8 +334,7 @@ export default {
       const source = this.compactArea(row.source_location)
       const target = this.compactArea(row.target_location || row.location)
       if (!source) return target || '—'
-      const compact = `${source} → ${target}`
-      return compact.length > 28 ? `${compact.slice(0, 25)}...` : compact
+      return `${source} → ${target}`
     },
     compactArea (value) {
       const aliases = {
@@ -357,7 +356,7 @@ export default {
           if (stageMatch) {
             const side = stageMatch[1].toUpperCase() === 'LEFT' ? 'L' : 'R'
             const suffix = stageMatch[2].trim()
-            return suffix ? `STG-${side}-${suffix}` : `STG-${side}`
+            return suffix ? `${side}${suffix}` : side
           }
           return area
         })
@@ -508,7 +507,7 @@ export default {
 .operations-board__table >>> .q-table__middle { width: 100%; overflow-x: auto; }
 .operations-board__table >>> .q-table { min-width: 980px; }
 .operations-board__table >>> .q-table th, .operations-board__table >>> .q-table td { white-space: nowrap; }
-.operations-board__table >>> .q-table tbody tr { height: 48px; }
+.operations-board__table >>> .q-table tbody tr { min-height: 48px; }
 .operations-board__table >>> .q-table tbody tr:nth-child(even) { background: #f7f8fb; }
 .operations-board__table >>> .q-table tbody tr:hover { background: #eaf0f8; }
 .operations-board__eta-value { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -516,7 +515,13 @@ export default {
 .operations-board__eta-countdown { margin-top: 2px; color: #6b7280; font-size: 11px; font-weight: 600; }
 .operations-board__reference { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: #334155; cursor: pointer; font: inherit; text-align: left; }
 .operations-board__reference:hover { color: #1976d2; }
+.operations-board__next-action-cell,
+.operations-board__move-cell,
+.operations-board__status-cell { white-space: normal !important; vertical-align: middle; }
+.operations-board__next-action,
+.operations-board__move { display: block; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
 .operations-board__next-action { font-weight: 600; }
+.operations-board__status-badge { max-width: 100%; white-space: normal; line-height: 1.25; text-align: center; }
 .operations-board__detail { width: min(420px, 92vw); max-width: 420px; min-height: 100vh; }
 .operations-board__detail-body { overflow-y: auto; }
 .operations-board__detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; font-size: 13px; }

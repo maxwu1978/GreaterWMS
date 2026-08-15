@@ -16,6 +16,13 @@ from dn.models import DnDetailModel, DnListModel, DnSerialAllocation
 from driver.models import ListModel as DriverModel
 from goods.models import ListModel as GoodsModel
 from stock.models import StockBinModel, StockListModel
+from staging.models import StagingAssignment
+from staging.services import (
+    StagingError,
+    occupy_staging_slot,
+    release_staging_slot,
+    reserve_staging_slots,
+)
 from utils.md5 import Md5
 
 from .models import (
@@ -112,10 +119,22 @@ def _detail_has_open_exception(detail):
     )
 
 
+def _detail_has_pending_physical(detail):
+    """Keep the stage occupied until every physical unit has a disposition."""
+    actual_qty = int(detail.actual_qty or 0)
+    accepted_qty = int(detail.accepted_qty or 0)
+    putaway_qty = int(detail.putaway_qty or 0)
+    rejected_qty = int(detail.rejected_qty or 0)
+    return (
+        putaway_qty < accepted_qty
+        or putaway_qty + rejected_qty < actual_qty
+    )
+
+
 def _all_accepted_putaway(record):
     return all(
         not _detail_has_open_exception(detail)
-        and int(detail.putaway_qty or 0) >= int(detail.accepted_qty or 0)
+        and not _detail_has_pending_physical(detail)
         for detail in record.details.all()
     )
 
@@ -132,6 +151,76 @@ def _refresh_record_after_putaway(record, operator=''):
         record.status = ReceivingRecord.CLOSED
         record.closed_by = operator
         record.closed_at = timezone.now()
+
+
+def _parse_staging_bins(value):
+    if isinstance(value, str):
+        values = value.replace(';', ',').split(',')
+    elif isinstance(value, (list, tuple)):
+        values = value
+    else:
+        values = []
+    names = [str(item).strip() for item in values if str(item).strip()]
+    if not names:
+        raise ValidationError({'detail': 'Select at least one staging location before receiving'})
+    if len(names) != len(set(names)):
+        raise ValidationError({'detail': 'Staging locations cannot be duplicated'})
+    return names
+
+
+def _active_receiving_staging(record):
+    return list(StagingAssignment.objects.filter(
+        openid=record.openid,
+        flow=StagingAssignment.INBOUND,
+        reference_code=record.receipt_no,
+        status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
+    ).order_by('bin_name'))
+
+
+def _assign_receiving_staging(record, bin_names, operator=''):
+    try:
+        reserve_staging_slots(
+            record.openid,
+            StagingAssignment.INBOUND,
+            record.receipt_no,
+            bin_names,
+            quantity=len(bin_names),
+            creater=operator,
+        )
+        occupy_staging_slot(
+            record.openid,
+            StagingAssignment.INBOUND,
+            record.receipt_no,
+        )
+    except StagingError as exc:
+        raise ValidationError({'detail': str(exc)})
+    metadata = dict(record.metadata or {})
+    metadata['staging_bins'] = sorted(bin_names)
+    metadata['staging_status'] = StagingAssignment.ACTIVE
+    metadata['staging_assigned_at'] = timezone.now().isoformat()
+    record.metadata = metadata
+    record.save(update_fields=['metadata', 'update_time'])
+
+
+def _ensure_receiving_staged(record):
+    if not _active_receiving_staging(record):
+        raise ValidationError({'detail': 'Assign active staging locations before QC'})
+
+
+def _release_receiving_staging(record, operator=''):
+    released = release_staging_slot(
+        record.openid,
+        StagingAssignment.INBOUND,
+        record.receipt_no,
+    )
+    metadata = dict(record.metadata or {})
+    metadata['staging_status'] = StagingAssignment.RELEASED
+    metadata['staging_released_at'] = timezone.now().isoformat()
+    if operator:
+        metadata['staging_released_by'] = operator
+    record.metadata = metadata
+    record.save(update_fields=['metadata', 'update_time'])
+    return released
 
 
 def _goods_master(openid, goods_code):
@@ -305,6 +394,7 @@ class ReceivingRecordListView(APIView):
         raw_details = data.get('details') or data.get('goodsData') or []
         if not isinstance(raw_details, list) or not raw_details:
             raise ValidationError({'detail': 'At least one receiving detail is required'})
+        staging_bins = _parse_staging_bins(data.get('staging_bins', data.get('staging_bin')))
         linked_asn_code = str(data.get('linked_asn_code') or '').strip()
         raw_goods_codes = []
         for raw in raw_details:
@@ -374,7 +464,13 @@ class ReceivingRecordListView(APIView):
             source_type=source_type,
             source_hash=str(data.get('source_hash') or '').strip(),
             created_by=_operator_name(request),
+            metadata={
+                **(data.get('metadata') if isinstance(data.get('metadata'), dict) else {}),
+                'staging_bins': sorted(staging_bins),
+                'staging_status': StagingAssignment.ACTIVE,
+            },
         )
+        _assign_receiving_staging(record, staging_bins, _operator_name(request))
         seen = set()
         for raw in raw_details:
             goods_code = str(raw.get('goods_code') or raw.get('sku') or '').strip()
@@ -428,7 +524,10 @@ class ReceivingRecordListView(APIView):
             openid=openid,
             event_type='RECEIVING_CREATED',
             operator=_operator_name(request),
-            payload={'source_type': record.source_type},
+            payload={
+                'source_type': record.source_type,
+                'staging_bins': sorted(staging_bins),
+            },
         )
         return Response(_record_data(record), status=201)
 
@@ -438,6 +537,41 @@ class ReceivingRecordDetailView(APIView):
         record = ReceivingRecord.objects.filter(openid=_openid(request), id=pk).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        return Response(_record_data(record))
+
+
+class ReceivingStagingAssignView(APIView):
+    """Repair or assign the physical stage before QC starts."""
+
+    @transaction.atomic
+    def post(self, request):
+        _ensure_roles(request, 'Manager', 'Supervisor', 'Warehouse', 'Inbound')
+        openid = _openid(request)
+        receipt_no = str(request.data.get('receipt_no') or '').strip()
+        if not receipt_no:
+            raise ValidationError({'detail': 'receipt_no is required'})
+        record = ReceivingRecord.objects.select_for_update().filter(
+            openid=openid,
+            receipt_no=receipt_no,
+        ).first()
+        if record is None:
+            raise ValidationError({'detail': 'Receiving record does not exist'})
+        if record.status in (ReceivingRecord.CLOSED, ReceivingRecord.CANCELLED):
+            raise ValidationError({'detail': 'Closed receiving records cannot be assigned to staging'})
+        staging_bins = _parse_staging_bins(
+            request.data.get('staging_bins', request.data.get('staging_bin'))
+        )
+        _assign_receiving_staging(record, staging_bins, _operator_name(request))
+        if record.status == ReceivingRecord.RECEIVING:
+            record.status = ReceivingRecord.QC_PENDING
+            record.save(update_fields=['status', 'update_time'])
+        ReceivingReconciliationEvent.objects.create(
+            receipt=record,
+            openid=openid,
+            event_type='RECEIVING_STAGING_ASSIGNED',
+            operator=_operator_name(request),
+            payload={'staging_bins': sorted(staging_bins)},
+        )
         return Response(_record_data(record))
 
 
@@ -458,6 +592,7 @@ class ReceivingPutawayAssignView(APIView):
         ).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        _ensure_receiving_staged(record)
         if record.status != ReceivingRecord.PUTAWAY_PENDING:
             raise ValidationError({'detail': 'Driver can only be assigned when putaway is pending'})
         if not DriverModel.objects.filter(
@@ -505,6 +640,7 @@ class ReceivingQcCompleteView(APIView):
         ).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        _ensure_receiving_staged(record)
         if record.status not in (ReceivingRecord.QC_PENDING, ReceivingRecord.QC_EXCEPTION):
             raise ValidationError({'detail': 'Receiving record is not waiting for QC'})
         raw_details = request.data.get('details') or []
@@ -668,6 +804,7 @@ class ReceivingExceptionResolveView(APIView):
         record = ReceivingRecord.objects.select_for_update().filter(openid=openid, receipt_no=receipt_no).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        _ensure_receiving_staged(record)
         action = str(request.data.get('action') or '').strip().upper()
         if action not in (ACCEPT_FOR_PUTAWAY, HOLD_QUARANTINE, REJECT_RETURN):
             raise ValidationError({'detail': 'Unsupported exception action'})
@@ -733,6 +870,8 @@ class ReceivingExceptionResolveView(APIView):
         record.resolution_note = resolution_notes
         record.exception_note = str(request.data.get('note') or '').strip() or resolution_notes
         record.save()
+        if record.status == ReceivingRecord.CLOSED and action == REJECT_RETURN:
+            _release_receiving_staging(record, _operator_name(request))
         ReceivingReconciliationEvent.objects.create(
             receipt=record,
             openid=openid,
@@ -758,6 +897,7 @@ class ReceivingPutawayView(APIView):
         record = ReceivingRecord.objects.select_for_update().filter(openid=openid, receipt_no=receipt_no).first()
         if record is None:
             raise ValidationError({'detail': 'Receiving record does not exist'})
+        _ensure_receiving_staged(record)
         if record.status not in (ReceivingRecord.PUTAWAY_PENDING, ReceivingRecord.QC_EXCEPTION):
             raise ValidationError({'detail': 'Receiving record is not ready for putaway'})
         detail = ReceivingDetail.objects.select_for_update().filter(
@@ -846,6 +986,8 @@ class ReceivingPutawayView(APIView):
         _refresh_record_after_putaway(record, _operator_name(request))
         record.putaway_by = _operator_name(request)
         record.save()
+        if record.status in (ReceivingRecord.PUTAWAY_COMPLETE, ReceivingRecord.CLOSED):
+            _release_receiving_staging(record, _operator_name(request))
         ReceivingReconciliationEvent.objects.create(
             receipt=record,
             openid=openid,

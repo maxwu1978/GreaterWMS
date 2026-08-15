@@ -437,6 +437,13 @@ function validateOutboundDetailData (data) {
   return data
 }
 
+function validateReceivingCreateData (data) {
+  if (!Array.isArray(data.staging_bins) || data.staging_bins.length === 0) {
+    throw new Error('receiving create requires staging_bins with at least one Stage-left/Stage-right slot')
+  }
+  return data
+}
+
 async function readResource (resource, action, options, json) {
   if (resource === 'receiving' && !['list', 'get'].includes(action)) return false
   if (resource === 'transport' && !['list', 'get'].includes(action)) return false
@@ -567,7 +574,7 @@ function help () {
   process.stdout.write('  serial exceptions --asn-code ASN [--json]\n  serial resolve --id ID --data {"action":"REPAIR_REWORK","note":"Needs repair and reinspection","resolution_location":"REPAIR-01"} --dry-run|--confirm\n  serial resolve --id ID --data {"action":"ACCEPT_FOR_PUTAWAY","note":"Passed reinspection"} --dry-run|--confirm\n  serial resolve-quantity --data {"asn_code":"ASN","goods_code":"SKU","action":"ACCEPT_EXCEPTION","note":"QC approved"} --dry-run|--confirm\n  asn putaway --id ASN_DETAIL_ID --data {"asn_code":"ASN","goods_code":"SKU","qty":1,"bin_name":"A1-01","putaway_driver":"Tom"} --dry-run|--confirm\n')
   process.stdout.write('AI Agent/CLI ingestion: Pack List and QC imports are not available in the web page.\n')
   process.stdout.write('QC inspection: inspection import --asn-code ASN --file FILE [--evidence-url URL] --allow-all --dry-run|--confirm; inspection list --asn-code ASN\n')
-  process.stdout.write('Receiving: receiving create|qc|resolve|putaway|reconcile|resolve-reconciliation --data JSON --dry-run|--confirm; receiving exceptions\n')
+  process.stdout.write('Receiving: receiving create|staging-assign|qc|resolve|putaway|reconcile|resolve-reconciliation --data JSON --dry-run|--confirm; receiving exceptions\n')
   process.stdout.write('Transport: transport create|assign|transition --data JSON --dry-run|--confirm; transport list\n')
   process.stdout.write('Outbound: outbound create; outbound-detail create; outbound release|order-release|pick|dispatch|pod|cancel-intransit --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
@@ -917,6 +924,7 @@ async function main () {
 
   const receivingActions = {
     create: { operation: 'receiving.create', endpoint: '/receiving/records/' },
+    'staging-assign': { operation: 'receiving.staging_assign', endpoint: '/receiving/staging/assign/' },
     qc: { operation: 'receiving.qc_complete', endpoint: '/receiving/qc/complete/' },
     resolve: { operation: 'receiving.resolve_exception', endpoint: '/receiving/exceptions/resolve/' },
     putaway: { operation: 'receiving.putaway', endpoint: '/receiving/putaway/' },
@@ -925,10 +933,13 @@ async function main () {
   }
   if (resource === 'receiving' && receivingActions[action]) {
     const definition = receivingActions[action]
+    const data = action === 'create'
+      ? validateReceivingCreateData(parseData(options))
+      : parseData(options)
     await runProtectedJsonCommand({
       operation: definition.operation,
       endpoint: definition.endpoint,
-      data: parseData(options),
+      data,
       options,
       json,
     })

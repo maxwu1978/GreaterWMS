@@ -232,6 +232,61 @@ class OperationsBoardTests(TestCase):
             0,
         )
 
+    def test_receiving_location_tracks_stage_until_putaway_then_storage(self):
+        openid = 'dashboard-receiving-location-tenant'
+        receipt_no = 'RC-DASHBOARD-LOCATION-01'
+        record = ReceivingRecord.objects.create(
+            openid=openid,
+            receipt_no=receipt_no,
+            customer='Test Customer',
+            received_at=timezone.now(),
+            status=ReceivingRecord.QC_PENDING,
+            metadata={
+                'staging_bins': ['STAGE-RIGHT-03'],
+                'staging_status': StagingAssignment.ACTIVE,
+            },
+        )
+        ReceivingDetail.objects.create(
+            receipt=record,
+            openid=openid,
+            goods_code='702-S',
+            actual_qty=1,
+            accepted_qty=1,
+        )
+        StagingAssignment.objects.create(
+            openid=openid,
+            flow=StagingAssignment.INBOUND,
+            reference_code=receipt_no,
+            bin_name='STAGE-RIGHT-03',
+            status=StagingAssignment.ACTIVE,
+        )
+
+        item = OperationsBoardViewSet()._receiving_items(openid, timezone.now())[0]
+        self.assertEqual(item['location_summary'], 'STAGE-RIGHT-03 -> Stage / QC')
+        self.assertEqual(item['staging_occupied_bins'], ['STAGE-RIGHT-03'])
+
+        record.status = ReceivingRecord.PUTAWAY_COMPLETE
+        record.save(update_fields=['status', 'update_time'])
+        QTYRecorder.objects.create(
+            openid=openid,
+            mode_code=receipt_no,
+            bin_name='A1-01',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            store_code='STORE-RECEIVING-01',
+            creater='Tom',
+        )
+        StagingAssignment.objects.filter(
+            openid=openid,
+            reference_code=receipt_no,
+        ).update(status=StagingAssignment.RELEASED)
+
+        item = OperationsBoardViewSet()._receiving_items(openid, timezone.now())[0]
+        self.assertEqual(item['location_summary'], 'STAGE-RIGHT-03 -> A1-01')
+        self.assertEqual(item['staging_occupied_bins'], [])
+        self.assertEqual(item['staging_bins'], ['STAGE-RIGHT-03'])
+
     def test_receiving_history_keeps_final_reconciliation_status_and_role_scope(self):
         openid = 'dashboard-history-tenant'
         record = ReceivingRecord.objects.create(

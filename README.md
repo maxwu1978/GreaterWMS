@@ -142,7 +142,10 @@ Production CLI requests use `https://api.maxsmartwms.online`; the browser UI
 continues to use `https://maxsmartwms.online`:
 
 ~~~shell
+# `staging_bins` is required because the scan/QC record starts after unloading
+# and must remain tied to the physical Stage-left/Stage-right slots.
 node tools/greaterwms.mjs receiving create --data-file receipt.json --dry-run --json
+node tools/greaterwms.mjs receiving staging-assign --data-file staging.json --dry-run --json
 node tools/greaterwms.mjs receiving qc --data-file qc.json --dry-run --json
 node tools/greaterwms.mjs receiving putaway --data-file putaway.json --dry-run --json
 node tools/greaterwms.mjs receiving reconcile --data-file reconcile.json --dry-run --json

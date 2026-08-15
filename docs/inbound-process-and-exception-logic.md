@@ -128,6 +128,21 @@ Quantity comparison:
 
 After receiving submission, normal or exception-bearing lines generally move to ASN status `4`. A fully short line can move to status `5`; if no physical goods remain, staging is released.
 
+The physical scan receiving path uses the same staging rule even when the
+customer Pack List arrives before or after the truck:
+
+- The scan/QC receiving record must include the actual `STAGE-LEFT-##` or
+  `STAGE-RIGHT-##` slots where the unloaded goods are physically waiting.
+- Those slots are stored as an inbound `StagingAssignment` with status
+  `ACTIVE`, and the QC endpoint rejects a record that has no active stage.
+- During `PUTAWAY_PENDING`, the source remains the recorded Stage slots and the
+  final storage bin is still `Storage (bin pending)` until a driver completes
+  the move.
+- The receiving putaway writes the formal bin to `QTYRecorder` and releases the
+  inbound staging assignment only when all physical units have a disposition.
+- A legacy receiving record without a stage can be repaired with
+  `POST /receiving/staging/assign/` before QC or putaway continues.
+
 ### 2.5 QC inspection import
 
 QC personnel use a fixed Excel format and do not need to enter every inspection result manually in WMS. The current flow is:

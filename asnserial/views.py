@@ -44,6 +44,7 @@ from .agent import (
     require_agent_role,
     agent_roles_for_operation,
 )
+from .permissions import AgentPreviewPermission
 
 
 EXCEPTION_STATUSES = {
@@ -103,6 +104,8 @@ def _openid(request):
 
 class AgentCommandPreviewView(APIView):
     """Create a short-lived, tenant-scoped preview token for CLI mutations."""
+
+    permission_classes = [AgentPreviewPermission]
 
     def post(self, request):
         def reject(detail, **extra):

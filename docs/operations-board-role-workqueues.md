@@ -30,6 +30,33 @@ Unknown roles receive an empty queue. Filtering is performed on the server, not 
 
 ## Receiving putaway assignment
 
+A physical receiving record must include the actual staging slots selected after
+unloading. The create payload uses `staging_bins`, for example:
+
+```json
+{
+  "receipt_no": "RC-...",
+  "customer": "Delta Electronics",
+  "staging_bins": ["STAGE-LEFT-01"],
+  "details": [{"goods_code": "702-S", "actual_qty": 8}]
+}
+```
+
+The API marks those slots `ACTIVE`. QC cannot be submitted without an active
+inbound staging assignment. For records created before this rule, Warehouse or
+Inbound can repair the link before QC with:
+
+```http
+POST /receiving/staging/assign/
+{
+  "receipt_no": "RC-...",
+  "staging_bins": ["STAGE-RIGHT-03"]
+}
+```
+
+The slots remain occupied through QC and putaway. They are released only after
+all physical units are put away, or after a full `REJECT_RETURN` disposition.
+
 After QC accepts quantity and a receiving record enters `PUTAWAY_PENDING`, a Warehouse or Inbound user can assign a driver with:
 
 ```http

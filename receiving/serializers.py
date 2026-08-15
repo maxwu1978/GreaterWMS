@@ -23,6 +23,8 @@ class ReceivingRecordSerializer(serializers.ModelSerializer):
     details = ReceivingDetailSerializer(many=True, read_only=True)
     serial_count = serializers.SerializerMethodField()
     open_exception_count = serializers.SerializerMethodField()
+    staging_bins = serializers.SerializerMethodField()
+    staging_status = serializers.SerializerMethodField()
 
     class Meta:
         model = ReceivingRecord
@@ -39,3 +41,9 @@ class ReceivingRecordSerializer(serializers.ModelSerializer):
                 'ACCEPT_FOR_PUTAWAY', 'REJECT_RETURN',
             )
         )
+
+    def get_staging_bins(self, obj):
+        return list((obj.metadata or {}).get('staging_bins') or [])
+
+    def get_staging_status(self, obj):
+        return (obj.metadata or {}).get('staging_status') or 'UNASSIGNED'

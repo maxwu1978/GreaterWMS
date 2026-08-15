@@ -27,6 +27,19 @@
       <template v-slot:body-cell-quantity="props">
         <q-td :props="props">{{ quantity(props.row) }}</q-td>
       </template>
+      <template v-slot:body-cell-staging="props">
+        <q-td :props="props">
+          <span>{{ (props.row.staging_bins || []).join(', ') || 'Unassigned' }}</span>
+          <q-badge
+            v-if="props.row.staging_status"
+            class="q-ml-xs"
+            outline
+            :color="props.row.staging_status === 'ACTIVE' ? 'primary' : 'grey-7'"
+          >
+            {{ props.row.staging_status }}
+          </q-badge>
+        </q-td>
+      </template>
       <template v-slot:body-cell-putaway_driver="props">
         <q-td :props="props">
           <span>{{ props.row.putaway_driver || '-' }}</span>
@@ -87,6 +100,7 @@ export default {
         { name: 'status', label: 'Status', field: 'status', align: 'left' },
         { name: 'reconciliation_status', label: 'ASN Check', field: 'reconciliation_status', align: 'left' },
         { name: 'quantity', label: 'Qty', field: row => this.quantity(row), align: 'right' },
+        { name: 'staging', label: 'Stage', field: row => (row.staging_bins || []).join(', ') || 'Unassigned', align: 'left' },
         { name: 'putaway_driver', label: 'Putaway Driver', field: 'putaway_driver', align: 'left' },
         { name: 'exception_note', label: 'Exception', field: 'exception_note', align: 'left' }
       ]
