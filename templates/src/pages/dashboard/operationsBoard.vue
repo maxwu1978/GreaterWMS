@@ -109,7 +109,19 @@
           </template>
           <template v-slot:body-cell-eta="props">
             <q-td :props="props">
-              {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
+              <div class="operations-board__eta-value">
+                {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
+                <q-badge
+                  outline
+                  :color="etaStatusColor(props.row.eta_status)"
+                  class="operations-board__eta-status"
+                >
+                  {{ etaStatusLabel(props.row.eta_status) }}
+                </q-badge>
+              </div>
+              <div v-if="etaCountdown(props.row)" class="operations-board__eta-countdown">
+                {{ etaCountdown(props.row) }}
+              </div>
             </q-td>
           </template>
           <template v-slot:body-cell-customer="props">
@@ -190,6 +202,7 @@ export default {
     filters () {
       return [
         { key: 'all', label: this.label('operations_board.all', 'All') },
+        { key: 'urgent', label: this.label('operations_board.urgent', 'Urgent') },
         { key: 'now', label: this.label('operations_board.now', 'Now') },
         { key: 'next', label: this.label('operations_board.next', 'Pending') },
         { key: 'delayed', label: this.label('operations_board.delayed', 'Delayed') },
@@ -201,6 +214,9 @@ export default {
     },
     filteredItems () {
       if (this.activeFilter === 'all') return this.items
+      if (this.activeFilter === 'urgent') {
+        return this.items.filter(item => ['DUE_SOON', 'OVERDUE'].includes(item.eta_status))
+      }
       return this.items.filter(item => item.lane === this.activeFilter)
     },
     viewerLabel () {
@@ -211,7 +227,7 @@ export default {
     },
     columns () {
       return [
-        { name: 'eta', label: this.label('operations_board.eta', 'ETA'), field: 'eta', align: 'left' },
+        { name: 'eta', label: this.label('operations_board.eta_urgency', 'ETA / Urgency'), field: 'eta', align: 'left' },
         { name: 'customer', label: this.label('operations_board.customer', 'Owner / Customer'), field: 'customer', align: 'left' },
         { name: 'assigned_to', label: this.label('operations_board.assigned_to', 'Assigned To'), field: 'assigned_to', align: 'left' },
         { name: 'category', label: this.label('operations_board.type', 'Type'), field: 'category', align: 'left' },
@@ -301,6 +317,34 @@ export default {
     },
     rowClass (row) {
       return `operations-board__row--${row.lane || 'default'}`
+    },
+    etaStatusLabel (status) {
+      const key = String(status || 'NOT_PROVIDED').toLowerCase()
+      return this.label(`operations_board.eta_${key}`, status || 'Not Provided')
+    },
+    etaStatusColor (status) {
+      return {
+        OVERDUE: 'negative',
+        DUE_SOON: 'warning',
+        ON_TIME: 'primary',
+        ARRIVED: 'positive',
+        COMPLETED: 'positive',
+        CANCELLED: 'negative',
+        NOT_PROVIDED: 'grey-7'
+      }[String(status || 'NOT_PROVIDED').toUpperCase()] || 'grey-7'
+    },
+    etaCountdown (row) {
+      const status = String(row.eta_status || '').toUpperCase()
+      const minutes = Number(row.minutes_to_eta)
+      if (!Number.isFinite(minutes) || !['DUE_SOON', 'ON_TIME', 'OVERDUE'].includes(status)) return ''
+      const absoluteMinutes = Math.abs(minutes)
+      const hours = Math.floor(absoluteMinutes / 60)
+      const remainingMinutes = absoluteMinutes % 60
+      const duration = hours ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`
+      if (status === 'OVERDUE') {
+        return `${this.label('operations_board.eta_overdue_by', 'Overdue by')} ${duration}`
+      }
+      return `${this.label('operations_board.eta_due_in', 'Due in')} ${duration}`
     },
     loadZoom () {
       const savedZoom = Number(window.localStorage.getItem('greaterwms.dashboard.zoom'))
@@ -418,6 +462,25 @@ export default {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+.operations-board__eta-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.operations-board__eta-status {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.operations-board__eta-countdown {
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .operations-board__viewer {

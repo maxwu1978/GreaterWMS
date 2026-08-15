@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import timedelta
 
 from django.test import TestCase
 from django.utils import timezone
@@ -282,5 +283,36 @@ class OperationsBoardTests(TestCase):
         }, now)
 
         self.assertEqual(item['eta'], now.strftime('%m-%d %H:%M'))
+
+    def test_format_item_exposes_eta_urgency_and_countdown(self):
+        now = timezone.now()
+        view = OperationsBoardViewSet()
+
+        def format_eta(eta=None, actual_arrival_at=None):
+            return view._format_item({
+                'category': 'inbound',
+                'reference': 'ASN-DASHBOARD-ETA-STATE',
+                'operation': 'Await Arrival',
+                'location': 'Stage',
+                'action_route': 'asn',
+                'status': 1,
+                'business_status': 'PRE_ARRIVAL',
+                'quantity': 1,
+                'progress_quantity': 0,
+                'blocked': False,
+                'planned': True,
+                'timestamp': now,
+                'eta': eta,
+                'actual_arrival_at': actual_arrival_at,
+                'history': False,
+            }, now)
+
+        self.assertEqual(format_eta()['eta_status'], 'NOT_PROVIDED')
+        self.assertEqual(format_eta(now + timedelta(minutes=90))['eta_status'], 'DUE_SOON')
+        self.assertEqual(format_eta(now + timedelta(minutes=90))['minutes_to_eta'], 90)
+        self.assertEqual(format_eta(now + timedelta(minutes=180))['eta_status'], 'ON_TIME')
+        self.assertEqual(format_eta(now - timedelta(minutes=15))['eta_status'], 'OVERDUE')
+        self.assertEqual(format_eta(now - timedelta(minutes=15))['minutes_to_eta'], -15)
+        self.assertEqual(format_eta(now - timedelta(minutes=15), actual_arrival_at=now)['eta_status'], 'ARRIVED')
 
 # Create your tests here.

@@ -23,6 +23,7 @@ from django.db import connection
 from django.db.models import Q
 from django.db.models import Sum
 import re
+import math
 from django.utils import timezone
 from staging.models import StagingAssignment
 from asnserial.views import _summary as receiving_summary
@@ -213,6 +214,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
     """Return the active warehouse work queue for the GreaterWMS dashboard."""
 
     MANAGEMENT_ROLES = {'admin', 'manager', 'supervisor'}
+    ETA_DUE_SOON_MINUTES = 120
 
     def list(self, request, *args, **kwargs):
         auth = getattr(request, 'auth', None)
@@ -241,7 +243,20 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'completed': 4,
             'cancelled': 5,
         }
-        items.sort(key=lambda item: (lane_order[item['lane']], item['sort_time']))
+        eta_order = {
+            'OVERDUE': 0,
+            'DUE_SOON': 1,
+            'ON_TIME': 2,
+            'NOT_PROVIDED': 3,
+            'ARRIVED': 4,
+            'COMPLETED': 5,
+            'CANCELLED': 6,
+        }
+        items.sort(key=lambda item: (
+            lane_order[item['lane']],
+            eta_order.get(item.get('eta_status'), 3),
+            item['sort_time'],
+        ))
 
         counts = {
             'total': len(items),
@@ -249,6 +264,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'next': sum(item['lane'] == 'next' for item in items),
             'delayed': sum(item['lane'] == 'delayed' for item in items),
             'blocked': sum(item['lane'] == 'blocked' for item in items),
+            'urgent': sum(item['eta_status'] in ('DUE_SOON', 'OVERDUE') for item in items),
+            'due_soon': sum(item['eta_status'] == 'DUE_SOON' for item in items),
+            'overdue': sum(item['eta_status'] == 'OVERDUE' for item in items),
             'completed': sum(item['lane'] == 'completed' for item in items),
             'cancelled': sum(item['lane'] == 'cancelled' for item in items),
         }
@@ -325,10 +343,44 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         return []
 
     @staticmethod
-    def _lane(eta, *, blocked, planned):
+    @staticmethod
+    def _align_datetimes(left, right):
+        """Make naive and aware datetimes comparable without changing the instant."""
+        if timezone.is_naive(left) == timezone.is_naive(right):
+            return left, right
+        current_timezone = timezone.get_current_timezone()
+        if timezone.is_naive(left):
+            left = timezone.make_aware(left, current_timezone)
+        if timezone.is_naive(right):
+            right = timezone.make_aware(right, current_timezone)
+        return left, right
+
+    @classmethod
+    def _eta_status(cls, eta, now, *, actual_arrival_at=None, business_status='', history=False):
+        if history:
+            return ('CANCELLED' if business_status == 'CANCELLED' else 'COMPLETED', None)
+        if actual_arrival_at or business_status == 'ARRIVED':
+            return 'ARRIVED', None
+        if not eta:
+            return 'NOT_PROVIDED', None
+        eta, now = cls._align_datetimes(eta, now)
+        seconds = (eta - now).total_seconds()
+        if seconds < 0:
+            minutes = -int(math.ceil(abs(seconds) / 60))
+            return 'OVERDUE', minutes
+        minutes = int(math.ceil(seconds / 60))
+        if minutes <= cls.ETA_DUE_SOON_MINUTES:
+            return 'DUE_SOON', minutes
+        return 'ON_TIME', minutes
+
+    @classmethod
+    def _lane(cls, eta, *, blocked, planned, now=None):
         if blocked:
             return 'blocked'
-        if eta and timezone.now() > eta:
+        if eta:
+            now = now or timezone.now()
+            eta, now = cls._align_datetimes(eta, now)
+        if eta and now > eta:
             return 'delayed'
         return 'next' if planned else 'now'
 
@@ -773,7 +825,14 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         elif item.get('actual_arrival_at') and item.get('operation') == 'Unload':
             lane = 'blocked' if item['blocked'] else 'now'
         else:
-            lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'])
+            lane = self._lane(eta, blocked=item['blocked'], planned=item['planned'], now=now)
+        eta_status, minutes_to_eta = self._eta_status(
+            eta,
+            now,
+            actual_arrival_at=item.get('actual_arrival_at'),
+            business_status=item.get('business_status', ''),
+            history=item.get('history', False),
+        )
         quantity = item['quantity']
         progress = min(item['progress_quantity'], quantity)
         # Production runs with USE_TZ=False, while some API paths can still
@@ -800,6 +859,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'progress_quantity': progress,
             'total_quantity': quantity,
             'eta': eta_text,
+            'eta_status': eta_status,
+            'minutes_to_eta': minutes_to_eta,
+            'eta_due_soon_minutes': self.ETA_DUE_SOON_MINUTES,
             'arrival_status': 'ARRIVED' if item.get('actual_arrival_at') else 'PRE_ARRIVAL',
             'staging_reserved_qty': item.get('staging_reserved_qty', 0),
             'staging_occupied_qty': item.get('staging_occupied_qty', 0),
