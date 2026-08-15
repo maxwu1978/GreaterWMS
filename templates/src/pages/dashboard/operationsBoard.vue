@@ -234,7 +234,7 @@ export default {
         { name: 'reference', label: this.label('operations_board.reference_type', 'Ref / Type'), field: 'reference', align: 'left' },
         { name: 'next_action', label: this.label('operations_board.next_action', 'Next Step'), field: 'next_action', align: 'left' },
         { name: 'assigned_to', label: this.label('operations_board.assigned_to', 'Assigned To'), field: 'assigned_to', align: 'left' },
-        { name: 'location', label: this.label('operations_board.location', 'From / To'), field: 'location_summary', align: 'left' },
+        { name: 'location', label: this.label('operations_board.location', 'Move'), field: 'location_summary', align: 'left' },
         { name: 'quantity', label: this.label('operations_board.quantity_short', 'Qty'), field: 'quantity_label', align: 'right' },
         { name: 'business_status', label: this.label('operations_board.status', 'Status'), field: 'business_status', align: 'left' },
         { name: 'action', label: '', field: 'action', align: 'right' }
@@ -331,11 +331,38 @@ export default {
     },
     compactLocation (row) {
       if (!row) return '—'
-      const source = row.source_location || ''
-      const target = row.target_location || row.location || ''
-      if (!source) return this.locationLabel(target) || '—'
+      const source = this.compactArea(row.source_location)
+      const target = this.compactArea(row.target_location || row.location)
+      if (!source) return target || '—'
       const compact = `${source} → ${target}`
-      return compact.length > 34 ? `${compact.slice(0, 31)}...` : compact
+      return compact.length > 28 ? `${compact.slice(0, 25)}...` : compact
+    },
+    compactArea (value) {
+      const aliases = {
+        Dock: 'DOCK',
+        Stage: 'STG',
+        'Stage / QC': 'STG/QC',
+        Storage: 'STO',
+        'Storage (bin pending)': 'STO?',
+        Shipping: 'SHP',
+        Customer: 'CUST'
+      }
+      return String(value || '')
+        .split(',')
+        .map(part => {
+          const area = part.trim()
+          if (!area) return ''
+          if (aliases[area]) return aliases[area]
+          const stageMatch = area.match(/^Stage[- ](left|right)(?:[- ]?)(.*)$/i)
+          if (stageMatch) {
+            const side = stageMatch[1].toUpperCase() === 'LEFT' ? 'L' : 'R'
+            const suffix = stageMatch[2].trim()
+            return suffix ? `STG-${side}-${suffix}` : `STG-${side}`
+          }
+          return area
+        })
+        .filter(Boolean)
+        .join(',')
     },
     operationLabel (operation) {
       const key = String(operation || '').toLowerCase()

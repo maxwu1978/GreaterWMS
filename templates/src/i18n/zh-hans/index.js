@@ -226,7 +226,7 @@ export default {
     warehouse: '仓管',
     reference: '单号',
     reference_type: '单号 / 类型',
-    location: '区域',
+    location: '移动路径',
     quantity: '剩余 / 总数',
     quantity_short: '数量',
     open: '打开',

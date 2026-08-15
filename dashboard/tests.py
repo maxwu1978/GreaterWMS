@@ -8,6 +8,8 @@ from asn.models import AsnDetailModel, AsnListModel
 from asnserial.models import AsnSerialRecord
 from dn.models import DnDetailModel
 from receiving.models import ReceivingDetail, ReceivingRecord
+from cyclecount.models import QTYRecorder
+from staging.models import StagingAssignment
 
 from .views import OperationsBoardViewSet
 
@@ -128,6 +130,55 @@ class OperationsBoardTests(TestCase):
         self.assertEqual(response.data['items'][0]['action_code'], 'unload')
         self.assertEqual(response.data['items'][0]['available_actions'], ['unload'])
         self.assertTrue(response.data['items'][0]['can_act'])
+
+    def test_putaway_route_uses_staging_as_source_and_recorded_bin_as_target(self):
+        openid = 'dashboard-putaway-location-tenant'
+        asn_code = 'ASN-DASHBOARD-PUTAWAY-01'
+        AsnListModel.objects.create(
+            asn_code=asn_code,
+            asn_status=4,
+            actual_arrival_at=timezone.now(),
+            supplier='Test Customer',
+            creater='tester',
+            bar_code='BAR-DASHBOARD-PUTAWAY-01',
+            openid=openid,
+            transportation_fee={},
+        )
+        AsnDetailModel.objects.create(
+            asn_code=asn_code,
+            asn_status=4,
+            supplier='Test Customer',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            goods_actual_qty=1,
+            sorted_qty=1,
+            creater='tester',
+            openid=openid,
+        )
+        QTYRecorder.objects.create(
+            openid=openid,
+            mode_code=asn_code,
+            bin_name='A1-01',
+            goods_code='702-S',
+            goods_desc='Test SKU',
+            goods_qty=1,
+            store_code='STORE-01',
+            creater='Tom',
+        )
+        StagingAssignment.objects.create(
+            openid=openid,
+            flow=StagingAssignment.INBOUND,
+            reference_code=asn_code,
+            bin_name='Stage-left-01',
+            status=StagingAssignment.ACTIVE,
+        )
+
+        item = OperationsBoardViewSet()._inbound_items(openid, timezone.now())[0]
+
+        self.assertEqual(item['source_location'], 'Stage-left-01')
+        self.assertEqual(item['target_location'], 'A1-01')
+        self.assertEqual(item['location_summary'], 'Stage-left-01 -> A1-01')
 
     def test_dashboard_action_metadata_is_scoped_to_role(self):
         view = OperationsBoardViewSet()

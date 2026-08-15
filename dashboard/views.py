@@ -30,6 +30,7 @@ from asnserial.views import _summary as receiving_summary
 from driver.models import DispatchListModel
 from receiving.models import ReceivingRecord
 from transport.models import TransportOrder
+from cyclecount.models import QTYRecorder
 
 class ReceiptsViewSet(viewsets.ModelViewSet):
     """
@@ -500,6 +501,17 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             is_delete=False,
         ).exclude(asn_code__in=linked_receipt_asns).order_by('-update_time', '-id'))
         asn_codes = {row.asn_code for row in rows}
+        putaway_bins_context = {}
+        for movement in QTYRecorder.objects.filter(
+            openid=openid,
+            mode_code__in=asn_codes,
+        ).order_by('id').values('mode_code', 'bin_name'):
+            bin_name = str(movement.get('bin_name') or '').strip()
+            if not bin_name:
+                continue
+            bins = putaway_bins_context.setdefault(movement['mode_code'], [])
+            if bin_name not in bins:
+                bins.append(bin_name)
         asn_models = {
             asn.asn_code: asn
             for asn in AsnListModel.objects.filter(
@@ -546,6 +558,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'staging_occupied_qty': staging['occupied'],
                 'staging_reserved_bins': staging['reserved_bins'],
                 'staging_occupied_bins': staging['occupied_bins'],
+                'putaway_bins': putaway_bins_context.get(row.asn_code, []),
                 'package_qty': intake.get('package_qty') or 0,
                 'container_tracking': intake.get('container_tracking') or '',
                 'source_location': 'Dock',
@@ -619,7 +632,9 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             if item['status'] == 3:
                 item['task_qty'] = received_qty
                 item['task_total_qty'] = expected_qty
-                item['source_location'] = 'Stage'
+                item['source_location'] = (
+                    ', '.join(item.get('staging_occupied_bins') or []) or 'Stage'
+                )
                 item['target_location'] = 'Stage / QC'
             elif item['status'] == 4:
                 sorted_qty = sum(
@@ -632,8 +647,19 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 )
                 item['task_qty'] = max(received_qty - sorted_qty, 0)
                 item['task_total_qty'] = received_qty
+                item['source_location'] = (
+                    ', '.join(item.get('staging_occupied_bins') or item.get('staging_reserved_bins') or [])
+                    or 'Stage'
+                )
+                item['target_location'] = (
+                    ', '.join(item.get('putaway_bins') or [])
+                    or 'Storage (bin pending)'
+                )
+            elif item['status'] == 5:
                 item['source_location'] = 'Stage'
-                item['target_location'] = 'Storage'
+                item['target_location'] = (
+                    ', '.join(item.get('putaway_bins') or []) or 'Storage'
+                )
             else:
                 item['task_qty'] = max(expected_qty - received_qty, 0)
                 item['task_total_qty'] = expected_qty
@@ -643,10 +669,6 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                     ', '.join(item.get('staging_occupied_bins') or item.get('staging_reserved_bins') or [])
                     or 'Stage'
                 )
-            if item.get('staging_occupied_bins'):
-                item['target_location'] = ', '.join(item['staging_occupied_bins'])
-            elif item.get('staging_reserved_bins') and item['status'] <= 2:
-                item['target_location'] = ', '.join(item['staging_reserved_bins'])
             item['location_summary'] = '%s -> %s' % (
                 item['source_location'],
                 item['target_location'],
@@ -1240,6 +1262,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'staging_reserved_bins': item.get('staging_reserved_bins', []),
             'staging_occupied_bins': item.get('staging_occupied_bins', []),
             'staging_bins': item.get('staging_occupied_bins') or item.get('staging_reserved_bins', []),
+            'putaway_bins': item.get('putaway_bins', []),
             'assigned_role': item.get('assigned_role', 'WAREHOUSE'),
             'assignee_name': item.get('assignee_name', ''),
             'assigned_to': item.get('assignee_name') or item.get('assigned_role', 'WAREHOUSE'),
