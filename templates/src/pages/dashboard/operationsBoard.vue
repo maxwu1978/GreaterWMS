@@ -12,71 +12,45 @@
             {{ label('operations_board.title', 'Warehouse Operations') }}
           </div>
           <q-space />
-          <div v-if="viewerLabel" class="operations-board__viewer">
-            {{ viewerLabel }}
-          </div>
+          <div v-if="viewerLabel" class="operations-board__viewer">{{ viewerLabel }}</div>
           <div class="operations-board__live">LIVE</div>
-          <q-btn
-            flat
-            round
-            dense
-            color="white"
-            icon="remove"
-            :aria-label="label('operations_board.zoom_out', 'Zoom out')"
-            @click="adjustZoom(-10)"
-          />
-          <button
-            type="button"
-            class="operations-board__zoom-value"
-            :aria-label="label('operations_board.zoom_reset', 'Reset zoom')"
-            @click="resetZoom"
-          >
+          <q-btn flat round dense color="white" icon="remove" :aria-label="label('operations_board.zoom_out', 'Zoom out')" @click="adjustZoom(-10)" />
+          <button type="button" class="operations-board__zoom-value" :aria-label="label('operations_board.zoom_reset', 'Reset zoom')" @click="resetZoom">
             {{ zoomPercent }}%
           </button>
-          <q-btn
-            flat
-            round
-            dense
-            color="white"
-            icon="add"
-            :aria-label="label('operations_board.zoom_in', 'Zoom in')"
-            @click="adjustZoom(10)"
-          />
-          <q-btn
-            flat
-            round
-            dense
-            color="white"
-            icon="refresh"
-            :loading="loading"
-            :aria-label="label('operations_board.refresh', 'Refresh')"
-            @click="getList"
-          />
+          <q-btn flat round dense color="white" icon="add" :aria-label="label('operations_board.zoom_in', 'Zoom in')" @click="adjustZoom(10)" />
+          <q-btn flat round dense color="white" icon="refresh" :loading="loading" :aria-label="label('operations_board.refresh', 'Refresh')" @click="getList()" />
           <q-btn
             flat
             round
             dense
             color="white"
             :icon="isFullscreen ? 'fullscreen_exit' : 'fullscreen'"
-            :aria-label="isFullscreen
-              ? label('operations_board.exit_fullscreen', 'Exit fullscreen')
-              : label('operations_board.fullscreen', 'Fullscreen')"
+            :aria-label="isFullscreen ? label('operations_board.exit_fullscreen', 'Exit fullscreen') : label('operations_board.fullscreen', 'Fullscreen')"
             @click="toggleFullscreen"
           />
         </q-card-section>
 
+        <q-card-section class="operations-board__summary row items-center q-px-md q-py-xs">
+          <q-tabs v-model="viewMode" dense align="left" active-color="primary" indicator-color="primary" class="operations-board__view-tabs">
+            <q-tab name="active" :label="label('operations_board.active', 'Active')" />
+            <q-tab name="history" :label="label('operations_board.history', 'History')" />
+          </q-tabs>
+          <q-space />
+          <div class="operations-board__counts">
+            <span class="operations-board__count">{{ countLabel('total', 'Total') }} {{ counts.total || 0 }}</span>
+            <span v-if="viewMode === 'active'" class="operations-board__count operations-board__count--urgent">{{ countLabel('urgent', 'Urgent') }} {{ counts.urgent || 0 }}</span>
+            <span v-if="viewMode === 'active'" class="operations-board__count operations-board__count--blocked">{{ countLabel('blocked', 'Blocked') }} {{ counts.blocked || 0 }}</span>
+            <span v-if="viewMode === 'history'" class="operations-board__count">{{ countLabel('completed', 'Completed') }} {{ counts.completed || 0 }}</span>
+          </div>
+        </q-card-section>
+
         <q-card-section class="operations-board__controls row items-center q-pa-none">
-          <q-tabs
-            v-model="activeFilter"
-            dense
-            align="left"
-            active-color="primary"
-            indicator-color="primary"
-            class="operations-board__filters"
-          >
+          <q-tabs v-model="activeFilter" dense align="left" active-color="primary" indicator-color="primary" class="operations-board__filters">
             <q-tab v-for="filter in filters" :key="filter.key" :name="filter.key" :label="filter.label" />
           </q-tabs>
           <q-space />
+          <q-btn v-if="hasMore" flat dense color="primary" class="q-mr-sm" :label="label('operations_board.load_more', 'Load More')" @click="loadMore" />
         </q-card-section>
 
         <q-table
@@ -95,89 +69,106 @@
           :pagination.sync="pagination"
           :no-data-label="noDataLabel"
         >
-          <template v-slot:body-cell-lane="props">
-            <q-td :props="props">
-              <q-badge :color="laneColor(props.value)" align="middle">
-                {{ laneLabel(props.value) }}
-              </q-badge>
-            </q-td>
-          </template>
-          <template v-slot:body-cell-quantity="props">
-            <q-td :props="props" class="text-weight-medium">
-              {{ props.row.quantity }} / {{ props.row.total_quantity }}
-            </q-td>
-          </template>
           <template v-slot:body-cell-eta="props">
             <q-td :props="props">
               <div class="operations-board__eta-value">
                 {{ props.row.eta || label('operations_board.eta_not_provided', 'Not Provided') }}
-                <q-badge
-                  outline
-                  :color="etaStatusColor(props.row.eta_status)"
-                  class="operations-board__eta-status"
-                >
+                <q-badge outline :color="etaStatusColor(props.row.eta_status)" class="operations-board__eta-status">
                   {{ etaStatusLabel(props.row.eta_status) }}
                 </q-badge>
               </div>
-              <div v-if="etaCountdown(props.row)" class="operations-board__eta-countdown">
-                {{ etaCountdown(props.row) }}
-              </div>
+              <div v-if="etaCountdown(props.row)" class="operations-board__eta-countdown">{{ etaCountdown(props.row) }}</div>
             </q-td>
           </template>
           <template v-slot:body-cell-customer="props">
             <q-td :props="props">
-              <span :title="props.row.customer_full_name || props.row.customer">
-                {{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}
-              </span>
+              <span :title="props.row.customer_full_name || props.row.customer">{{ props.row.customer || label('operations_board.customer_not_provided', 'Not Provided') }}</span>
             </q-td>
+          </template>
+          <template v-slot:body-cell-reference="props">
+            <q-td :props="props">
+              <button type="button" class="operations-board__reference" @click="showDetails(props.row)">
+                <q-badge outline color="primary">{{ categoryLabel(props.row.category) }}</q-badge>
+                <span>{{ props.row.reference }}</span>
+              </button>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-next_action="props">
+            <q-td :props="props"><span class="operations-board__next-action">{{ operationLabel(props.row.next_action || props.row.operation) }}</span></q-td>
           </template>
           <template v-slot:body-cell-assigned_to="props">
-            <q-td :props="props">
-              {{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}
-            </q-td>
-          </template>
-          <template v-slot:body-cell-operation="props">
-            <q-td :props="props">{{ operationLabel(props.value) }}</q-td>
-          </template>
-          <template v-slot:body-cell-business_status="props">
-            <q-td :props="props">
-              <q-badge :color="businessStatusColor(props.row.business_status)">
-                {{ businessStatusLabel(props.row.business_status) }}
-              </q-badge>
-            </q-td>
-          </template>
-          <template v-slot:body-cell-category="props">
-            <q-td :props="props">
-              <q-badge outline color="primary" class="operations-board__type">
-                {{ categoryLabel(props.value) }}
-              </q-badge>
-            </q-td>
+            <q-td :props="props">{{ props.row.assignee_name || assignedRoleLabel(props.row.assigned_role) }}</q-td>
           </template>
           <template v-slot:body-cell-location="props">
-            <q-td :props="props">
-              <span :title="label('operations_board.location_hint', 'Target area for this step, not current inventory location')">
-                {{ locationLabel(props.value) }}
-              </span>
-              <div v-if="props.row.category === 'inbound'" class="text-caption text-grey-6">
-                R {{ props.row.staging_reserved_qty || 0 }} / O {{ props.row.staging_occupied_qty || 0 }}
-              </div>
-            </q-td>
+            <q-td :props="props"><span :title="props.row.location_summary || props.row.location">{{ compactLocation(props.row) }}</span></q-td>
+          </template>
+          <template v-slot:body-cell-quantity="props">
+            <q-td :props="props" class="text-weight-medium text-right">{{ props.row.quantity_label || `${props.row.quantity} / ${props.row.total_quantity}` }}</q-td>
+          </template>
+          <template v-slot:body-cell-business_status="props">
+            <q-td :props="props"><q-badge :color="businessStatusColor(props.row.business_status)">{{ businessStatusLabel(props.row.business_status) }}</q-badge></q-td>
           </template>
           <template v-slot:body-cell-action="props">
             <q-td :props="props">
-              <q-btn
-                flat
-                dense
-                color="primary"
-                icon="open_in_new"
-                :aria-label="label('operations_board.open', 'Open')"
-                @click="openItem(props.row)"
-              />
+              <q-btn flat dense color="primary" icon="open_in_new" :aria-label="label('operations_board.open', 'Open')" @click="showDetails(props.row)" />
             </q-td>
           </template>
         </q-table>
       </q-card>
     </div>
+
+    <q-dialog v-model="detailOpen" position="right">
+      <q-card v-if="selectedItem" class="operations-board__detail">
+        <q-card-section class="row items-center q-pb-sm">
+          <div>
+            <div class="text-subtitle1 text-weight-bold">{{ selectedItem.reference }}</div>
+            <div class="text-caption text-grey-7">{{ categoryLabel(selectedItem.category) }} · {{ selectedItem.customer }}</div>
+          </div>
+          <q-space />
+          <q-btn flat round dense icon="close" @click="detailOpen = false" />
+        </q-card-section>
+        <q-separator />
+        <q-card-section class="operations-board__detail-body">
+          <div class="operations-board__detail-status row items-center q-mb-md">
+            <q-badge :color="businessStatusColor(selectedItem.business_status)">{{ businessStatusLabel(selectedItem.business_status) }}</q-badge>
+            <q-space />
+            <span class="text-caption text-grey-7">{{ operationLabel(selectedItem.next_action || selectedItem.operation) }}</span>
+          </div>
+
+          <div class="operations-board__detail-grid">
+            <div class="operations-board__detail-label">{{ label('operations_board.assigned_to', 'Assigned To') }}</div>
+            <div>{{ selectedItem.assignee_name || assignedRoleLabel(selectedItem.assigned_role) }}</div>
+            <div class="operations-board__detail-label">{{ label('operations_board.location', 'Location') }}</div>
+            <div>{{ selectedItem.location_summary || selectedItem.location || '—' }}</div>
+            <div class="operations-board__detail-label">{{ label('operations_board.quantity', 'Qty') }}</div>
+            <div>{{ selectedItem.quantity_label || '—' }}</div>
+            <div class="operations-board__detail-label">{{ label('operations_board.eta', 'ETA') }}</div>
+            <div>{{ selectedItem.eta || label('operations_board.eta_not_provided', 'Not Provided') }}</div>
+            <div v-if="selectedItem.linked_reference" class="operations-board__detail-label">Linked Ref</div>
+            <div v-if="selectedItem.linked_reference">{{ selectedItem.linked_reference }}</div>
+          </div>
+
+          <div v-if="selectedItem.staging_bins && selectedItem.staging_bins.length" class="operations-board__detail-section">
+            <div class="operations-board__detail-label">Staging</div>
+            <div>{{ selectedItem.staging_bins.join(', ') }}</div>
+          </div>
+
+          <div v-if="acceptanceRows(selectedItem).length" class="operations-board__detail-section">
+            <div class="operations-board__detail-label">Checks</div>
+            <div v-for="row in acceptanceRows(selectedItem)" :key="row.label" class="operations-board__detail-line">
+              <span>{{ row.label }}</span>
+              <strong>{{ row.value }}</strong>
+            </div>
+          </div>
+
+          <q-banner v-if="selectedItem.exception_summary || selectedItem.blocking_reason" dense rounded class="bg-red-1 text-negative q-mt-md">
+            {{ selectedItem.exception_summary || selectedItem.blocking_reason }}
+          </q-banner>
+
+          <q-btn unelevated color="primary" class="full-width q-mt-lg" :label="label('operations_board.open_record', 'Open Record')" @click="openItem(selectedItem)" />
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -188,35 +179,46 @@ export default {
   name: 'OperationsBoard',
   data () {
     return {
+      viewMode: 'active',
       activeFilter: 'all',
       items: [],
+      counts: {},
       viewer: { staff_name: '', staff_type: '', scope: '' },
       loading: false,
       refreshTimer: null,
-      pagination: { rowsPerPage: 10 },
+      // The API paginates; the board should render every loaded row without a second hidden pager.
+      pagination: { rowsPerPage: 0 },
+      hasMore: false,
+      detailOpen: false,
+      selectedItem: null,
       isFullscreen: false,
       zoomPercent: 100
     }
   },
   computed: {
     filters () {
+      if (this.viewMode === 'history') {
+        return [
+          { key: 'all', label: this.label('operations_board.all', 'All') },
+          { key: 'completed', label: this.label('operations_board.completed', 'Completed') },
+          { key: 'cancelled', label: this.label('operations_board.cancelled', 'Cancelled') }
+        ]
+      }
       return [
         { key: 'all', label: this.label('operations_board.all', 'All') },
         { key: 'urgent', label: this.label('operations_board.urgent', 'Urgent') },
-        { key: 'now', label: this.label('operations_board.now', 'Now') },
+        { key: 'now', label: this.label('operations_board.now', 'In Progress') },
         { key: 'next', label: this.label('operations_board.next', 'Pending') },
         { key: 'delayed', label: this.label('operations_board.delayed', 'Delayed') },
-        { key: 'blocked', label: this.label('operations_board.blocked', 'Blocked') }
+        { key: 'blocked', label: this.label('operations_board.blocked', 'Exception') }
       ]
     },
     noDataLabel () {
-      return this.label('operations_board.no_work', 'No active warehouse work')
+      return this.viewMode === 'history' ? this.label('operations_board.no_history', 'No processed work') : this.label('operations_board.no_work', 'No active warehouse work')
     },
     filteredItems () {
       if (this.activeFilter === 'all') return this.items
-      if (this.activeFilter === 'urgent') {
-        return this.items.filter(item => ['DUE_SOON', 'OVERDUE'].includes(item.eta_status))
-      }
+      if (this.activeFilter === 'urgent') return this.items.filter(item => ['DUE_SOON', 'OVERDUE'].includes(item.eta_status))
       return this.items.filter(item => item.lane === this.activeFilter)
     },
     viewerLabel () {
@@ -228,16 +230,21 @@ export default {
     columns () {
       return [
         { name: 'eta', label: this.label('operations_board.eta_urgency', 'ETA / Urgency'), field: 'eta', align: 'left' },
-        { name: 'customer', label: this.label('operations_board.customer', 'Owner / Customer'), field: 'customer', align: 'left' },
+        { name: 'customer', label: this.label('operations_board.customer', 'Customer'), field: 'customer', align: 'left' },
+        { name: 'reference', label: this.label('operations_board.reference_type', 'Ref / Type'), field: 'reference', align: 'left' },
+        { name: 'next_action', label: this.label('operations_board.next_action', 'Next Step'), field: 'next_action', align: 'left' },
         { name: 'assigned_to', label: this.label('operations_board.assigned_to', 'Assigned To'), field: 'assigned_to', align: 'left' },
-        { name: 'category', label: this.label('operations_board.type', 'Type'), field: 'category', align: 'left' },
-        { name: 'operation', label: this.label('operations_board.operation', 'Next Step'), field: 'operation', align: 'left' },
-        { name: 'reference', label: this.label('operations_board.reference', 'Reference'), field: 'reference', align: 'left' },
-        { name: 'location', label: this.label('operations_board.location', 'Target Area'), field: 'location', align: 'left' },
-        { name: 'quantity', label: this.label('operations_board.quantity', 'Remaining / Total'), field: 'quantity', align: 'right' },
+        { name: 'location', label: this.label('operations_board.location', 'From / To'), field: 'location_summary', align: 'left' },
+        { name: 'quantity', label: this.label('operations_board.quantity_short', 'Qty'), field: 'quantity_label', align: 'right' },
         { name: 'business_status', label: this.label('operations_board.status', 'Status'), field: 'business_status', align: 'left' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
+    }
+  },
+  watch: {
+    viewMode () {
+      this.activeFilter = 'all'
+      this.getList()
     }
   },
   mounted () {
@@ -257,25 +264,59 @@ export default {
       const translated = this.$t(key)
       return translated === key ? fallback : translated
     },
-    getList () {
+    countLabel (key, fallback) {
+      return this.label(`operations_board.${key}`, fallback)
+    },
+    getList ({ append = false } = {}) {
       if (!this.$q.localStorage.has('auth')) return
       this.loading = true
-      getauth('dashboard/operations/?view=active&limit=200')
+      const offset = append ? this.items.length : 0
+      const path = `dashboard/operations/?view=${this.viewMode}&limit=200&offset=${offset}`
+      getauth(path)
         .then(res => {
-          this.items = res.items || []
+          this.items = append ? this.items.concat(res.items || []) : (res.items || [])
           this.viewer = res.viewer || { staff_name: '', staff_type: '', scope: '' }
+          this.counts = res.counts || {}
+          this.hasMore = Boolean(res.has_more)
         })
         .catch(() => {})
         .finally(() => {
           this.loading = false
         })
     },
-    laneLabel (lane) {
-      return this.label(`operations_board.${lane}`, lane)
+    loadMore () {
+      this.getList({ append: true })
     },
-    categoryLabel (category) {
-      const key = String(category || '').toLowerCase()
-      return this.label(`operations_board.${key}`, category)
+    showDetails (item) {
+      this.selectedItem = item
+      this.detailOpen = true
+    },
+    acceptanceRows (item) {
+      const summary = item && item.acceptance_summary ? item.acceptance_summary : {}
+      const rows = []
+      if (summary.pack_list_status) rows.push({ label: 'Pack List', value: summary.pack_list_status })
+      if (summary.qc_status) rows.push({ label: 'QC', value: summary.qc_status })
+      if (summary.verification_mode) rows.push({ label: 'Check Mode', value: summary.verification_mode })
+      if (summary.picking_mode) rows.push({ label: 'Pick Mode', value: summary.picking_mode })
+      if (summary.expected_qty !== undefined) rows.push({ label: 'Expected', value: summary.expected_qty })
+      if (summary.received_qty !== undefined) rows.push({ label: 'Received', value: summary.received_qty })
+      if (summary.scanned_qty !== undefined) rows.push({ label: 'Scanned', value: summary.scanned_qty })
+      if (summary.accepted_qty !== undefined) rows.push({ label: 'Accepted', value: summary.accepted_qty })
+      if (summary.repair_qty) rows.push({ label: 'Repair / Hold', value: summary.repair_qty })
+      if (summary.rejected_qty) rows.push({ label: 'Rejected', value: summary.rejected_qty })
+      if (summary.open_exception_qty) rows.push({ label: 'Open Exceptions', value: summary.open_exception_qty })
+      if (summary.requested_serials !== undefined) rows.push({ label: 'SN Requested', value: summary.requested_serials })
+      if (summary.picked_serials !== undefined) rows.push({ label: 'SN Picked', value: summary.picked_serials })
+      if (summary.shipped_serials !== undefined) rows.push({ label: 'SN Shipped', value: summary.shipped_serials })
+      return rows
+    },
+    compactLocation (row) {
+      if (!row) return '—'
+      const source = row.source_location || ''
+      const target = row.target_location || row.location || ''
+      if (!source) return this.locationLabel(target) || '—'
+      const compact = `${source} → ${target}`
+      return compact.length > 34 ? `${compact.slice(0, 31)}...` : compact
     },
     operationLabel (operation) {
       const key = String(operation || '').toLowerCase()
@@ -292,6 +333,10 @@ export default {
       if (value.includes('PENDING') || value === 'PRE_ARRIVAL') return 'primary'
       return 'grey-7'
     },
+    categoryLabel (category) {
+      const key = String(category || '').toLowerCase()
+      return this.label(`operations_board.${key}`, category)
+    },
     locationLabel (location) {
       const key = String(location || '').toLowerCase()
       return this.label(`operations_board.${key}`, location)
@@ -304,16 +349,6 @@ export default {
         LOGISTICS: this.label('operations_board.logistics', 'Logistics')
       }
       return labels[String(role || '').toUpperCase()] || role || ''
-    },
-    laneColor (lane) {
-      return {
-        now: 'positive',
-        next: 'primary',
-        delayed: 'warning',
-        blocked: 'negative',
-        completed: 'positive',
-        cancelled: 'negative'
-      }[lane] || 'grey'
     },
     rowClass (row) {
       return `operations-board__row--${row.lane || 'default'}`
@@ -341,16 +376,12 @@ export default {
       const hours = Math.floor(absoluteMinutes / 60)
       const remainingMinutes = absoluteMinutes % 60
       const duration = hours ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`
-      if (status === 'OVERDUE') {
-        return `${this.label('operations_board.eta_overdue_by', 'Overdue by')} ${duration}`
-      }
+      if (status === 'OVERDUE') return `${this.label('operations_board.eta_overdue_by', 'Overdue by')} ${duration}`
       return `${this.label('operations_board.eta_due_in', 'Due in')} ${duration}`
     },
     loadZoom () {
       const savedZoom = Number(window.localStorage.getItem('greaterwms.dashboard.zoom'))
-      if (savedZoom >= 80 && savedZoom <= 140 && savedZoom % 10 === 0) {
-        this.zoomPercent = savedZoom
-      }
+      if (savedZoom >= 80 && savedZoom <= 140 && savedZoom % 10 === 0) this.zoomPercent = savedZoom
     },
     adjustZoom (delta) {
       this.zoomPercent = Math.min(140, Math.max(80, this.zoomPercent + delta))
@@ -373,23 +404,20 @@ export default {
       }
       const request = target && (target.requestFullscreen || target.webkitRequestFullscreen)
       if (!request) {
-        this.$q.notify({
-          message: this.label('operations_board.fullscreen_unavailable', 'Fullscreen is not supported by this browser'),
-          color: 'negative',
-          icon: 'fullscreen'
-        })
+        this.$q.notify({ message: this.label('operations_board.fullscreen_unavailable', 'Fullscreen is not supported by this browser'), color: 'negative', icon: 'fullscreen' })
         return
       }
       const result = request.call(target)
       if (result && result.catch) result.catch(() => {})
     },
     openItem (item) {
-      if (!item.action_route) return
+      if (!item || !item.action_route) return
       const query = { reference: item.reference }
       if (item.category === 'inbound') query.asn_code = item.reference
       if (item.category === 'receiving') query.receipt_no = item.reference
       if (item.category === 'outbound') query.dn_code = item.reference
       if (item.category === 'transport') query.transport_no = item.reference
+      this.detailOpen = false
       this.$router.push({ name: item.action_route, query })
     }
   }
@@ -397,155 +425,44 @@ export default {
 </script>
 
 <style scoped>
-.operations-board-shell {
-  width: 100%;
-}
-
-.operations-board__surface {
-  width: 100%;
-}
-
-.operations-board-shell--fullscreen {
-  box-sizing: border-box;
-  width: 100vw;
-  height: 100vh;
-  padding: 12px;
-  overflow: auto;
-  background: #edf1f5;
-}
-
-.operations-board-shell--fullscreen .operations-board__surface {
-  width: calc(100% / var(--board-scale, 1));
-  transform: scale(var(--board-scale, 1));
-  transform-origin: top left;
-}
-
-.operations-board-shell--fullscreen .operations-board {
-  min-height: calc(100vh - 24px);
-  border-radius: 0;
-}
-
-.operations-board {
-  width: 100%;
-  background: #ffffff;
-  border-radius: 2px;
-}
-
-.operations-board__header {
-  min-height: 48px;
-  background: #596782;
-  color: #ffffff;
-}
-
-.operations-board__title {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.operations-board__live {
-  margin-right: 8px;
-  color: #8ee3a7;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.operations-board__zoom-value {
-  min-width: 42px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.operations-board__eta-value {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.operations-board__eta-status {
-  font-size: 10px;
-  line-height: 1.2;
-}
-
-.operations-board__eta-countdown {
-  margin-top: 2px;
-  color: #6b7280;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.operations-board__viewer {
-  margin-right: 16px;
-  color: #e8edf7;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-
-.operations-board__controls {
-  min-height: 38px;
-  background: #f5f6f8;
-  border-bottom: 1px solid #dfe3ea;
-}
-
-.operations-board__filters {
-  min-height: 38px;
-}
-
-.operations-board__table >>> .q-table thead tr th {
-  height: 38px;
-  background: #3f4b69;
-  color: #ffffff;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.operations-board__table >>> .q-table__middle {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.operations-board__table >>> .q-table {
-  min-width: 1040px;
-}
-
-.operations-board__table >>> .q-table th,
-.operations-board__table >>> .q-table td {
-  white-space: nowrap;
-}
-
-.operations-board__table >>> .q-table tbody tr {
-  height: 48px;
-}
-
-.operations-board__table >>> .q-table tbody tr:nth-child(even) {
-  background: #f7f8fb;
-}
-
-.operations-board__table >>> .q-table tbody tr:hover {
-  background: #eaf0f8;
-}
-
-.operations-board__type {
-  min-width: 64px;
-  justify-content: center;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
+.operations-board-shell { width: 100%; }
+.operations-board__surface { width: 100%; }
+.operations-board-shell--fullscreen { box-sizing: border-box; width: 100vw; height: 100vh; padding: 12px; overflow: auto; background: #edf1f5; }
+.operations-board-shell--fullscreen .operations-board__surface { width: calc(100% / var(--board-scale, 1)); transform: scale(var(--board-scale, 1)); transform-origin: top left; }
+.operations-board-shell--fullscreen .operations-board { min-height: calc(100vh - 24px); border-radius: 0; }
+.operations-board { width: 100%; background: #ffffff; border-radius: 2px; }
+.operations-board__header { min-height: 48px; background: #596782; color: #ffffff; }
+.operations-board__title { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.operations-board__live { margin-right: 8px; color: #8ee3a7; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
+.operations-board__zoom-value { min-width: 42px; padding: 0; border: 0; background: transparent; color: #ffffff; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+.operations-board__viewer { margin-right: 16px; color: #e8edf7; font-size: 11px; letter-spacing: 0.04em; }
+.operations-board__summary { min-height: 40px; border-bottom: 1px solid #dfe3ea; }
+.operations-board__view-tabs, .operations-board__filters { min-height: 38px; }
+.operations-board__counts { display: flex; gap: 12px; color: #667085; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.operations-board__count--urgent { color: #b54708; }
+.operations-board__count--blocked { color: #b42318; }
+.operations-board__controls { min-height: 38px; background: #f5f6f8; border-bottom: 1px solid #dfe3ea; }
+.operations-board__table >>> .q-table thead tr th { height: 38px; background: #3f4b69; color: #ffffff; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.operations-board__table >>> .q-table__middle { width: 100%; overflow-x: auto; }
+.operations-board__table >>> .q-table { min-width: 980px; }
+.operations-board__table >>> .q-table th, .operations-board__table >>> .q-table td { white-space: nowrap; }
+.operations-board__table >>> .q-table tbody tr { height: 48px; }
+.operations-board__table >>> .q-table tbody tr:nth-child(even) { background: #f7f8fb; }
+.operations-board__table >>> .q-table tbody tr:hover { background: #eaf0f8; }
+.operations-board__eta-value { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.operations-board__eta-status { font-size: 10px; line-height: 1.2; }
+.operations-board__eta-countdown { margin-top: 2px; color: #6b7280; font-size: 11px; font-weight: 600; }
+.operations-board__reference { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: #334155; cursor: pointer; font: inherit; text-align: left; }
+.operations-board__reference:hover { color: #1976d2; }
+.operations-board__next-action { font-weight: 600; }
+.operations-board__detail { width: min(420px, 92vw); max-width: 420px; min-height: 100vh; }
+.operations-board__detail-body { overflow-y: auto; }
+.operations-board__detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; font-size: 13px; }
+.operations-board__detail-label { color: #667085; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.operations-board__detail-section { margin-top: 20px; padding-top: 14px; border-top: 1px solid #eaecf0; }
+.operations-board__detail-line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; }
 @media (max-width: 599px) {
-  .operations-board__table >>> .q-table {
-    min-width: 1040px;
-  }
+  .operations-board__table >>> .q-table { min-width: 980px; }
+  .operations-board__counts { gap: 6px; font-size: 10px; }
 }
 </style>

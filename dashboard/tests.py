@@ -103,6 +103,46 @@ class OperationsBoardTests(TestCase):
 
         self.assertEqual(items[0]['assigned_role'], 'DRIVER')
         self.assertEqual(items[0]['assignee_name'], 'Tom')
+        self.assertEqual(items[0]['task_qty'], 1)
+        self.assertEqual(items[0]['task_total_qty'], 1)
+        self.assertEqual(items[0]['quantity_label'], '1 / 1')
+        self.assertEqual(items[0]['location_summary'], 'Dock -> Stage')
+
+        request = SimpleNamespace(
+            auth=SimpleNamespace(
+                openid=openid,
+                staff_name='Tom',
+                staff_type='Driver',
+            ),
+            query_params={'view': 'active', 'limit': '10', 'offset': '0'},
+        )
+        response = OperationsBoardViewSet().list(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], 1)
+        self.assertEqual(response.data['offset'], 0)
+        self.assertFalse(response.data['has_more'])
+        self.assertEqual(response.data['items'][0]['action_code'], 'unload')
+        self.assertEqual(response.data['items'][0]['available_actions'], ['unload'])
+        self.assertTrue(response.data['items'][0]['can_act'])
+
+    def test_dashboard_action_metadata_is_scoped_to_role(self):
+        view = OperationsBoardViewSet()
+        driver_task = {
+            'category': 'inbound',
+            'assigned_role': 'DRIVER',
+            'assignee_name': 'Tom',
+            'operation': 'Unload',
+        }
+
+        view._decorate_action(driver_task, 'driver')
+        self.assertEqual(driver_task['action_code'], 'unload')
+        self.assertEqual(driver_task['available_actions'], ['unload'])
+        self.assertTrue(driver_task['can_act'])
+
+        view._decorate_action(driver_task, 'qc')
+        self.assertEqual(driver_task['action_code'], 'unload')
+        self.assertEqual(driver_task['available_actions'], [])
+        self.assertFalse(driver_task['can_act'])
 
     def test_receiving_putaway_is_visible_to_assigned_driver(self):
         openid = 'dashboard-receiving-driver-tenant'

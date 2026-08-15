@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 from asn.models import AsnDetailModel, AsnListModel
-from dn.models import DnDetailModel
+from dn.models import DnDetailModel, DnListModel, PickingListModel
 from asn import serializers as asnserializers
 from dn import serializers as dnserializers
 from supplier.models import ListModel as SupplierModel
@@ -235,6 +235,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         items.extend(self._outbound_items(openid, now, history=history))
         items.extend(self._transport_items(openid, now, history=history))
         items = self._filter_for_identity(items, viewer_role, viewer_name, history=history)
+        for item in items:
+            self._decorate_action(item, viewer_role)
         lane_order = {
             'blocked': 0,
             'delayed': 1,
@@ -276,6 +278,11 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             limit = min(max(int(request.query_params.get('limit', 100)), 1), 500)
         except (TypeError, ValueError):
             return Response({'detail': 'limit must be an integer'}, status=400)
+        try:
+            offset = max(int(request.query_params.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            return Response({'detail': 'offset must be an integer'}, status=400)
+        total = len(items)
         return Response({
             'generated_at': now.isoformat(),
             'view': view,
@@ -284,10 +291,56 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'staff_type': getattr(auth, 'staff_type', '') or '',
                 'scope': 'all' if viewer_role in self.MANAGEMENT_ROLES else 'role',
             },
-            'items': items[:limit],
-            'has_more': len(items) > limit,
+            'items': items[offset:offset + limit],
+            'offset': offset,
+            'limit': limit,
+            'has_more': offset + limit < total,
+            'total': total,
             'counts': counts,
         })
+
+    @staticmethod
+    def _action_code(operation):
+        return {
+            'Reserve Stage': 'reserve_stage',
+            'Await Arrival': 'await_arrival',
+            'Assign Unloading Driver': 'assign_unloading_driver',
+            'Unload': 'unload',
+            'Receive': 'receive',
+            'Inspect': 'inspect',
+            'Review QC': 'review_qc',
+            'Assign Putaway Driver': 'assign_putaway_driver',
+            'Putaway': 'putaway',
+            'Reconcile ASN': 'reconcile_asn',
+            'Resolve Reconciliation': 'resolve_reconciliation',
+            'Resolve QC Exception': 'resolve_qc_exception',
+            'Close Receipt': 'close_receipt',
+            'Release': 'release',
+            'Pick': 'pick',
+            'Pack': 'pack',
+            'Ship': 'ship',
+            'Assign Driver': 'assign_driver',
+            'Transport': 'transport',
+            'Confirm Delivery': 'confirm_delivery',
+            'Completed': 'completed',
+            'Cancelled': 'cancelled',
+        }.get(operation, str(operation or '').strip().lower().replace(' ', '_'))
+
+    @classmethod
+    def _decorate_action(cls, item, viewer_role):
+        action_code = cls._action_code(item.get('operation'))
+        assigned_role = str(item.get('assigned_role') or '').casefold()
+        category = item.get('category')
+        can_act = viewer_role in cls.MANAGEMENT_ROLES or viewer_role == assigned_role
+        if viewer_role == 'inbound' and category in ('inbound', 'receiving'):
+            can_act = True
+        elif viewer_role == 'outbound' and category == 'outbound':
+            can_act = True
+        elif viewer_role == 'logistics' and category == 'transport':
+            can_act = True
+        item['action_code'] = action_code
+        item['available_actions'] = [action_code] if can_act and action_code not in ('completed', 'cancelled') else []
+        item['can_act'] = bool(item['available_actions'])
 
     def _filter_for_identity(self, items, viewer_role, viewer_name, history=False):
         """Keep the dashboard server-side scoped to the logged-in role."""
@@ -342,7 +395,6 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             return [item for item in items if item.get('assigned_role') in ('WAREHOUSE', 'QC')]
         return []
 
-    @staticmethod
     @staticmethod
     def _align_datetimes(left, right):
         """Make naive and aware datetimes comparable without changing the instant."""
@@ -419,12 +471,21 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             openid=openid,
             flow=StagingAssignment.INBOUND,
             status__in=(StagingAssignment.RESERVED, StagingAssignment.ACTIVE),
-        ).only('reference_code', 'status'):
-            summary = staging_context.setdefault(assignment.reference_code, {'reserved': 0, 'occupied': 0})
+        ).only('reference_code', 'status', 'bin_name'):
+            summary = staging_context.setdefault(assignment.reference_code, {
+                'reserved': 0,
+                'occupied': 0,
+                'reserved_bins': [],
+                'occupied_bins': [],
+            })
             if assignment.status == StagingAssignment.RESERVED:
                 summary['reserved'] += 1
+                if assignment.bin_name not in summary['reserved_bins']:
+                    summary['reserved_bins'].append(assignment.bin_name)
             else:
                 summary['occupied'] += 1
+                if assignment.bin_name not in summary['occupied_bins']:
+                    summary['occupied_bins'].append(assignment.bin_name)
         linked_receipt_asns = set(ReceivingRecord.objects.filter(
             openid=openid,
         ).exclude(
@@ -447,7 +508,12 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         for row in rows:
             customer_name = row.supplier or ''
             intake = asn_context.get(row.asn_code, {})
-            staging = staging_context.get(row.asn_code, {'reserved': 0, 'occupied': 0})
+            staging = staging_context.get(row.asn_code, {
+                'reserved': 0,
+                'occupied': 0,
+                'reserved_bins': [],
+                'occupied_bins': [],
+            })
             current = grouped.setdefault(row.asn_code, {
                 'category': 'inbound',
                 'reference': row.asn_code,
@@ -467,7 +533,17 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'putaway_driver': intake.get('putaway_driver') or '',
                 'staging_reserved_qty': staging['reserved'],
                 'staging_occupied_qty': staging['occupied'],
+                'staging_reserved_bins': staging['reserved_bins'],
+                'staging_occupied_bins': staging['occupied_bins'],
                 'package_qty': intake.get('package_qty') or 0,
+                'container_tracking': intake.get('container_tracking') or '',
+                'source_location': 'Dock',
+                'target_location': 'Stage',
+                'task_qty': 0,
+                'task_total_qty': 0,
+                'acceptance_summary': {},
+                'exception_summary': '',
+                'blocking_reason': '',
                 'history': history,
                 'history_roles': [],
                 'history_assignees': [],
@@ -524,7 +600,46 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             ])
             current['timestamp'] = max(current['timestamp'], self._timestamp(row))
 
+        summary_cache = {}
         for item in grouped.values():
+            received_qty = int(item.get('progress_quantity') or 0)
+            expected_qty = int(item.get('quantity') or 0)
+            sorted_qty = 0
+            if item['status'] == 3:
+                item['task_qty'] = received_qty
+                item['task_total_qty'] = expected_qty
+                item['source_location'] = 'Stage'
+                item['target_location'] = 'Stage / QC'
+            elif item['status'] == 4:
+                sorted_qty = sum(
+                    int(row.sorted_qty or 0)
+                    for row in AsnDetailModel.objects.filter(
+                        openid=openid,
+                        asn_code=item['reference'],
+                        is_delete=False,
+                    )
+                )
+                item['task_qty'] = max(received_qty - sorted_qty, 0)
+                item['task_total_qty'] = received_qty
+                item['source_location'] = 'Stage'
+                item['target_location'] = 'Storage'
+            else:
+                item['task_qty'] = max(expected_qty - received_qty, 0)
+                item['task_total_qty'] = expected_qty
+                if item['status'] == 1 and item.get('actual_arrival_at'):
+                    item['source_location'] = 'Dock'
+                item['target_location'] = (
+                    ', '.join(item.get('staging_occupied_bins') or item.get('staging_reserved_bins') or [])
+                    or 'Stage'
+                )
+            if item.get('staging_occupied_bins'):
+                item['target_location'] = ', '.join(item['staging_occupied_bins'])
+            elif item.get('staging_reserved_bins') and item['status'] <= 2:
+                item['target_location'] = ', '.join(item['staging_reserved_bins'])
+            item['location_summary'] = '%s -> %s' % (
+                item['source_location'],
+                item['target_location'],
+            )
             if history:
                 roles = {'WAREHOUSE'}
                 assignees = []
@@ -542,8 +657,30 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                     'history_roles': sorted(roles),
                     'history_assignees': assignees,
                 })
-            if item['status'] == 4:
-                summary = receiving_summary(openid, item['reference'])
+            if item['status'] in (3, 4):
+                summary = summary_cache.setdefault(
+                    item['reference'],
+                    receiving_summary(openid, item['reference']),
+                )
+                receiving_data = summary.get('receiving_summary') or {}
+                item['acceptance_summary'] = {
+                    'pack_list_status': summary.get('pack_list_status', 'NOT_RECEIVED'),
+                    'pack_list_timing': summary.get('pack_list_timing', 'NOT_RECEIVED'),
+                    'verification_mode': summary.get('verification_mode', 'ASN_ONLY'),
+                    'qc_status': summary.get('qc_status', 'NOT_STARTED'),
+                    'expected_qty': item['quantity'],
+                    'received_qty': summary.get('total_received_qty', item['progress_quantity']),
+                    'scanned_qty': receiving_data.get('scanned', summary.get('total_received_serials', 0)),
+                    'accepted_qty': receiving_data.get('accepted_for_putaway', summary.get('total_accepted_for_putaway', 0)),
+                    'repair_qty': receiving_data.get('repair_qty', summary.get('total_repair_serials', 0)),
+                    'rejected_qty': receiving_data.get('rejected_qty', summary.get('total_rejected_serials', 0)),
+                    'open_exception_qty': receiving_data.get('open_exceptions', summary.get('total_exception_serials', 0)),
+                }
+                item['exception_summary'] = (
+                    'QC review required' if not summary.get('qc_complete', False) else ''
+                )
+                if item['status'] == 4:
+                    item['blocking_reason'] = item['exception_summary']
                 if not summary.get('ready_for_putaway', False):
                     item.update({
                         'operation': 'Review QC',
@@ -555,6 +692,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                         'assigned_role': 'QC',
                         'assignee_name': '',
                     })
+                    item['blocking_reason'] = 'QC review required'
+
+            if item.get('blocked') and not item.get('blocking_reason'):
+                item['blocking_reason'] = 'Quantity or damage exception'
 
         return [self._format_item(item, now) for item in grouped.values()]
 
@@ -585,6 +726,15 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             accepted_total = sum(int(detail.accepted_qty or 0) for detail in details)
             total = accepted_total if record.status == ReceivingRecord.PUTAWAY_PENDING else physical_total
             progress = sum(int(detail.putaway_qty or 0) for detail in details)
+            if record.status in (ReceivingRecord.QC_PENDING, ReceivingRecord.QC_EXCEPTION):
+                task_qty = physical_total
+                task_total_qty = physical_total
+            elif record.status == ReceivingRecord.PUTAWAY_PENDING:
+                task_qty = max(accepted_total - progress, 0)
+                task_total_qty = accepted_total
+            else:
+                task_qty = max(physical_total - progress, 0)
+                task_total_qty = physical_total
             assignee = ''
             if history:
                 operation = 'Cancelled' if record.status == ReceivingRecord.CANCELLED else 'Completed'
@@ -622,6 +772,25 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             if record.putaway_driver:
                 history_roles.add('DRIVER')
                 history_assignees.append(record.putaway_driver)
+            detail_exceptions = [
+                str(detail.exception_note or '').strip()
+                for detail in details
+                if str(detail.exception_note or '').strip()
+            ]
+            exception_summary = str(record.exception_note or '').strip() or (
+                '; '.join(detail_exceptions[:2])
+            )
+            if record.status == ReceivingRecord.QC_EXCEPTION and not exception_summary:
+                exception_summary = 'QC exception requires resolution'
+            if record.reconciliation_status in (ReceivingRecord.EXCEPTION, ReceivingRecord.DISPUTED) and not exception_summary:
+                exception_summary = 'ASN reconciliation requires resolution'
+            if record.status in (ReceivingRecord.QC_PENDING, ReceivingRecord.QC_EXCEPTION):
+                source_location, target_location = 'Stage', 'Stage / QC'
+            elif record.status == ReceivingRecord.PUTAWAY_PENDING:
+                target_bins = sorted({detail.bin_name for detail in details if detail.bin_name})
+                source_location, target_location = 'Stage', ', '.join(target_bins) or 'Storage'
+            else:
+                source_location, target_location = 'Dock', 'Stage'
             items.append(self._format_item({
                 'category': 'receiving',
                 'reference': record.receipt_no,
@@ -634,6 +803,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'reconciliation_status': record.reconciliation_status,
                 'quantity': total,
                 'progress_quantity': progress,
+                'task_qty': task_qty,
+                'task_total_qty': task_total_qty,
                 'blocked': blocked,
                 'planned': planned,
                 'timestamp': record.update_time or record.create_time,
@@ -641,6 +812,24 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'assigned_role': role,
                 'assignee_name': assignee,
                 'exception_note': record.exception_note,
+                'exception_summary': exception_summary,
+                'blocking_reason': exception_summary if blocked else '',
+                'source_location': source_location,
+                'target_location': target_location,
+                'location_summary': '%s -> %s' % (source_location, target_location),
+                'linked_reference': record.linked_asn_code,
+                'acceptance_summary': {
+                    'expected_qty': sum(int(detail.expected_qty or 0) for detail in details),
+                    'received_qty': physical_total,
+                    'accepted_qty': accepted_total,
+                    'putaway_qty': progress,
+                    'repair_qty': sum(int(detail.hold_qty or 0) for detail in details),
+                    'rejected_qty': sum(int(detail.rejected_qty or 0) for detail in details),
+                    'open_exception_qty': sum(
+                        int(detail.damage_qty or 0) + int(detail.hold_qty or 0) + int(detail.rejected_qty or 0)
+                        for detail in details
+                    ),
+                },
                 'business_status': (
                     'CANCELLED' if record.status == ReceivingRecord.CANCELLED else
                     'RESOLVED' if history and record.reconciliation_status == ReceivingRecord.RESOLVED else
@@ -695,6 +884,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             if order.driver_name:
                 history_roles.add('DRIVER')
                 history_assignees.append(order.driver_name)
+            source_location = order.pickup_location or 'Dock'
+            target_location = order.delivery_location or 'Dock'
             items.append(self._format_item({
                 'category': 'transport',
                 'reference': order.transport_no,
@@ -706,6 +897,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'status': order.status,
                 'quantity': 0,
                 'progress_quantity': 0,
+                'task_qty': 0,
+                'task_total_qty': 0,
                 'blocked': False,
                 'planned': planned,
                 'timestamp': order.update_time or order.create_time,
@@ -713,6 +906,11 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'assigned_role': role,
                 'assignee_name': assignee or '',
                 'exception_note': order.note,
+                'exception_summary': order.note or '',
+                'source_location': source_location,
+                'target_location': target_location,
+                'location_summary': '%s -> %s' % (source_location, target_location),
+                'linked_reference': order.reference_no,
                 'business_status': business_status_map.get(order.status, order.status),
                 'history': history,
                 'history_roles': sorted(history_roles),
@@ -749,15 +947,36 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             dn_status__in=history_statuses,
             is_delete=False,
         ).order_by('-update_time', '-id'))
-        dispatch_context = {}
-        for dn_code, driver_name in DispatchListModel.objects.filter(
+        dn_codes = {row.dn_code for row in rows}
+        dn_context = {
+            row.dn_code: row for row in DnListModel.objects.filter(
+                openid=openid,
+                dn_code__in=dn_codes,
+                is_delete=False,
+            ).only('dn_code', 'picking_mode', 'transport_required', 'transport_order_no', 'ship_to')
+        }
+        picking_context = {}
+        for picking in PickingListModel.objects.filter(
             openid=openid,
-            dn_code__in={row.dn_code for row in rows},
-        ).order_by('dn_code', 'id').values_list('dn_code', 'driver_name'):
+            dn_code__in=dn_codes,
+        ).only('dn_code', 'bin_name'):
+            bins = picking_context.setdefault(picking.dn_code, [])
+            if picking.bin_name and picking.bin_name not in bins:
+                bins.append(picking.bin_name)
+        dispatch_context = {}
+        for dispatch in DispatchListModel.objects.filter(
+            openid=openid,
+            dn_code__in=dn_codes,
+        ).order_by('dn_code', 'id').values('dn_code', 'driver_name', 'staging_bin'):
             # Keep the latest dispatch record when a DN was reassigned.
-            dispatch_context[dn_code] = driver_name
+            dispatch_context[dispatch['dn_code']] = {
+                'driver_name': str(dispatch.get('driver_name') or ''),
+                'staging_bin': str(dispatch.get('staging_bin') or ''),
+            }
         for row in rows:
             customer_name = row.customer or ''
+            dn = dn_context.get(row.dn_code)
+            dispatch = dispatch_context.get(row.dn_code, {})
             current = grouped.setdefault(row.dn_code, {
                 'category': 'outbound',
                 'reference': row.dn_code,
@@ -772,7 +991,25 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'blocked': False,
                 'timestamp': self._timestamp(row),
                 'eta': None,
-                'driver_name': dispatch_context.get(row.dn_code, ''),
+                'driver_name': dispatch.get('driver_name', ''),
+                'staging_bin': dispatch.get('staging_bin', ''),
+                'picking_mode': dn.picking_mode if dn else DnListModel.SKU_QTY,
+                'transport_required': bool(dn.transport_required) if dn else False,
+                'linked_reference': dn.transport_order_no if dn else '',
+                'ship_to': dn.ship_to if dn else '',
+                'picking_bins': picking_context.get(row.dn_code, []),
+                'picked_qty': 0,
+                'intransit_qty': 0,
+                'delivery_actual_qty': 0,
+                'requested_serials': 0,
+                'picked_serials': 0,
+                'shipped_serials': 0,
+                'source_location': 'Storage',
+                'target_location': 'Shipping',
+                'task_qty': 0,
+                'task_total_qty': 0,
+                'exception_summary': '',
+                'blocking_reason': '',
                 'history': history,
                 'history_roles': [],
                 'history_assignees': [],
@@ -793,10 +1030,69 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 current.update({'assigned_role': 'WAREHOUSE', 'assignee_name': ''})
             current['quantity'] += int(row.goods_qty or 0)
             current['progress_quantity'] += int(row.picked_qty or row.delivery_actual_qty or 0)
+            current['picked_qty'] += int(row.picked_qty or 0)
+            current['intransit_qty'] += int(row.intransit_qty or 0)
+            current['delivery_actual_qty'] += int(row.delivery_actual_qty or 0)
+            current['requested_serials'] += len(row.requested_serials or [])
+            current['picked_serials'] += len(row.picked_serials or [])
+            current['shipped_serials'] += len(row.shipped_serials or [])
             current['blocked'] = current['blocked'] or bool(
                 row.back_order_label or row.delivery_shortage_qty or row.delivery_more_qty or row.delivery_damage_qty
             )
+            current['exception_summary'] = current['exception_summary'] or str(row.delivery_note or '').strip()
             current['timestamp'] = max(current['timestamp'], self._timestamp(row))
+
+        transport_context = {
+            order.transport_no: order
+            for order in TransportOrder.objects.filter(
+                openid=openid,
+                transport_no__in={item.get('linked_reference') for item in grouped.values() if item.get('linked_reference')},
+            ).only('transport_no', 'eta', 'appointment_at', 'reference_no')
+        }
+        for item in grouped.values():
+            expected_qty = int(item.get('quantity') or 0)
+            picked_qty = int(item.get('picked_qty') or 0)
+            intransit_qty = int(item.get('intransit_qty') or 0)
+            actual_qty = int(item.get('delivery_actual_qty') or 0)
+            if item['status'] <= 2:
+                item['task_qty'] = expected_qty
+                item['task_total_qty'] = expected_qty
+                item['source_location'] = ', '.join(item.get('picking_bins') or []) or 'Storage'
+                item['target_location'] = item.get('staging_bin') or 'Shipping'
+            elif item['status'] == 3:
+                item['task_qty'] = max(expected_qty - picked_qty, 0)
+                item['task_total_qty'] = expected_qty
+                item['source_location'] = ', '.join(item.get('picking_bins') or []) or 'Storage'
+                item['target_location'] = item.get('staging_bin') or 'Shipping'
+            elif item['status'] == 4:
+                item['task_qty'] = max(picked_qty - intransit_qty, 0)
+                item['task_total_qty'] = picked_qty or expected_qty
+                item['source_location'] = 'Storage'
+                item['target_location'] = item.get('staging_bin') or 'Shipping'
+            else:
+                item['task_qty'] = max(intransit_qty - actual_qty, 0)
+                item['task_total_qty'] = intransit_qty or expected_qty
+                item['source_location'] = item.get('staging_bin') or 'Shipping'
+                item['target_location'] = item.get('ship_to') or 'Customer'
+            item['location_summary'] = '%s -> %s' % (
+                item['source_location'],
+                item['target_location'],
+            )
+            if item.get('linked_reference'):
+                transport = transport_context.get(item['linked_reference'])
+                if transport:
+                    item['eta'] = transport.eta or transport.appointment_at
+                    item['linked_reference'] = transport.reference_no or item['linked_reference']
+            item['acceptance_summary'] = {
+                'picking_mode': item.get('picking_mode', DnListModel.SKU_QTY),
+                'requested_serials': item.get('requested_serials', 0),
+                'picked_serials': item.get('picked_serials', 0),
+                'shipped_serials': item.get('shipped_serials', 0),
+            }
+            if item.get('blocked') and not item.get('exception_summary'):
+                item['exception_summary'] = 'Outbound quantity or delivery exception'
+            if item.get('blocked'):
+                item['blocking_reason'] = item['exception_summary']
 
         if history:
             for item in grouped.values():
@@ -835,6 +1131,18 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         )
         quantity = item['quantity']
         progress = min(item['progress_quantity'], quantity)
+        task_qty = max(int(item.get('task_qty', max(quantity - progress, 0)) or 0), 0)
+        task_total_qty = max(int(item.get('task_total_qty', quantity) or 0), 0)
+        if item.get('category') == 'transport' and not task_total_qty:
+            quantity_label = '—'
+        else:
+            quantity_label = '%s / %s' % (task_qty, task_total_qty)
+        source_location = item.get('source_location', '')
+        target_location = item.get('target_location', item.get('location', ''))
+        location_summary = item.get('location_summary') or (
+            '%s -> %s' % (source_location, target_location)
+            if source_location else target_location
+        )
         # Production runs with USE_TZ=False, while some API paths can still
         # return aware datetimes. Format both forms without crashing the board.
         if eta:
@@ -855,9 +1163,15 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'customer': item.get('customer', ''),
             'customer_full_name': item.get('customer_full_name', ''),
             'location': item['location'],
+            'source_location': source_location,
+            'target_location': target_location,
+            'location_summary': location_summary,
             'quantity': max(quantity - progress, 0),
             'progress_quantity': progress,
             'total_quantity': quantity,
+            'task_qty': task_qty,
+            'task_total_qty': task_total_qty,
+            'quantity_label': quantity_label,
             'eta': eta_text,
             'eta_status': eta_status,
             'minutes_to_eta': minutes_to_eta,
@@ -865,9 +1179,21 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'arrival_status': 'ARRIVED' if item.get('actual_arrival_at') else 'PRE_ARRIVAL',
             'staging_reserved_qty': item.get('staging_reserved_qty', 0),
             'staging_occupied_qty': item.get('staging_occupied_qty', 0),
+            'staging_reserved_bins': item.get('staging_reserved_bins', []),
+            'staging_occupied_bins': item.get('staging_occupied_bins', []),
+            'staging_bins': item.get('staging_occupied_bins') or item.get('staging_reserved_bins', []),
             'assigned_role': item.get('assigned_role', 'WAREHOUSE'),
             'assignee_name': item.get('assignee_name', ''),
             'assigned_to': item.get('assignee_name') or item.get('assigned_role', 'WAREHOUSE'),
+            'acceptance_summary': item.get('acceptance_summary', {}),
+            'exception_summary': item.get('exception_summary') or item.get('exception_note', ''),
+            'blocking_reason': item.get('blocking_reason', ''),
+            'linked_reference': item.get('linked_reference', ''),
+            'picking_mode': item.get('picking_mode', ''),
+            'transport_required': bool(item.get('transport_required', False)),
+            'action_code': item.get('action_code', self._action_code(item.get('operation'))),
+            'available_actions': item.get('available_actions', []),
+            'can_act': bool(item.get('can_act', False)),
             'history_roles': item.get('history_roles', []),
             'history_assignees': item.get('history_assignees', []),
             'is_history': bool(item.get('history')),
