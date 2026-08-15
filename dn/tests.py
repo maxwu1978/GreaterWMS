@@ -16,6 +16,7 @@ from .serializers import DNListGetSerializer
 from .views import (
     DnCancelInTransitViewSet,
     DnDispatchViewSet,
+    DnPickedViewSet,
     DnPODViewSet,
     _validate_outbound_detail_payload,
     _validate_outbound_serial_request,
@@ -105,6 +106,14 @@ class DnDispatchSafetyTests(TestCase):
         view.get_object = lambda: DnListModel.objects.get(id=self.dn.id)
         return view.create(request, self.dn.id)
 
+    def pick(self, data=None):
+        request = self.request(data)
+        view = DnPickedViewSet()
+        view.request = request
+        view.action = 'create'
+        view.get_object = lambda: DnListModel.objects.get(id=self.dn.id)
+        return view.create(request, self.dn.id)
+
     def pod(self, data=None):
         request = self.request(data)
         view = DnPODViewSet()
@@ -152,6 +161,42 @@ class DnDispatchSafetyTests(TestCase):
         stock.refresh_from_db()
         self.assertEqual(stock.goods_qty, 1)
         self.assertEqual(DispatchListModel.objects.filter(openid=self.openid, dn_code=self.dn.dn_code).count(), 1)
+
+    def test_picked_can_fall_back_to_customer_on_delivery_note(self):
+        self.dn.dn_status = 3
+        self.dn.save(update_fields=['dn_status'])
+        detail = DnDetailModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code)
+        detail.dn_status = 3
+        detail.pick_qty = 2
+        detail.picked_qty = 0
+        detail.save(update_fields=['dn_status', 'pick_qty', 'picked_qty'])
+        pick_row = PickingListModel.objects.get(openid=self.openid, dn_code=self.dn.dn_code)
+        pick_row.pick_qty = 2
+        pick_row.picked_qty = 0
+        pick_row.save(update_fields=['pick_qty', 'picked_qty'])
+        stock = StockListModel.objects.get(openid=self.openid, goods_code='SKU-01')
+        stock.onhand_stock = 3
+        stock.pick_stock = 2
+        stock.picked_stock = 0
+        stock.save(update_fields=['onhand_stock', 'pick_stock', 'picked_stock'])
+        bin_stock = StockBinModel.objects.get(openid=self.openid, t_code='TX-01')
+        bin_stock.goods_qty = 2
+        bin_stock.pick_qty = 2
+        bin_stock.picked_qty = 0
+        bin_stock.save(update_fields=['goods_qty', 'pick_qty', 'picked_qty'])
+
+        response = self.pick({
+            'dn_code': self.dn.dn_code,
+            'goodsData': [{
+                'goods_code': 'SKU-01',
+                't_code': 'TX-01',
+                'pick_qty': 2,
+            }],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.dn.refresh_from_db()
+        self.assertEqual(self.dn.dn_status, 4)
 
     def test_dispatch_failure_rolls_back_inventory_and_staging(self):
         with patch('dn.views.driverdispatch.objects.create', side_effect=RuntimeError('dispatch write failed')):

@@ -2045,45 +2045,58 @@ class DnPickedViewSet(viewsets.ModelViewSet):
             if replay is not None:
                 return Response(replay)
             data = self.request.data
+            dn_code = str(data.get('dn_code') or qs.dn_code).strip()
+            goods_data = data.get('goodsData') or []
+            if not isinstance(goods_data, list) or not goods_data:
+                raise ValidationError({'detail': 'goodsData must be a non-empty list'})
+            pick_customer = str(data.get('customer') or qs.customer or '').strip()
+            if not pick_customer:
+                raise ValidationError({'detail': 'customer is required'})
+            if qs.customer and pick_customer.casefold() != str(qs.customer).casefold():
+                raise ValidationError({'detail': 'customer does not match the delivery note'})
             serials_by_goods = _validate_pick_serials(
                 self.request.auth.openid,
                 qs,
-                data.get('goodsData') or [],
+                goods_data,
             )
-            for i in range(len(data['goodsData'])):
+            for i in range(len(goods_data)):
                 pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
-                                                                  dn_code=str(data['dn_code']),
+                                                                  dn_code=dn_code,
                                                                   picking_status=0,
-                                                                  t_code=str(data['goodsData'][i].get('t_code'))).first()
-                if int(data['goodsData'][i].get('pick_qty')) < 0:
-                    raise APIException({"detail": str(data['goodsData'][i].get('goods_code')) + " Picked Qty Must >= 0"})
+                                                                  t_code=str(goods_data[i].get('t_code'))).first()
+                if pick_qty_change is None:
+                    raise ValidationError({'detail': 'Picking list row does not exist'})
+                if int(goods_data[i].get('pick_qty')) < 0:
+                    raise APIException({"detail": str(goods_data[i].get('goods_code')) + " Picked Qty Must >= 0"})
                 else:
-                    if int(data['goodsData'][i].get('pick_qty')) > pick_qty_change.pick_qty:
-                        raise APIException({"detail": str(data['goodsData'][i].get('goods_code')) + " Picked Qty Must Less Than Pick Qty"})
+                    if int(goods_data[i].get('pick_qty')) > pick_qty_change.pick_qty:
+                        raise APIException({"detail": str(goods_data[i].get('goods_code')) + " Picked Qty Must Less Than Pick Qty"})
                     else:
                         continue
             qs.dn_status = 4
             staff_name = staff.objects.filter(openid=self.request.auth.openid,
                                               id=self.request.META.get('HTTP_OPERATOR')).first().staff_name
-            for j in range(len(data['goodsData'])):
+            for j in range(len(goods_data)):
                 goods_qty_change = stocklist.objects.filter(openid=self.request.auth.openid,
-                                                            goods_code=str(data['goodsData'][j].get('goods_code'))).first()
+                                                            goods_code=str(goods_data[j].get('goods_code'))).first()
                 dn_detail = DnDetailModel.objects.filter(openid=self.request.auth.openid,
-                                                         dn_code=str(data['dn_code']),
-                                                         customer=str(data['customer']),
-                                                         goods_code=str(data['goodsData'][j].get('goods_code'))).first()
+                                                         dn_code=dn_code,
+                                                         customer=pick_customer,
+                                                         goods_code=str(goods_data[j].get('goods_code'))).first()
                 bin_qty_change = stockbin.objects.filter(openid=self.request.auth.openid,
-                                                         t_code=str(data['goodsData'][j].get('t_code'))).first()
+                                                         t_code=str(goods_data[j].get('t_code'))).first()
                 pick_qty_change = PickingListModel.objects.filter(openid=self.request.auth.openid,
-                                                                  dn_code=str(data['dn_code']),
+                                                                  dn_code=dn_code,
                                                                   picking_status=0,
-                                                                  t_code=str(data['goodsData'][j].get('t_code'))).first()
+                                                                  t_code=str(goods_data[j].get('t_code'))).first()
+                if not goods_qty_change or not dn_detail or not bin_qty_change or not pick_qty_change:
+                    raise ValidationError({'detail': 'Picking data does not match the delivery note'})
                 qtychangerecorder.objects.create(openid=self.request.auth.openid,
                                                  mode_code=dn_detail.dn_code,
                                                  bin_name=bin_qty_change.bin_name,
                                                  goods_code=bin_qty_change.goods_code,
                                                  goods_desc=bin_qty_change.goods_desc,
-                                                 goods_qty=0 - int(data['goodsData'][j].get('pick_qty')),
+                                                 goods_qty=0 - int(goods_data[j].get('pick_qty')),
                                                  store_code=bin_qty_change.t_code,
                                                  creater=str(staff_name)
                                                  )
@@ -2092,44 +2105,44 @@ class DnPickedViewSet(viewsets.ModelViewSet):
                                                     bin_name=bin_qty_change.bin_name,
                                                     goods_code=bin_qty_change.goods_code,
                                                     ).aggregate(sum=Sum('goods_qty'))["sum"]
-                cycle_qty = bin_stock - int(data['goodsData'][j].get('pick_qty'))
+                cycle_qty = bin_stock - int(goods_data[j].get('pick_qty'))
                 cyclecount.objects.filter(openid=self.request.auth.openid,
                                           bin_name=bin_qty_change.bin_name,
                                           goods_code=bin_qty_change.goods_code,
                                           create_time__gte=cur_date).update(goods_qty=cycle_qty)
-                if int(data['goodsData'][j].get('pick_qty')) == pick_qty_change.pick_qty:
-                    goods_qty_change.onhand_stock = goods_qty_change.onhand_stock - int(data['goodsData'][j].get('pick_qty'))
-                    goods_qty_change.pick_stock = goods_qty_change.pick_stock - int(data['goodsData'][j].get('pick_qty'))
-                    goods_qty_change.picked_stock = goods_qty_change.picked_stock + int(data['goodsData'][j].get('pick_qty'))
-                    pick_qty_change.picked_qty = int(data['goodsData'][j].get('pick_qty'))
+                if int(goods_data[j].get('pick_qty')) == pick_qty_change.pick_qty:
+                    goods_qty_change.onhand_stock = goods_qty_change.onhand_stock - int(goods_data[j].get('pick_qty'))
+                    goods_qty_change.pick_stock = goods_qty_change.pick_stock - int(goods_data[j].get('pick_qty'))
+                    goods_qty_change.picked_stock = goods_qty_change.picked_stock + int(goods_data[j].get('pick_qty'))
+                    pick_qty_change.picked_qty = int(goods_data[j].get('pick_qty'))
                     pick_qty_change.picking_status = 1
-                    bin_qty_change.goods_qty = bin_qty_change.goods_qty - int(data['goodsData'][j].get('pick_qty'))
-                    bin_qty_change.pick_qty = bin_qty_change.pick_qty - int(data['goodsData'][j].get('pick_qty'))
-                    bin_qty_change.picked_qty = bin_qty_change.picked_qty + int(data['goodsData'][j].get('pick_qty'))
+                    bin_qty_change.goods_qty = bin_qty_change.goods_qty - int(goods_data[j].get('pick_qty'))
+                    bin_qty_change.pick_qty = bin_qty_change.pick_qty - int(goods_data[j].get('pick_qty'))
+                    bin_qty_change.picked_qty = bin_qty_change.picked_qty + int(goods_data[j].get('pick_qty'))
                     goods_qty_change.save()
                     pick_qty_change.save()
                     bin_qty_change.save()
-                elif int(data['goodsData'][j].get('pick_qty')) < pick_qty_change.pick_qty:
-                    goods_qty_change.onhand_stock = goods_qty_change.onhand_stock - int(data['goodsData'][j].get('pick_qty'))
+                elif int(goods_data[j].get('pick_qty')) < pick_qty_change.pick_qty:
+                    goods_qty_change.onhand_stock = goods_qty_change.onhand_stock - int(goods_data[j].get('pick_qty'))
                     goods_qty_change.pick_stock = goods_qty_change.pick_stock - dn_detail.pick_qty
-                    goods_qty_change.picked_stock = goods_qty_change.picked_stock + int(data['goodsData'][j].get('pick_qty'))
+                    goods_qty_change.picked_stock = goods_qty_change.picked_stock + int(goods_data[j].get('pick_qty'))
                     goods_qty_change.can_order_stock = goods_qty_change.can_order_stock + (int(pick_qty_change.pick_qty) - int(
-                        data['goodsData'][j].get('pick_qty')))
-                    pick_qty_change.picked_qty = int(data['goodsData'][j].get('pick_qty'))
+                        goods_data[j].get('pick_qty')))
+                    pick_qty_change.picked_qty = int(goods_data[j].get('pick_qty'))
                     pick_qty_change.picking_status = 1
-                    bin_qty_change.goods_qty = bin_qty_change.goods_qty - int(data['goodsData'][j].get('pick_qty'))
+                    bin_qty_change.goods_qty = bin_qty_change.goods_qty - int(goods_data[j].get('pick_qty'))
                     bin_qty_change.pick_qty = bin_qty_change.pick_qty - pick_qty_change.pick_qty
-                    bin_qty_change.picked_qty = bin_qty_change.picked_qty + int(data['goodsData'][j].get('pick_qty'))
+                    bin_qty_change.picked_qty = bin_qty_change.picked_qty + int(goods_data[j].get('pick_qty'))
                     goods_qty_change.save()
                     pick_qty_change.save()
                     bin_qty_change.save()
-                dn_detail.picked_qty = dn_detail.picked_qty + int(data['goodsData'][j].get('pick_qty'))
+                dn_detail.picked_qty = dn_detail.picked_qty + int(goods_data[j].get('pick_qty'))
                 if dn_detail.dn_status == 3:
                     dn_detail.dn_status = 4
                 if dn_detail.pick_qty > 0:
                     dn_detail.pick_qty = 0
                 dn_detail.save()
-            if DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=str(data['dn_code']), dn_status=3).exists() is False:
+            if DnDetailModel.objects.filter(openid=self.request.auth.openid, dn_code=dn_code, dn_status=3).exists() is False:
                 qs.save()
             _mark_picked_serials(self.request.auth.openid, qs, serials_by_goods)
             result = {"Detail": "success"}
