@@ -42,6 +42,7 @@ SUPPORTED_OPERATIONS = frozenset({
     'outbound.dispatch',
     'outbound.pod',
     'outbound.cancel_intransit',
+    'tenant.cleanup',
 })
 
 
@@ -52,6 +53,8 @@ def is_agent_request(request):
 def agent_roles_for_operation(operation):
     operation = str(operation or '').strip().lower()
     if operation == 'outbound.cancel_intransit':
+        return frozenset({'admin'})
+    if operation == 'tenant.cleanup':
         return frozenset({'admin'})
     if operation.startswith('outbound.'):
         return OUTBOUND_WORKFLOW_ROLES
