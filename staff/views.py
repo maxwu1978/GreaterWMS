@@ -1,3 +1,8 @@
+import json
+
+from django.db import transaction
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets
 from .models import ListModel, TypeListModel
 from . import serializers
@@ -7,11 +12,95 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.response import Response
 from .filter import Filter, TypeFilter
 from rest_framework.exceptions import APIException, PermissionDenied
+from utils.fbmsg import FBMsg
 from .serializers import FileRenderSerializer
 from django.http import StreamingHttpResponse
 from .files import FileRenderCN, FileRenderEN
 from rest_framework.settings import api_settings
 from .auth import issue_session_token, revoke_staff_tokens
+
+
+@csrf_exempt
+def staff_login(request, *args, **kwargs):
+    """Issue a staff session without requiring an administrator session.
+
+    Staff names are tenant-scoped in the data model. Direct login therefore
+    requires the name to identify exactly one active non-admin staff record;
+    ambiguous names are rejected instead of guessing a tenant.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    try:
+        post_data = json.loads(request.body.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({'detail': 'Request body must be valid JSON'}, status=400)
+
+    if not isinstance(post_data, dict):
+        return JsonResponse({'detail': 'Request body must be a JSON object'}, status=400)
+
+    staff_name = str(post_data.get('staff_name', post_data.get('name', ''))).strip()
+    raw_check_code = post_data.get('check_code')
+    if not staff_name or raw_check_code in (None, ''):
+        return JsonResponse({'detail': 'Staff name and check code are required'}, status=400)
+
+    try:
+        check_code = int(raw_check_code)
+    except (TypeError, ValueError):
+        return JsonResponse({'detail': 'The verification code is incorrect'}, status=401)
+
+    with transaction.atomic():
+        matches = list(ListModel.objects.select_for_update().filter(
+            staff_name__iexact=staff_name,
+            is_delete=False,
+        ).exclude(staff_type__iexact='Admin'))
+        if not matches:
+            return JsonResponse({'detail': 'Invalid staff credentials'}, status=401)
+        if len(matches) > 1:
+            return JsonResponse(
+                {'detail': 'Staff account is ambiguous; contact an administrator'},
+                status=409,
+            )
+        staff_record = matches[0]
+        if staff_record.is_delete or str(staff_record.staff_type).strip().casefold() == 'admin':
+            return JsonResponse({'detail': 'Invalid staff credentials'}, status=401)
+        if staff_record.is_lock:
+            return JsonResponse(
+                {'detail': 'Staff account is locked. Please contact an administrator'},
+                status=423,
+            )
+
+        if staff_record.check_code != check_code:
+            counter = max(0, int(staff_record.error_check_code_counter or 0)) + 1
+            if counter >= 3:
+                staff_record.is_lock = True
+                staff_record.error_check_code_counter = 0
+                staff_record.save(update_fields=['is_lock', 'error_check_code_counter', 'update_time'])
+                return JsonResponse(
+                    {'detail': 'Staff account is locked. Please contact an administrator'},
+                    status=423,
+                )
+            staff_record.error_check_code_counter = counter
+            staff_record.save(update_fields=['error_check_code_counter', 'update_time'])
+            return JsonResponse({'detail': 'Invalid staff credentials'}, status=401)
+
+        staff_record.error_check_code_counter = 0
+        staff_record.save(update_fields=['error_check_code_counter', 'update_time'])
+        api_token = issue_session_token(staff_record, token_kind='staff')
+
+    ret = FBMsg.ret()
+    ret['msg'] = 'Success Login'
+    ret['data'] = {
+        'name': staff_record.staff_name,
+        # ``openid`` is retained as the frontend's historical token field.
+        'openid': api_token,
+        'token': api_token,
+        'tenant_openid': staff_record.openid,
+        'user_id': staff_record.id,
+        'staff_type': staff_record.staff_type,
+        'login_mode': 'user',
+    }
+    return JsonResponse(ret, status=200)
 
 
 class APIViewSet(viewsets.ModelViewSet):

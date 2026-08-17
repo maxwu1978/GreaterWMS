@@ -2,6 +2,7 @@ from django.urls import path, re_path
 from . import views
 
 urlpatterns = [
+path(r'login/', views.staff_login, name="staff-login"),
 path(r'', views.APIViewSet.as_view({"get": "list", "post": "create"}), name="staff"),
 path(r'type/', views.TypeAPIViewSet.as_view({"get": "list"}), name="stafftype"),
 path(r'file/', views.FileDownloadView.as_view({"get": "list"}), name="stafffiledownload"),

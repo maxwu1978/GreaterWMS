@@ -610,16 +610,6 @@
               dense
               outlined
               square
-              :label="$t('index.your_openid')"
-              v-model="openid"
-              disable
-              readonly
-              @keyup.enter="Login()"
-            />
-            <q-input
-              dense
-              outlined
-              square
               :label="$t('index.staff_name')"
               v-model="login_name"
               autofocus
@@ -839,70 +829,51 @@ export default {
           icon: 'close'
         })
       } else {
-        if (_this.openid === '') {
+        if (_this.check_code === '') {
           _this.$q.notify({
-            message: 'Please Enter The Openid',
+            message: 'Please Enter The Check Code',
             icon: 'close',
             color: 'negative'
           })
         } else {
-          if (_this.check_code === '') {
-            _this.$q.notify({
-              message: 'Please Enter The Check Code',
-              icon: 'close',
-              color: 'negative'
+          SessionStorage.set('axios_check', 'false')
+          post('staff/login/', {
+            staff_name: _this.login_name.trim(),
+            check_code: _this.check_code
+          })
+            .then((res) => {
+              if (res.code === '200' && res.data && (res.data.token || res.data.openid)) {
+                var staffToken = res.data.token || res.data.openid
+                LocalStorage.set('openid', staffToken)
+                LocalStorage.remove('admin_token')
+                LocalStorage.set('tenant_openid', res.data.tenant_openid || '')
+                LocalStorage.set('auth', '1')
+                LocalStorage.set('login_name', res.data.name || _this.login_name)
+                LocalStorage.set('login_id', res.data.user_id)
+                LocalStorage.set('staff_type', res.data.staff_type || '')
+                LocalStorage.set('login_mode', 'user')
+                _this.authin = '1'
+                _this.login = false
+                _this.openid = res.data.tenant_openid || ''
+                _this.login_id = res.data.user_id
+                _this.$q.notify({
+                  message: 'Success Login',
+                  icon: 'check',
+                  color: 'green'
+                })
+                localStorage.removeItem('menulink')
+                _this.link = ''
+                _this.$router.push({ name: 'web_index' })
+              }
             })
-          } else {
-            var adminToken = LocalStorage.getItem('admin_token')
-            if (!adminToken) {
+            .catch((err) => {
+              var responseData = err.response && err.response.data ? err.response.data : {}
               _this.$q.notify({
-                message: 'Please sign in as administrator before selecting a staff account',
+                message: responseData.detail || responseData.msg || err.detail || 'Staff login failed',
                 icon: 'close',
                 color: 'negative'
               })
-              return
-            }
-            SessionStorage.set('axios_check', 'false')
-            getauth(
-              'staff/?staff_name=' +
-                _this.login_name +
-                '&check_code=' +
-                _this.check_code,
-              {
-                headers: {
-                  token: adminToken
-                }
-              }
-            )
-              .then((res) => {
-                if (res.count === 1 && res.auth_token) {
-                  LocalStorage.set('openid', res.auth_token)
-                  LocalStorage.remove('admin_token')
-                  _this.authin = '1'
-                  _this.login = false
-                  _this.login_id = res.results[0].id
-                  LocalStorage.set('auth', '1')
-                  LocalStorage.set('login_name', _this.login_name)
-                  LocalStorage.set('login_id', res.results[0].id)
-                  LocalStorage.set('login_mode', 'user')
-                  _this.$q.notify({
-                    message: 'Success Login',
-                    icon: 'check',
-                    color: 'green'
-                  })
-                  localStorage.removeItem('menulink')
-                  _this.link = ''
-                  _this.$router.push({ name: 'web_index' })
-                }
-              })
-              .catch((err) => {
-                _this.$q.notify({
-                  message: err.detail,
-                  icon: 'close',
-                  color: 'negative'
-                })
-              })
-          }
+            })
         }
       }
     },

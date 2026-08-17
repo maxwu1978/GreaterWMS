@@ -12,7 +12,23 @@ use an opaque session token in the `HTTP_TOKEN` header.
 
 ## Staff session
 
-An administrator session can validate a staff name and check code:
+Staff can sign in directly with their own staff name and check code:
+
+```http
+POST /staff/login/
+Content-Type: application/json
+
+{"staff_name":"op10@peaksmartlogistics.com","check_code":123456}
+```
+
+The response contains `data.token`. Use that value as `HTTP_TOKEN` for the
+staff member's subsequent requests. The staff name must identify exactly one
+active non-administrator account across the system; duplicate names are
+rejected so a login cannot select the wrong tenant. Three consecutive failed
+check codes lock the account and require administrator intervention.
+
+For compatibility, an administrator can still validate a staff name and check
+code from an existing administrator session:
 
 ```http
 GET /staff/?staff_name=WM1&check_code=1234
