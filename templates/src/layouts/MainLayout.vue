@@ -314,6 +314,18 @@
             <q-item-section avatar><q-icon name="auto_graph" /></q-item-section>
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
+          <q-item
+            clickable
+            :to="{ name: 'cli-install' }"
+            @click="linkChange('cli-install')"
+            v-ripple
+            exact
+            :active="link === 'cli-install' && link !== ''"
+            :class="{ 'my-menu-link': link === 'cli-install' && link !== '' }"
+          >
+            <q-item-section avatar><q-icon name="terminal" /></q-item-section>
+            <q-item-section>{{ $t("menuItem.cli") }}</q-item-section>
+          </q-item>
           <q-separator />
           <q-item
             clickable

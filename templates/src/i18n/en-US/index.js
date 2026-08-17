@@ -59,6 +59,7 @@ export default {
   },
   menuItem: {
     dashboard: 'Dashboard',
+    cli: 'CLI Setup',
     inbound: 'Inbound',
     receiving: 'Receiving',
     outbound: 'Outbound',

@@ -57,3 +57,58 @@ def myip(request):
     ip = s.getsockname()[0]
     s.close()
     return JsonResponse({"ip": ip})
+
+
+def cli_install(request):
+    """Return the public, machine-readable CLI installation contract."""
+    if request.method != 'GET':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    response = JsonResponse({
+        'schema_version': '1',
+        'product': 'GreaterWMS',
+        'web_url': 'https://app.maxsmartwms.online',
+        'api_base_url': 'https://api.maxsmartwms.online',
+        'cli': {
+            'entrypoint': 'tools/greaterwms.mjs',
+            'runtime': {
+                'node_min': '18.0.0',
+                'recommended': 'Node.js 18 LTS or newer',
+            },
+            'repository': 'https://github.com/maxwu1978/GreaterWMS',
+            'source_ref': 'codex/cli-install-info',
+            'install_commands': [
+                'git clone --branch codex/cli-install-info https://github.com/maxwu1978/GreaterWMS.git',
+                'cd GreaterWMS',
+                'node tools/greaterwms.mjs --help',
+            ],
+            'auth': [
+                {
+                    'role': 'Admin',
+                    'command': 'node tools/greaterwms.mjs login --env production --name ADMIN',
+                    'endpoint': '/login/',
+                    'credential': 'username and password',
+                },
+                {
+                    'role': 'Staff',
+                    'command': 'node tools/greaterwms.mjs login --env production --staff --name STAFF',
+                    'endpoint': '/staff/login/',
+                    'credential': 'staff name and check code',
+                    'check_code_env': 'GREATERWMS_CHECK_CODE',
+                },
+            ],
+            'first_commands': [
+                'node tools/greaterwms.mjs auth status --json',
+                'node tools/greaterwms.mjs dashboard-operations list --env production --json',
+                'node tools/greaterwms.mjs receiving list --env production --json',
+            ],
+            'safety': [
+                'The CLI calls GreaterWMS APIs and never writes directly to the database.',
+                'Read commands run after login; write commands require --dry-run and then --confirm.',
+                'Agent operations require a server confirmation token and idempotency key.',
+                'Passwords and check codes are never written to the local session file.',
+            ],
+        },
+    })
+    response['Cache-Control'] = 'no-store'
+    return response

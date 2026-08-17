@@ -15,6 +15,23 @@ class ProductionSecurityTests(TestCase):
         response = self.client.post('/health/', {})
         self.assertEqual(response.status_code, 405)
 
+    def test_cli_install_manifest_is_public_and_machine_readable(self):
+        response = self.client.get('/cli/install/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        payload = response.json()
+        self.assertEqual(payload['product'], 'GreaterWMS')
+        self.assertEqual(payload['cli']['runtime']['node_min'], '18.0.0')
+        self.assertIn('/staff/login/', [item['endpoint'] for item in payload['cli']['auth']])
+        self.assertIn('GREATERWMS_CHECK_CODE', payload['cli']['auth'][1]['check_code_env'])
+        serialized = response.content.decode('utf-8').lower()
+        self.assertNotIn('password=', serialized)
+        self.assertNotIn('token=', serialized)
+
+    def test_cli_install_manifest_rejects_non_get_requests(self):
+        response = self.client.post('/cli/install/', {})
+        self.assertEqual(response.status_code, 405)
+
     def test_login_rejects_get_without_debug_traceback(self):
         response = self.client.get('/login/')
         self.assertEqual(response.status_code, 405)

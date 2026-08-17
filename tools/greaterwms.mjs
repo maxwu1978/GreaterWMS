@@ -237,16 +237,23 @@ function readLine (prompt) {
 
 async function login (options, json) {
   const url = options.url ? normalizeUrl(options.url) : (options.env ? environmentUrl(options.env) : baseUrl())
-  const name = options.name || process.env.GREATERWMS_USERNAME || await readLine('Admin name: ')
-  const password = process.env.GREATERWMS_PASSWORD || await readLine('Password: ')
-  if (!name || !password) throw new Error('Admin name and password are required')
+  const isStaff = Boolean(options.staff)
+  const name = options.name || process.env.GREATERWMS_USERNAME || await readLine(isStaff ? 'Staff name: ' : 'Admin name: ')
+  const credential = isStaff
+    ? (options['check-code'] || process.env.GREATERWMS_CHECK_CODE || await readLine('Check code: '))
+    : (options.password || process.env.GREATERWMS_PASSWORD || await readLine('Password: '))
+  if (!name || !credential) {
+    throw new Error(isStaff ? 'Staff name and check code are required' : 'Admin name and password are required')
+  }
 
   let response
   try {
-    response = await fetch(`${url}/login/`, {
+    response = await fetch(`${url}${isStaff ? '/staff/login/' : '/login/'}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ name, password })
+      body: JSON.stringify(isStaff
+        ? { staff_name: name, check_code: credential }
+        : { name, password: credential })
     })
   } catch (error) {
     throw new Error(`Unable to reach GreaterWMS at ${url}: ${error.message}`)
@@ -259,19 +266,29 @@ async function login (options, json) {
   } catch {
     payload = { detail: text || response.statusText }
   }
-  if (!response.ok || payload.code !== '200' || !payload.data?.openid) {
+  const token = payload.data?.token || payload.data?.openid
+  if (!response.ok || payload.code !== '200' || !token) {
     const message = payload.msg || payload.detail || response.statusText || 'Login failed'
-    throw new Error(`GreaterWMS login failed at ${url}: ${message}`)
+    throw new Error(`GreaterWMS ${isStaff ? 'staff ' : ''}login failed at ${url}: ${message}`)
   }
 
   saveSession({
     url,
     name: payload.data.name || name,
     operator: String(payload.data.user_id || ''),
-    token: payload.data.openid,
+    role: payload.data.staff_type || (isStaff ? 'Staff' : 'Admin'),
+    login_mode: isStaff ? 'staff' : 'admin',
+    token,
     saved_at: new Date().toISOString()
   })
-  print({ detail: 'login success', url, name: payload.data.name || name, operator: String(payload.data.user_id || ''), session_file: sessionFile() }, json)
+  print({
+    detail: `${isStaff ? 'staff ' : ''}login success`,
+    url,
+    name: payload.data.name || name,
+    role: payload.data.staff_type || (isStaff ? 'Staff' : 'Admin'),
+    operator: String(payload.data.user_id || ''),
+    session_file: sessionFile()
+  }, json)
 }
 
 function logout (json) {
@@ -287,6 +304,8 @@ function authStatus (json) {
     detail: session.token ? 'local session available' : 'login required',
     url: session.url || null,
     name: session.name || null,
+    role: session.role || null,
+    login_mode: session.login_mode || null,
     operator: session.operator || null,
     token_present: Boolean(session.token),
     session_file: sessionFile()
@@ -318,6 +337,26 @@ async function request (path, options = {}) {
   if (!response.ok || hasApplicationError) {
     const detail = typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload)
     throw new Error(`HTTP ${response.ok ? applicationStatus : response.status}: ${detail}`)
+  }
+  return payload
+}
+
+async function publicRequest (path, url) {
+  const response = await fetch(`${url}${path}`, {
+    method: 'GET',
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(30000)
+  })
+  const text = await response.text()
+  let payload
+  try {
+    payload = text ? JSON.parse(text) : {}
+  } catch {
+    payload = { detail: text || response.statusText }
+  }
+  if (!response.ok) {
+    const detail = typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload)
+    throw new Error(`HTTP ${response.status}: ${detail}`)
   }
   return payload
 }
@@ -567,7 +606,8 @@ function print (payload, json) {
 }
 
 function help () {
-  process.stdout.write('Authentication:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs auth status\n  node tools/greaterwms.mjs logout\n  Password is prompted without echo and is never saved.\n\n')
+  process.stdout.write('Authentication:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs login --env production --staff --name STAFF\n  node tools/greaterwms.mjs auth status\n  node tools/greaterwms.mjs logout\n  Password/check code is prompted without echo and is never saved.\n\n')
+  process.stdout.write('Installation: node tools/greaterwms.mjs install-info --env production --json\n\n')
   process.stdout.write('Inbound: asn eta|arrival|reserve-staging|unload-start|unload-finish|receive --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Exception review: serial exceptions --asn-code ASN; serial resolve --id ID --data JSON --dry-run|--confirm\n')
   process.stdout.write('Putaway: asn putaway|putaway-bulk --id ID --data JSON --dry-run|--confirm\n')
@@ -581,14 +621,14 @@ function help () {
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
   process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
   process.stdout.write('Tenant cleanup: tenant cleanup --dry-run, then tenant cleanup --confirm with the preview token.\n')
-  process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated openid token from the current GreaterWMS session\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
+  process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs login --env production --staff --name STAFF\n  node tools/greaterwms.mjs install-info --env production --json\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated session token override\n  GREATERWMS_CHECK_CODE staff check code for non-interactive staff login\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
 }
 
 async function main () {
   const { options, positional } = parseArgs(process.argv.slice(2))
   const [resource, action] = positional
   const json = Boolean(options.json)
-  if (options.help || !resource || (!action && !['login', 'logout'].includes(resource))) {
+  if (options.help || !resource || (!action && !['login', 'logout', 'install-info'].includes(resource))) {
     help()
     return
   }
@@ -600,6 +640,10 @@ async function main () {
   }
   if (resource === 'logout') {
     logout(json)
+    return
+  }
+  if (resource === 'install-info' || (resource === 'auth' && action === 'install-info')) {
+    print(await publicRequest('/cli/install/', baseUrl()), json)
     return
   }
   if (resource === 'auth' && action === 'login') {

@@ -108,11 +108,14 @@ The repository includes `tools/greaterwms.mjs` for access to the current menu
 pages and Pack List workflow. The Pack List page is read-only; Pack List and QC
 results are imported through the CLI/AI Agent path. The CLI uses the same
 `token` header as the web client, calls the application API, and never writes
-directly to the database. Production and test targets are explicit; production
-defaults to the customer domain.
+directly to the database. The CLI runtime requires Node.js 18 LTS or newer.
+Production and test targets are explicit; production requests target the API
+origin directly.
 
 ~~~shell
 node tools/greaterwms.mjs login --env production --name ADMIN
+node tools/greaterwms.mjs login --env production --staff --name STAFF
+node tools/greaterwms.mjs install-info --env production --json
 node tools/greaterwms.mjs auth status --json
 node tools/greaterwms.mjs sku list --env production --query '{"goods_code__icontains":"702"}' --json
 node tools/greaterwms.mjs warehouse list --env production --json
@@ -125,12 +128,18 @@ node tools/greaterwms.mjs sku create --env production --data '{"goods_code":"702
 node tools/greaterwms.mjs sku delete --env production --id 123 --dry-run --json
 ~~~
 
-The login command prompts for the password without echo and stores only the
-openid token, operator id, URL, and login name in
+The login command prompts for the password or staff check code without echo and
+stores only the opaque session token, role, operator id, URL, and login name in
 `~/.config/greaterwms/session.json` with local-only permissions. The password is
-never saved. Use `--env test` for the Render test service or `--url URL` for a
-different approved deployment. `GREATERWMS_TOKEN` remains available as an
+check code is never saved. Use `--env test` for the Render test service or
+`--url URL` for a different approved deployment. For non-interactive staff
+login, use `GREATERWMS_CHECK_CODE`; `GREATERWMS_TOKEN` remains available as an
 explicit session-token override for automation.
+
+The website exposes the same machine-readable installation contract at
+`https://api.maxsmartwms.online/cli/install/`. The `CLI Setup` menu page reads
+that endpoint, so an AI Agent or operator can use the endpoint as the source of
+truth for installation, login, supported first commands, and safety rules.
 
 Master-data create/update and enabled single-record deletes require explicit
 `--dry-run`/`--confirm` handling. Pack List import, confirmation, replacement,

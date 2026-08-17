@@ -34,6 +34,11 @@ const routes = [{
       ]
     },
     {
+      path: 'cli',
+      name: 'cli-install',
+      component: () => import('pages/cli/cli.vue')
+    },
+    {
       path: 'inbound',
       name: 'inbound',
       component: () => import('pages/inbound/inbound.vue'),
