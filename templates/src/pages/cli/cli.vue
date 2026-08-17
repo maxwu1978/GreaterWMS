@@ -29,7 +29,20 @@
         </q-card-section>
 
         <q-card-section>
-          <div class="cli-section-title">Install</div>
+          <div class="row items-center q-mb-sm">
+            <div class="cli-section-title q-mb-none">Install</div>
+            <q-space />
+            <q-btn
+              outline
+              dense
+              color="primary"
+              icon="download"
+              label="Download CLI"
+              :href="manifest.cli.download_url"
+              target="_blank"
+              rel="noopener"
+            />
+          </div>
           <div class="cli-command" v-for="command in manifest.cli.install_commands" :key="command">
             <code>{{ command }}</code>
             <q-btn flat round dense icon="content_copy" aria-label="Copy command" @click="copy(command)" />

@@ -10,9 +10,19 @@ the database.
 Requirements: Node.js 18 LTS or newer.
 
 ```shell
-git clone --branch codex/cli-install-info https://github.com/maxwu1978/GreaterWMS.git
-cd GreaterWMS
-node tools/greaterwms.mjs --help
+mkdir -p greaterwms-cli && cd greaterwms-cli
+curl -fsSL https://api.maxsmartwms.online/cli/download/ -o greaterwms.mjs
+chmod +x greaterwms.mjs
+node greaterwms.mjs --help
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force greaterwms-cli | Out-Null
+Set-Location greaterwms-cli
+Invoke-WebRequest https://api.maxsmartwms.online/cli/download/ -OutFile greaterwms.mjs
+node greaterwms.mjs --help
 ```
 
 The public machine-readable contract is available without authentication:
@@ -21,9 +31,11 @@ The public machine-readable contract is available without authentication:
 curl -fsSL https://api.maxsmartwms.online/cli/install/
 ```
 
-The web application exposes the same information from the `CLI Setup` menu
-page. AI Agents should read the endpoint before constructing commands instead
-of hard-coding an API URL or authentication assumption.
+The CLI file itself is available at
+`https://api.maxsmartwms.online/cli/download/`. The web application exposes the
+same information from the `CLI Setup` menu page. AI Agents should read the
+endpoint before constructing commands instead of hard-coding an API URL or
+authentication assumption.
 
 ## Login
 

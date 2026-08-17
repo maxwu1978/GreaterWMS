@@ -20,6 +20,7 @@ urlpatterns = [
     path('health/', views.health, name='health'),
     path('health', views.health, name='health-no-slash'),
     path('cli/install/', views.cli_install, name='cli-install'),
+    path('cli/download/', views.cli_download, name='cli-download'),
     path('asn/', include('asn.urls')),
     path('asn/serial/', include('asnserial.urls')),
     path('dn/', include('dn.urls')),

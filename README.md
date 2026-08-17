@@ -113,6 +113,13 @@ Production and test targets are explicit; production requests target the API
 origin directly.
 
 ~~~shell
+mkdir -p greaterwms-cli && cd greaterwms-cli
+curl -fsSL https://api.maxsmartwms.online/cli/download/ -o greaterwms.mjs
+chmod +x greaterwms.mjs
+node greaterwms.mjs --help
+~~~
+
+~~~shell
 node tools/greaterwms.mjs login --env production --name ADMIN
 node tools/greaterwms.mjs login --env production --staff --name STAFF
 node tools/greaterwms.mjs install-info --env production --json
@@ -131,7 +138,7 @@ node tools/greaterwms.mjs sku delete --env production --id 123 --dry-run --json
 The login command prompts for the password or staff check code without echo and
 stores only the opaque session token, role, operator id, URL, and login name in
 `~/.config/greaterwms/session.json` with local-only permissions. The password is
-check code is never saved. Use `--env test` for the Render test service or
+never saved, and the staff check code is never saved. Use `--env test` for the Render test service or
 `--url URL` for a different approved deployment. For non-interactive staff
 login, use `GREATERWMS_CHECK_CODE`; `GREATERWMS_TOKEN` remains available as an
 explicit session-token override for automation.

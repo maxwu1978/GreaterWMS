@@ -1,4 +1,4 @@
-from django.http import StreamingHttpResponse, JsonResponse
+from django.http import FileResponse, StreamingHttpResponse, JsonResponse
 from django.template.response import TemplateResponse
 from django.conf import settings
 from wsgiref.util import FileWrapper
@@ -71,6 +71,7 @@ def cli_install(request):
         'api_base_url': 'https://api.maxsmartwms.online',
         'cli': {
             'entrypoint': 'tools/greaterwms.mjs',
+            'download_url': 'https://api.maxsmartwms.online/cli/download/',
             'runtime': {
                 'node_min': '18.0.0',
                 'recommended': 'Node.js 18 LTS or newer',
@@ -78,9 +79,9 @@ def cli_install(request):
             'repository': 'https://github.com/maxwu1978/GreaterWMS',
             'source_ref': 'codex/cli-install-info',
             'install_commands': [
-                'git clone --branch codex/cli-install-info https://github.com/maxwu1978/GreaterWMS.git',
-                'cd GreaterWMS',
-                'node tools/greaterwms.mjs --help',
+                'mkdir -p greaterwms-cli && cd greaterwms-cli',
+                'curl -fsSL https://api.maxsmartwms.online/cli/download/ -o greaterwms.mjs',
+                'chmod +x greaterwms.mjs && node greaterwms.mjs --help',
             ],
             'auth': [
                 {
@@ -110,5 +111,24 @@ def cli_install(request):
             ],
         },
     })
+    response['Cache-Control'] = 'no-store'
+    return response
+
+
+def cli_download(request):
+    """Download only the CLI entrypoint, without exposing the repository."""
+    if request.method != 'GET':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    cli_path = os.path.join(settings.BASE_DIR, 'tools', 'greaterwms.mjs')
+    if not os.path.isfile(cli_path):
+        return JsonResponse({'detail': 'CLI file is unavailable'}, status=404)
+
+    response = FileResponse(
+        open(cli_path, 'rb'),
+        as_attachment=True,
+        filename='greaterwms.mjs',
+        content_type='text/javascript; charset=utf-8',
+    )
     response['Cache-Control'] = 'no-store'
     return response

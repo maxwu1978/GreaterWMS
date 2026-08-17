@@ -22,11 +22,23 @@ class ProductionSecurityTests(TestCase):
         payload = response.json()
         self.assertEqual(payload['product'], 'GreaterWMS')
         self.assertEqual(payload['cli']['runtime']['node_min'], '18.0.0')
+        self.assertEqual(payload['cli']['download_url'], 'https://api.maxsmartwms.online/cli/download/')
         self.assertIn('/staff/login/', [item['endpoint'] for item in payload['cli']['auth']])
         self.assertIn('GREATERWMS_CHECK_CODE', payload['cli']['auth'][1]['check_code_env'])
         serialized = response.content.decode('utf-8').lower()
         self.assertNotIn('password=', serialized)
         self.assertNotIn('token=', serialized)
+
+    def test_cli_download_serves_only_the_cli_entrypoint(self):
+        response = self.client.get('/cli/download/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Disposition'], 'attachment; filename="greaterwms.mjs"')
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        self.assertIn(b'#!/usr/bin/env node', b''.join(response.streaming_content))
+
+    def test_cli_download_rejects_non_get_requests(self):
+        response = self.client.post('/cli/download/', {})
+        self.assertEqual(response.status_code, 405)
 
     def test_cli_install_manifest_rejects_non_get_requests(self):
         response = self.client.post('/cli/install/', {})
