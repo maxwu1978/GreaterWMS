@@ -1,10 +1,13 @@
-from django.http import FileResponse, StreamingHttpResponse, JsonResponse
+from django.http import FileResponse, StreamingHttpResponse, JsonResponse, HttpResponse
 from django.template.response import TemplateResponse
 from django.conf import settings
 from wsgiref.util import FileWrapper
 from rest_framework.exceptions import APIException
 from utils.health import health
-import mimetypes, os
+import io
+import mimetypes
+import os
+import zipfile
 
 
 NO_CACHE = 'no-cache, no-store, must-revalidate'
@@ -110,6 +113,23 @@ def cli_install(request):
                 'Passwords and check codes are never written to the local session file.',
             ],
         },
+        'skills': [
+            {
+                'name': 'wms-email-intake-operator',
+                'version': '1.0.0',
+                'description': 'Read warehouse emails and attachments, classify documents, reconcile GreaterWMS data, and prepare the next safe workflow step.',
+                'download_url': 'https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/',
+                'archive': 'zip',
+                'install_commands': [
+                    'mkdir -p ~/.codex/skills && curl -fsSL https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/ -o /tmp/wms-email-intake-operator.zip',
+                    'unzip -q -o /tmp/wms-email-intake-operator.zip -d ~/.codex/skills',
+                ],
+                'safety': [
+                    'The Skill is read-only by default and requires GreaterWMS dry-run and confirmation gates before writes.',
+                    'It never sends or deletes email and never writes directly to the database.',
+                ],
+            },
+        ],
     })
     response['Cache-Control'] = 'no-store'
     return response
@@ -130,5 +150,38 @@ def cli_download(request):
         filename='greaterwms.mjs',
         content_type='text/javascript; charset=utf-8',
     )
+    response['Cache-Control'] = 'no-store'
+    return response
+
+
+def email_intake_skill_download(request):
+    """Download the governed warehouse email intake Skill as a ZIP bundle."""
+    if request.method != 'GET':
+        return JsonResponse({'detail': 'Method not allowed'}, status=405)
+
+    skill_root = os.path.join(
+        settings.BASE_DIR,
+        'tools',
+        'skills',
+        'wms-email-intake-operator',
+    )
+    skill_files = (
+        'SKILL.md',
+        os.path.join('agents', 'openai.yaml'),
+        os.path.join('references', 'document-mapping.md'),
+    )
+    if not all(os.path.isfile(os.path.join(skill_root, path)) for path in skill_files):
+        return JsonResponse({'detail': 'Email intake Skill is unavailable'}, status=404)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as bundle:
+        for relative_path in skill_files:
+            bundle.write(
+                os.path.join(skill_root, relative_path),
+                arcname=os.path.join('wms-email-intake-operator', relative_path),
+            )
+
+    response = HttpResponse(archive.getvalue(), content_type='application/zip')
+    response['Content-Disposition'] = 'attachment; filename="wms-email-intake-operator.zip"'
     response['Cache-Control'] = 'no-store'
     return response

@@ -50,6 +50,33 @@
           <div class="text-caption text-grey-7 q-mt-sm">The CLI requires Node.js {{ manifest.cli.runtime.node_min }} or newer.</div>
         </q-card-section>
 
+        <q-card-section v-if="manifest.skills && manifest.skills.length">
+          <div class="cli-section-title">AI Agent Skills</div>
+          <div v-for="skill in manifest.skills" :key="skill.name" class="cli-skill-row q-mb-md">
+            <div class="row items-center q-mb-xs">
+              <div>
+                <div class="text-weight-bold">{{ skill.name }}</div>
+                <div class="text-caption text-grey-7">{{ skill.description }}</div>
+              </div>
+              <q-space />
+              <q-btn
+                outline
+                dense
+                color="primary"
+                icon="download"
+                label="Download Skill"
+                :href="skill.download_url"
+                target="_blank"
+                rel="noopener"
+              />
+            </div>
+            <div class="cli-command" v-for="command in skill.install_commands" :key="command">
+              <code>{{ command }}</code>
+              <q-btn flat round dense icon="content_copy" aria-label="Copy command" @click="copy(command)" />
+            </div>
+          </div>
+        </q-card-section>
+
         <q-card-section>
           <div class="cli-section-title">Login</div>
           <div v-for="auth in manifest.cli.auth" :key="auth.role" class="cli-auth-row q-mb-md">

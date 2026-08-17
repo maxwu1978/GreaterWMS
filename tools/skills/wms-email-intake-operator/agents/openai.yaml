@@ -1,0 +1,4 @@
+interface:
+  display_name: "Warehouse Email Intake"
+  short_description: "Turn warehouse emails into safe WMS next steps"
+  default_prompt: "Use $wms-email-intake-operator to read warehouse email and attachments, classify the documents, and prepare the next safe GreaterWMS step."

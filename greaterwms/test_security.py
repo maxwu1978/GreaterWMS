@@ -1,4 +1,7 @@
 from rest_framework.exceptions import APIException
+from io import BytesIO
+from zipfile import ZipFile
+
 from django.test import TestCase
 
 from utils.my_exceptions import custom_exception_handler
@@ -23,6 +26,11 @@ class ProductionSecurityTests(TestCase):
         self.assertEqual(payload['product'], 'GreaterWMS')
         self.assertEqual(payload['cli']['runtime']['node_min'], '18.0.0')
         self.assertEqual(payload['cli']['download_url'], 'https://api.maxsmartwms.online/cli/download/')
+        self.assertEqual(
+            payload['skills'][0]['download_url'],
+            'https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/',
+        )
+        self.assertIn('~/.codex/skills', payload['skills'][0]['install_commands'][0])
         self.assertIn('/staff/login/', [item['endpoint'] for item in payload['cli']['auth']])
         self.assertIn('GREATERWMS_CHECK_CODE', payload['cli']['auth'][1]['check_code_env'])
         serialized = response.content.decode('utf-8').lower()
@@ -38,6 +46,32 @@ class ProductionSecurityTests(TestCase):
 
     def test_cli_download_rejects_non_get_requests(self):
         response = self.client.post('/cli/download/', {})
+        self.assertEqual(response.status_code, 405)
+
+    def test_email_intake_skill_download_contains_only_skill_bundle(self):
+        response = self.client.get('/skills/wms-email-intake-operator/download/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="wms-email-intake-operator.zip"',
+        )
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        with ZipFile(BytesIO(response.content)) as bundle:
+            self.assertEqual(
+                sorted(bundle.namelist()),
+                [
+                    'wms-email-intake-operator/SKILL.md',
+                    'wms-email-intake-operator/agents/openai.yaml',
+                    'wms-email-intake-operator/references/document-mapping.md',
+                ],
+            )
+            skill_text = bundle.read('wms-email-intake-operator/SKILL.md')
+            self.assertIn(b'wms-email-intake-operator', skill_text)
+            self.assertNotIn(b'Authorization: Bearer', skill_text)
+            self.assertNotIn(b'SECRET_KEY=', skill_text)
+
+    def test_email_intake_skill_download_rejects_non_get_requests(self):
+        response = self.client.post('/skills/wms-email-intake-operator/download/', {})
         self.assertEqual(response.status_code, 405)
 
     def test_cli_install_manifest_rejects_non_get_requests(self):

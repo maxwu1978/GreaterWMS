@@ -21,6 +21,11 @@ urlpatterns = [
     path('health', views.health, name='health-no-slash'),
     path('cli/install/', views.cli_install, name='cli-install'),
     path('cli/download/', views.cli_download, name='cli-download'),
+    path(
+        'skills/wms-email-intake-operator/download/',
+        views.email_intake_skill_download,
+        name='email-intake-skill-download',
+    ),
     path('asn/', include('asn.urls')),
     path('asn/serial/', include('asnserial.urls')),
     path('dn/', include('dn.urls')),
