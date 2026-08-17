@@ -37,7 +37,7 @@ from .views import (
     _serial_rows_from_workbook,
     _summary,
 )
-from .agent import complete_preview, consume_preview, create_preview, request_payload
+from .agent import agent_roles_for_operation, complete_preview, consume_preview, create_preview, request_payload
 from .permissions import AgentPreviewPermission
 
 
@@ -60,6 +60,11 @@ class AgentPreviewPermissionTests(TestCase):
 
     def test_agent_preview_rejects_non_agent_requests(self):
         self.assertFalse(AgentPreviewPermission().has_permission(self.request(agent=False), None))
+
+    def test_warehouse_can_preview_inbound_but_not_admin_workflows(self):
+        self.assertIn('warehouse', agent_roles_for_operation('asn.create'))
+        self.assertNotIn('warehouse', agent_roles_for_operation('tenant.cleanup'))
+        self.assertNotIn('warehouse', agent_roles_for_operation('outbound.cancel_intransit'))
 
 
 class PackListWorkflowTests(TestCase):

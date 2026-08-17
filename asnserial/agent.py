@@ -13,7 +13,10 @@ from .models import AgentCommandPreview
 
 
 AGENT_CLIENT = 'greaterwms-cli'
-WORKFLOW_ROLES = frozenset({'admin', 'manager', 'supervisor', 'inbound', 'stockcontrol'})
+# Warehouse operators own customer-email intake and the inbound ASN lifecycle.
+# Keep master-data administration role-gated elsewhere; this set only controls
+# operational Agent previews and confirmations.
+WORKFLOW_ROLES = frozenset({'admin', 'manager', 'supervisor', 'inbound', 'warehouse', 'stockcontrol'})
 OUTBOUND_WORKFLOW_ROLES = frozenset({'admin', 'manager', 'supervisor', 'outbound', 'warehouse'})
 SUPPORTED_OPERATIONS = frozenset({
     'asn.create',
