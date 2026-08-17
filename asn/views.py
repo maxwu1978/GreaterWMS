@@ -52,7 +52,7 @@ from staging.services import (
     reserve_staging_slots,
 )
 from receiving.services import assert_legacy_asn_putaway_allowed
-from .services import inbound_package_quantity
+from .services import asn_detail_reference_errors, inbound_package_quantity
 
 
 def _operator_name(request, required=False):
@@ -564,6 +564,14 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         data = self.request.data
         _validate_asn_detail_payload(data)
+        reference_errors = asn_detail_reference_errors(
+            self.request.auth.openid,
+            data.get('asn_code'),
+            data.get('supplier'),
+            data.get('goods_code'),
+        )
+        if reference_errors:
+            raise ValidationError(reference_errors)
         command, replay = consume_preview(
             request,
             'asn.detail.create',
@@ -690,6 +698,14 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         data = self.request.data
         _validate_asn_detail_payload(data)
+        reference_errors = asn_detail_reference_errors(
+            self.request.auth.openid,
+            data.get('asn_code'),
+            data.get('supplier'),
+            data.get('goods_code'),
+        )
+        if reference_errors:
+            raise ValidationError(reference_errors)
         if AsnListModel.objects.filter(openid=self.request.auth.openid, asn_code=str(data['asn_code']),
                                        asn_status=1, is_delete=False).exists():
             if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=str(data['supplier']),

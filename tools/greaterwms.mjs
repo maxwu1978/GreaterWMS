@@ -568,7 +568,12 @@ function addPackListFields (form, options) {
 
 function packListForm (file, options) {
   const filePath = resolve(file)
-  const fileInfo = statSync(filePath)
+  let fileInfo
+  try {
+    fileInfo = statSync(filePath)
+  } catch {
+    throw new Error(`File not found: ${file}`)
+  }
   if (!fileInfo.isFile()) throw new Error(`File not found: ${file}`)
   const form = new FormData()
   form.append(
@@ -582,7 +587,12 @@ function packListForm (file, options) {
 
 function serialImportForm (file, options) {
   const filePath = resolve(file)
-  const fileInfo = statSync(filePath)
+  let fileInfo
+  try {
+    fileInfo = statSync(filePath)
+  } catch {
+    throw new Error(`File not found: ${file}`)
+  }
   if (!fileInfo.isFile()) throw new Error(`File not found: ${file}`)
   const form = new FormData()
   form.append(
@@ -605,6 +615,65 @@ function print (payload, json) {
   process.stdout.write(json ? `${JSON.stringify(payload, null, 2)}\n` : `${payload.detail || 'success'}\n${JSON.stringify(payload, null, 2)}\n`)
 }
 
+function recoveryHint (message, operation = '') {
+  const text = `${operation} ${message}`.toLowerCase()
+  if (text.includes('dry-run') || text.includes('dry run')) {
+    return 'Run the same write command with --dry-run --json, review the server preview, then repeat with --confirm and its confirmation token.'
+  }
+  if (text.includes('confirmation-token') || text.includes('confirmation token')) {
+    return 'Use the confirmation_token returned by the latest dry-run preview and provide a stable --idempotency-key.'
+  }
+  if (text.includes('login required') || text.includes('invalid or revoked token') || text.includes('token expired')) {
+    return 'Log in for the selected environment, then rerun: node tools/greaterwms.mjs login --env production.'
+  }
+  if (text.includes('asn create requires')) {
+    return 'Provide a trusted supplier or container_tracking reference, then preview the ASN before confirming it.'
+  }
+  if (text.includes('asn detail create requires')) {
+    return 'Provide the existing ASN code in --data or --data-file; do not create a second ASN for the same load.'
+  }
+  if (text.includes('--id is required')) {
+    return 'Use a read-only list/get command to find the existing record id, then rerun the operation with --id.'
+  }
+  if (text.includes('file not found') || text.includes('enoent')) {
+    return 'Provide an existing workbook path and rerun the preview. No import record was created.'
+  }
+  if (text.includes('requires asn status 3')) {
+    return 'Complete physical arrival and unloading first, then finish unloading so the ASN reaches Receiving before submitting received quantities.'
+  }
+  if (text.includes('mark the asn as arrived') || text.includes('physical arrival')) {
+    return 'Confirm the vehicle has physically arrived with asn arrival, then preview unload-start again. No staging slot is occupied by this rejection.'
+  }
+  if (text.includes('not ready for putaway') || text.includes('putaway')) {
+    return 'Check that receiving/QC is complete, accepted quantity remains, all exceptions are resolved, and the assigned driver and final storage bin are valid.'
+  }
+  if (text.includes('pack list') || text.includes('packlist')) {
+    return 'Check packlist list, correct the workbook mapping, then preview packlist import. Use --late-reference only after receiving has started.'
+  }
+  if (text.includes('sku does not exist') || text.includes('goods code does not exist')) {
+    return 'List the tenant SKU master data, create or import the missing SKU, then rerun ASN detail create from a fresh preview.'
+  }
+  if (/(^|\s)(serial|sn)(\s|$)/.test(text)) {
+    return 'Review serial exceptions or inspection results first. Resolve the exception with a note and required location before putaway.'
+  }
+  if (text.includes('staging') || text.includes('stage-left') || text.includes('stage-right')) {
+    return 'List staging-slots, verify package/load-unit capacity, reserve valid Stage-left or Stage-right slots, and do not occupy them before physical unloading.'
+  }
+  if (text.includes('driver')) {
+    return 'List driver records and use an active driver assigned to this task. Do not start unloading or putaway without the required driver.'
+  }
+  if (text.includes('arrival') || text.includes('unloading')) {
+    return 'Check ASN state and event history. Mark actual arrival first; unloading is blocked until the vehicle has physically arrived.'
+  }
+  if (text.includes('permission') || text.includes('forbidden') || text.includes('403')) {
+    return 'Use the CLI with the warehouse role that owns this step. QC handles inspection and exceptions; drivers do not receive administrative write access.'
+  }
+  if (text.includes('not found') || text.includes('does not exist')) {
+    return 'Verify tenant, warehouse, ASN id/code, SKU, driver, and bin with read-only list/get commands before retrying.'
+  }
+  return 'Inspect the current ASN, Pack List, staging assignments, exceptions, and event history; follow the returned business status before retrying.'
+}
+
 function help () {
   process.stdout.write('Authentication:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs login --env production --staff --name STAFF\n  node tools/greaterwms.mjs auth status\n  node tools/greaterwms.mjs logout\n  Password/check code is prompted without echo and is never saved.\n\n')
   process.stdout.write('Installation: node tools/greaterwms.mjs install-info --env production --json\n\n')
@@ -621,6 +690,7 @@ function help () {
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
   process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
   process.stdout.write('Tenant cleanup: tenant cleanup --dry-run, then tenant cleanup --confirm with the preview token.\n')
+  process.stdout.write('Inbound CLI test suite: node tools/inbound-cli-test-suite.mjs [--catalog|--live --env test --asn-id ID --asn-code ASN]\n')
   process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs login --env production --staff --name STAFF\n  node tools/greaterwms.mjs install-info --env production --json\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated session token override\n  GREATERWMS_CHECK_CODE staff check code for non-interactive staff login\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
 }
 
@@ -1034,6 +1104,8 @@ async function main () {
 }
 
 main().catch(error => {
-  process.stderr.write(`Error: ${error.message}\n`)
+  const message = error.message
+  const operation = process.argv.slice(2).filter(value => !value.startsWith('--')).join(' ')
+  process.stderr.write(`Error: ${message}\nNext action: ${recoveryHint(message, operation)}\n`)
   process.exitCode = 1
 })

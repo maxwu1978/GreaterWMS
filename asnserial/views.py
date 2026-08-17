@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import APIException, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
+from asn.services import asn_detail_reference_errors
 from dn.models import DnDetailModel, DnListModel
 from binset.models import ListModel as Bin
 from stock.models import StockBinModel, StockListModel
@@ -238,6 +239,23 @@ class AgentCommandPreviewView(APIView):
                 }.get(operation)
                 if expected_status is not None and int(dn.dn_status or 0) != expected_status:
                     reject('%s requires delivery note status %s' % (operation, expected_status))
+        if operation == 'asn.detail.create':
+            goods_codes = payload.get('goods_code')
+            goods_qty = payload.get('goods_qty')
+            if not isinstance(goods_codes, list) or not goods_codes:
+                reject('goods_code must be a non-empty list')
+            if not isinstance(goods_qty, list) or not goods_qty:
+                reject('goods_qty must be a non-empty list')
+            if len(goods_codes) != len(goods_qty):
+                reject('goods_code and goods_qty must have the same length')
+            reference_errors = asn_detail_reference_errors(
+                request.auth.openid,
+                payload.get('asn_code'),
+                payload.get('supplier'),
+                goods_codes,
+            )
+            if reference_errors:
+                reject(reference_errors)
         if operation == 'packlist.confirm':
             if not PackListDocument.objects.filter(
                 openid=request.auth.openid, id=resource_id, is_current=True,

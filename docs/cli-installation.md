@@ -80,3 +80,38 @@ node tools/greaterwms.mjs sku list --env production --json
 For Pack List, QC, receiving, transport, and outbound payloads, use the
 workflow-specific references in `docs/pack-list-cli.md`,
 `docs/inbound-process-and-exception-logic.md`, and `docs/outbound-cli.md`.
+
+## Inbound Test Suite
+
+Warehouse operators can run the local inbound guard suite without changing any
+WMS data:
+
+```shell
+node tools/inbound-cli-test-suite.mjs
+node tools/inbound-cli-test-suite.mjs --catalog
+```
+
+For a disposable test ASN, live mode performs read-only checks and server
+previews only:
+
+```shell
+GREATERWMS_TOKEN=... node tools/inbound-cli-test-suite.mjs \
+  --live --env test --asn-id 123 --asn-code ASN-TEST-001
+```
+
+Confirmed writes are intentionally not automated by the suite. Review each
+preview and use the normal `--confirm`, `--confirmation-token`, and
+`--idempotency-key` workflow on a disposable tenant.
+
+For the Node simulation runner, requests have a 30-second timeout and at most
+three exponential-backoff retries by default. Override them when diagnosing a
+slow test service:
+
+```shell
+node tools/wms-sim-node.mjs --api https://greaterwms-v2-test3-sn.onrender.com \
+  --user SIM-TENANT --pass '<password>' --day 0 \
+  --timeout-ms 30000 --max-retries 3
+```
+
+The simulator records these values in its result JSON and stops with a
+structured retry-limit error instead of retrying forever.

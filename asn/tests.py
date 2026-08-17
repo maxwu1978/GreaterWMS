@@ -4,9 +4,12 @@ from django.test import TestCase
 from rest_framework.exceptions import APIException, ValidationError
 
 from supplier.models import ListModel as Supplier
+from goods.models import ListModel as Goods
+from staff.models import ListModel as Staff
 from utils.my_exceptions import custom_exception_handler
 
 from .models import AsnDetailModel, AsnListModel
+from .services import asn_detail_reference_errors
 from .views import AsnDetailViewSet, MoveToBinViewSet, _validate_asn_detail_payload
 
 
@@ -38,6 +41,34 @@ class AsnInputSafetyTests(TestCase):
             supplier_contact='test',
             supplier_manager='test',
             creater='tester',
+            openid=self.openid,
+        )
+        Goods.objects.create(
+            goods_code='SKU-01',
+            goods_desc='Test SKU',
+            goods_supplier='Customer A',
+            goods_weight=1,
+            goods_w=1,
+            goods_d=1,
+            goods_h=1,
+            unit_volume=1,
+            goods_unit='EA',
+            goods_class='TEST',
+            goods_brand='TEST',
+            goods_color='NA',
+            goods_shape='BOX',
+            goods_specs='TEST',
+            goods_origin='US',
+            goods_cost=1,
+            goods_price=1,
+            creater='tester',
+            bar_code='SKU-01-BAR',
+            openid=self.openid,
+        )
+        self.operator = Staff.objects.create(
+            staff_name='inbound-operator',
+            staff_type='Inbound',
+            check_code=1234,
             openid=self.openid,
         )
 
@@ -110,3 +141,34 @@ class AsnInputSafetyTests(TestCase):
             raised.exception.detail['goods_qty'][0],
             'Must contain the same number of entries as goods_code.',
         )
+
+    def test_asn_detail_reference_errors_report_missing_sku_as_client_error(self):
+        errors = asn_detail_reference_errors(
+            self.openid,
+            self.asn.asn_code,
+            self.asn.supplier,
+            ['SKU-MISSING'],
+        )
+
+        self.assertEqual(errors['goods_code'], ['SKU does not exist: SKU-MISSING.'])
+
+    def test_asn_detail_create_rejects_missing_sku_before_inventory_write(self):
+        request = self.request({
+            'asn_code': self.asn.asn_code,
+            'supplier': self.asn.supplier,
+            'goods_code': ['SKU-MISSING'],
+            'goods_qty': [1],
+        }, operator=self.operator.id)
+        view = AsnDetailViewSet()
+        view.request = request
+        view.action = 'create'
+
+        with self.assertRaises(ValidationError) as raised:
+            view.create(request)
+
+        self.assertEqual(raised.exception.detail['goods_code'][0], 'SKU does not exist: SKU-MISSING.')
+        self.assertFalse(AsnDetailModel.objects.filter(
+            openid=self.openid,
+            asn_code=self.asn.asn_code,
+            goods_code='SKU-MISSING',
+        ).exists())
