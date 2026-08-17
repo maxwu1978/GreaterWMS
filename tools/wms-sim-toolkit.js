@@ -222,7 +222,11 @@ window.SIM = (() => {
     await boardCheck(drv === 'SIM-Tom' ? 'T2' : 'T1', rc, { present: false, note: '另一司机不应看到' });
     const put = actQ - dmg, drvK = drv === 'SIM-Tom' ? 'T1' : 'T2';
     j = step(c, 'putaway(driver)', ...(await api('/receiving/putaway/', { method: 'POST', token: S.staff[drvK].token, operator: S.staff[drvK].id, body: { receipt_no: rc, goods_code: goods, quantity: put, bin_name: pick(S.bins), driver_name: drv, idempotency_key: rc + '-P1' } })));
-    if (j) { exp(goods).recv += put; S.ledger.closedRefs.push(rc); }
+    if (j) {
+      exp(goods).recv += put;
+      if (dmg === 0) S.ledger.closedRefs.push(rc);
+      else S.ledger.notes.push(`damage staging retained until disposition: ${rc}`);
+    }
     return c;
   }
   async function inboundAsnSN({ agent = true } = {}) { // AI-agent 导入 pack list 的 SN 柜
@@ -264,9 +268,9 @@ window.SIM = (() => {
     for (const sn of sns) { const [ss, sj] = await api('/asn/serial/scan/', { method: 'POST', token: S.staff.QC.token, operator: S.staff.QC.id, body: { asn_code: asn, goods_code: goods, serial_number: sn } }); if (ss >= 300) { step(c, 'scan-' + sn, ss, sj); break; } }
     c.steps.push({ name: `scan×${qty}`, http: 200, ok: true, msg: '' });
     step(c, 'presort', ...(await api(`/asn/presort/${aid}/`, { method: 'POST', token: S.staff.WH.token, operator: S.staff.WH.id, body: {} })));
-    step(c, 'sorted', ...(await api('/asn/sorted/', { method: 'PUT', token: S.staff.WH.token, operator: S.staff.WH.id, body: { asn_code: asn, supplier: 'SIM-SUP-B', goodsData: [{ goods_code: goods, goods_qty: qty }] } })));
+    step(c, 'sorted', ...(await api('/asn/sorted/', { method: 'PUT', token: S.staff.WH.token, operator: S.staff.WH.id, body: { asn_code: asn, supplier: 'SIM-SUP-B', goodsData: [{ goods_code: goods, goods_actual_qty: qty }] } })));
     const did = await listId('/asn/detail/', 'asn_code', asn);
-    const j2 = step(c, 'putaway(movetobin)', ...(await api(`/asn/movetobin/${did}/`, { method: 'POST', token: S.staff.WH.token, operator: S.staff.WH.id, body: { asn_code: asn, qty, bin_name: pick(S.bins), putaway_driver: 'SIM-Leo' } })));
+    const j2 = step(c, 'putaway(movetobin)', ...(await api(`/asn/movetobin/${did}/`, { method: 'POST', token: S.staff.WH.token, operator: S.staff.WH.id, body: { asn_code: asn, goods_code: goods, qty, bin_name: pick(S.bins), putaway_driver: 'SIM-Leo' } })));
     if (j2) { exp(goods).recv += qty; c.refs.sns = sns; c.refs.goods = goods; S.ledger.closedRefs.push(asn); }
     return c;
   }
@@ -288,11 +292,18 @@ window.SIM = (() => {
   // ---------- 出仓场景 ----------
   async function outboundCommon(c, { goods, qty, sn = false, serials = [], agent = false }) {
     const tokOB = { token: S.staff.OB.token, operator: S.staff.OB.id };
-    let j = step(c, 'dn-create', ...(await api('/dn/list/', Object.assign({ method: 'POST', body: { creater: 'sim', picking_mode: sn ? 'SN' : 'SKU_QTY' }, agent }, tokOB))));
+    const createPayload = { customer: 'SIM-CUST-A', creater: 'sim', picking_mode: sn ? 'SN' : 'SKU_QTY', transport_required: true, ship_to: 'SIM-CUST-A Dock' };
+    const createResult = agent
+      ? await agentExec('/dn/list/', createPayload, 'outbound.create', tokOB)
+      : await api('/dn/list/', Object.assign({ method: 'POST', body: createPayload }, tokOB));
+    let j = step(c, 'dn-create' + (agent ? '(agent)' : ''), createResult[0], createResult[1]);
     if (!j) return null; const dn = j.dn_code; c.refs.dn = dn;
     const detailBody = { dn_code: dn, customer: 'SIM-CUST-A', goods_code: [goods], goods_qty: [qty] };
     if (sn) detailBody.serial_numbers = [serials];
-    j = step(c, sn ? 'dn-detail(pick ticket' + (agent ? '·agent' : '') + ')' : 'dn-detail', ...(await api('/dn/detail/', Object.assign({ method: 'POST', body: detailBody, agent }, tokOB))));
+    const detailResult = agent
+      ? await agentExec('/dn/detail/', detailBody, 'outbound.detail.create', Object.assign({ resourceId: dn }, tokOB))
+      : await api('/dn/detail/', Object.assign({ method: 'POST', body: detailBody }, tokOB));
+    j = step(c, sn ? 'dn-detail(pick ticket' + (agent ? '·agent' : '') + ')' : 'dn-detail', detailResult[0], detailResult[1]);
     if (!j) return null;
     const id = await listId('/dn/list/', 'dn_code', dn);
     step(c, 'neworder', ...(await api(`/dn/neworder/${id}/`, Object.assign({ method: 'POST', body: {} }, tokOB))));
@@ -301,7 +312,13 @@ window.SIM = (() => {
     const rows = (pl && (pl.results || pl)) || [];
     const goodsData = (Array.isArray(rows) ? rows : []).filter(r => r.t_code).map(r => { const g = { t_code: r.t_code, goods_code: r.goods_code, pick_qty: r.pick_qty }; if (sn) g.serial_numbers = serials; return g; });
     if (!goodsData.length) { step(c, 'pickinglist-empty', 500, pl); return null; }
-    step(c, 'picked', ...(await api('/dn/picked/', Object.assign({ method: 'PUT', body: { dn_code: dn, goodsData } }, tokOB))));
+    // The production route is POST /dn/picked/<id>/ (create). The legacy PUT
+    // /dn/picked/ route expects a different payload with picked_qty fields.
+    const pickPayload = { dn_code: dn, goodsData };
+    const pickResult = agent
+      ? await agentExec(`/dn/picked/${id}/`, pickPayload, 'outbound.pick', Object.assign({ resourceId: id }, tokOB))
+      : await api(`/dn/picked/${id}/`, Object.assign({ method: 'POST', body: pickPayload }, tokOB));
+    step(c, 'picked' + (agent ? '(agent)' : ''), pickResult[0], pickResult[1]);
     return { dn, id };
   }
   async function outboundFlow(kind, { agent = false } = {}) { // clean|sn|podexc|cancelreturn
@@ -319,7 +336,9 @@ window.SIM = (() => {
     exp(goods).ship += qty;
     await boardCheck(drvK, 'TR-' + r.dn, { present: true, note: '司机应看到自己的运输任务' }).catch(() => {});
     const tno = 'TR-' + r.dn;
-    step(c, 'driver-depart(IN_TRANSIT)', ...(await api('/transport/transition/', { method: 'POST', token: S.staff[drvK].token, operator: S.staff[drvK].id, body: { transport_no: tno, status: 'IN_TRANSIT' } })));
+    const [, dispatchedTransport] = await api('/transport/orders/?transport_no=' + encodeURIComponent(tno), { token: S.staff.LG.token, operator: S.staff.LG.id });
+    const dispatchedOrder = ((dispatchedTransport && dispatchedTransport.results) || [])[0];
+    step(c, 'driver-depart(IN_TRANSIT)', dispatchedOrder && String(dispatchedOrder.status || '').toUpperCase() === 'IN_TRANSIT' ? 200 : 500, { status: dispatchedOrder && dispatchedOrder.status });
     if (kind === 'cancelreturn') {
       step(c, 'cancel-intransit(admin)', ...(await api(`/dn/cancel-intransit/${r.id}/`, { method: 'POST', body: { cancellation_note: 'SIM 取消在途,货物退回' } })));
       const rc = nid('RC');
@@ -428,7 +447,7 @@ window.SIM = (() => {
       const b = S.base[g] || { goods_qty: 0, onhand: 0, can_order: 0 };
       const want = e.recv - e.ship + e.ret;
       const checks = [
-        ['goods_qty', Number(row.goods_qty || 0), b.goods_qty + want],
+        ['goods_qty', Number(row.goods_qty || 0), b.goods_qty + want + Number(e.asnOpen || 0)],
         ['onhand', Number(row.onhand_stock || 0), b.onhand + want],
         ['can_order', Number(row.can_order_stock || 0), b.can_order + want],
         // 口径修正:故意保留的开放 ASN 预留(negMixing 等)计入期望,不再误报
@@ -438,7 +457,9 @@ window.SIM = (() => {
       for (const [nm, got, exp2] of checks) S.ledger.verify.push({ sku: g, check: nm, got, want: exp2, ok: got === exp2 });
     }
     const [, asg] = await api('/staging/assignments/');
-    const act = (Array.isArray(asg) ? asg : []).filter(a => String(a.status).toUpperCase() === 'ACTIVE' && S.ledger.closedRefs.includes(String(a.reference_code)));
+    const activeAssignments = (Array.isArray(asg) ? asg : []).filter(a => String(a.status).toUpperCase() === 'ACTIVE');
+    const act = activeAssignments.filter(a => S.ledger.closedRefs.includes(String(a.reference_code)));
+    if (act.length) S.ledger.notes.push('active staging on closed refs=' + JSON.stringify(act.map(a => ({ flow: a.flow, reference_code: a.reference_code, bin_name: a.bin_name }))));
     S.ledger.verify.push({ sku: '(staging)', check: '闭环单据无残留占用', got: act.length, want: 0, ok: act.length === 0 });
     const fails = S.ledger.verify.filter(v => !v.ok);
     console.table(fails.length ? fails : S.ledger.verify.slice(0, 12));

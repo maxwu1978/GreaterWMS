@@ -81,6 +81,30 @@ For Pack List, QC, receiving, transport, and outbound payloads, use the
 workflow-specific references in `docs/pack-list-cli.md`,
 `docs/inbound-process-and-exception-logic.md`, and `docs/outbound-cli.md`.
 
+## Outbound Test Suite
+
+Warehouse operators can run the local outbound guard suite without changing
+any WMS data:
+
+```shell
+node tools/outbound-cli-test-suite.mjs
+node tools/outbound-cli-test-suite.mjs --catalog
+```
+
+For one disposable delivery note, live mode reads the order and requests
+server previews only. It never confirms a write:
+
+```shell
+GREATERWMS_TOKEN=... node tools/outbound-cli-test-suite.mjs \
+  --live --env test --dn-id 123 --dn-code DN-TEST-001 \
+  --sku SKU-01 --qty 1 --driver Tom --staging-bin STAGE-LEFT-01
+```
+
+Use a disposable test tenant. A blocked preview is useful when it returns a
+clear `Next action`; do not pass `--execute`, because confirmed writes must be
+reviewed and run one by one with the normal confirmation token and idempotency
+key workflow.
+
 ## Inbound Test Suite
 
 Warehouse operators can run the local inbound guard suite without changing any

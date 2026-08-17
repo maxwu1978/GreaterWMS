@@ -387,9 +387,15 @@ function queryPath (path, options) {
 }
 
 function parseData (options) {
-  const value = options['data-file']
-    ? readFileSync(resolve(String(options['data-file'])), 'utf8')
-    : options.data
+  let value = options.data
+  if (options['data-file']) {
+    const file = String(options['data-file'])
+    try {
+      value = readFileSync(resolve(file), 'utf8')
+    } catch {
+      throw new Error(`File not found: ${file}`)
+    }
+  }
   if (value === undefined || value === null || value === '') return {}
   try {
     const parsed = JSON.parse(String(value))
@@ -632,11 +638,20 @@ function recoveryHint (message, operation = '') {
   if (text.includes('asn detail create requires')) {
     return 'Provide the existing ASN code in --data or --data-file; do not create a second ASN for the same load.'
   }
+  if (text.includes('outbound create requires customer')) {
+    return 'Provide the exact customer or owner from the customer order, then run outbound create with --dry-run.'
+  }
+  if (text.includes('outbound create requires creater')) {
+    return 'Provide the authenticated warehouse operator as creater, then run outbound create with --dry-run.'
+  }
+  if (text.includes('outbound-detail create requires')) {
+    return 'Provide dn_code, goods_code, and goods_qty as matching arrays, then preview the outbound detail.'
+  }
   if (text.includes('--id is required')) {
     return 'Use a read-only list/get command to find the existing record id, then rerun the operation with --id.'
   }
   if (text.includes('file not found') || text.includes('enoent')) {
-    return 'Provide an existing workbook path and rerun the preview. No import record was created.'
+    return 'Provide an existing input file path and rerun the preview. No import or outbound record was created.'
   }
   if (text.includes('requires asn status 3')) {
     return 'Complete physical arrival and unloading first, then finish unloading so the ASN reaches Receiving before submitting received quantities.'
@@ -652,6 +667,18 @@ function recoveryHint (message, operation = '') {
   }
   if (text.includes('sku does not exist') || text.includes('goods code does not exist')) {
     return 'List the tenant SKU master data, create or import the missing SKU, then rerun ASN detail create from a fresh preview.'
+  }
+  if (text.includes('delivery details') || text.includes('exception note') || text.includes('delivery actual')) {
+    return 'Submit one POD line for every shipped SKU. If actual quantity differs or damage is present, include a delivery note before confirming.'
+  }
+  if (text.includes('cancellation reason')) {
+    return 'Provide a clear cancellation_note, then confirm whether the goods returned to the warehouse; returned goods must use the OUTBOUND_RETURN receiving flow.'
+  }
+  if (text.includes('stock is insufficient') || text.includes('insufficient stock')) {
+    return 'Check available stock, picked quantity, and the requested SKU or SN before releasing the order again.'
+  }
+  if (text.includes('dn status') || text.includes('delivery note') || text.includes('outbound')) {
+    return 'Read the delivery note and picking list, then follow the required sequence: release, order-release, pick, dispatch, and POD or cancel-intransit.'
   }
   if (/(^|\s)(serial|sn)(\s|$)/.test(text)) {
     return 'Review serial exceptions or inspection results first. Resolve the exception with a note and required location before putaway.'
@@ -691,6 +718,7 @@ function help () {
   process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
   process.stdout.write('Tenant cleanup: tenant cleanup --dry-run, then tenant cleanup --confirm with the preview token.\n')
   process.stdout.write('Inbound CLI test suite: node tools/inbound-cli-test-suite.mjs [--catalog|--live --env test --asn-id ID --asn-code ASN]\n')
+  process.stdout.write('Outbound CLI test suite: node tools/outbound-cli-test-suite.mjs [--catalog|--live --env test --dn-id ID --dn-code DN]\n')
   process.stdout.write(`GreaterWMS CLI\n\nUsage:\n  node tools/greaterwms.mjs login --env production --name ADMIN\n  node tools/greaterwms.mjs login --env production --staff --name STAFF\n  node tools/greaterwms.mjs install-info --env production --json\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> list [--query JSON] [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> get --id ID [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> create --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> update --id ID --data JSON --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <resource> delete --id ID --dry-run [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs packlist list --asn-code ASN [--json]\n  GREATERWMS_TOKEN=... node tools/greaterwms.mjs <operation> [--query JSON] [--json]\n\nResources:\n  warehouse, bin, bin-size, bin-property, sku, sku-unit, sku-class, sku-color,\n  sku-brand, sku-shape, sku-specs, sku-origin, supplier, customer, company, staff,\n  staff-types, driver, stock, asn, asn-detail, outbound, outbound-detail,\n  staging-slots, staging-assignments, dashboard-operations, dashboard-receipts,\n  dashboard-sales\n\nRead-only operations:\n  asn events | outbound picking-list | driver dispatch-list\n\nPack List operations:\n  packlist list --asn-code ASN\n  packlist import --asn-code ASN --file FILE --dry-run|--confirm\n  packlist import --asn-code ASN --file FILE --replace --dry-run|--confirm\n  packlist confirm --id ID --confirm\n\nCommon options:\n  --query JSON       query parameters, for example '{"goods_code__icontains":"702"}'\n  --page N --page-size N\n  --id ID             record id for get/update/delete\n  --data JSON         JSON object for create/update\n  --data-file FILE    read create/update JSON from a file\n  --dry-run           print a write plan without changing data\n  --confirm           execute a previously reviewed write plan\n  --json              print machine-readable JSON\n\nEnvironment:\n  GREATERWMS_URL       GreaterWMS base URL (default: ${DEFAULT_URL})\n  GREATERWMS_TOKEN     authenticated session token override\n  GREATERWMS_CHECK_CODE staff check code for non-interactive staff login\n  GREATERWMS_OPERATOR  optional staff id used for the audit operator\n  GREATERWMS_LANGUAGE  optional response language (default: en-US)\n\nMaster-data create/update and single-record delete require explicit confirmation. Pack List deletion and bulk cleanup are not supported.\n`)
 }
 
