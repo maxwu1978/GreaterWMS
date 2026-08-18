@@ -3,8 +3,8 @@
     <q-card flat bordered class="source-intake-card">
       <q-card-section class="row items-center q-pb-sm">
         <div>
-          <div class="text-h5 text-weight-bold">Source Intake</div>
-          <div class="text-caption text-grey-7">Email evidence and AI processing status</div>
+          <div class="text-h6 text-weight-bold">Source Intake</div>
+          <div class="text-caption text-grey-7">External instructions and email evidence</div>
         </div>
         <q-space />
         <q-btn flat round icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
@@ -29,7 +29,7 @@
 
       <q-card-section class="source-intake-counts row q-gutter-sm q-py-none">
         <q-chip v-for="item in countItems" :key="item.key" dense square :color="item.color" text-color="white">
-          {{ item.label }} {{ counts[item.key] || 0 }}
+          {{ item.label }} {{ item.value }}
         </q-chip>
       </q-card-section>
 
@@ -50,23 +50,46 @@
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">{{ formatDate(props.row.received_at || props.row.captured_at) }}</q-td>
         </template>
-        <template v-slot:body-cell-source="props">
+        <template v-slot:body-cell-document="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ props.row.document_type || 'OTHER' }}</div>
-            <div class="text-caption text-grey-7">{{ props.row.sender_email || props.row.mailbox_account || '-' }}</div>
+            <div class="text-weight-medium">{{ documentLabel(props.row.document_type) }}</div>
+            <div class="text-caption text-grey-7">{{ sourceTypeLabel(props.row.source_type) }}</div>
+          </q-td>
+        </template>
+        <template v-slot:body-cell-sender="props">
+          <q-td :props="props">
+            <div class="text-weight-medium ellipsis" :title="props.row.sender_name || props.row.sender_email">
+              {{ props.row.sender_name || props.row.sender_email || '-' }}
+            </div>
+            <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.mailbox_account">
+              {{ props.row.sender_email || props.row.mailbox_account || '-' }}
+            </div>
           </q-td>
         </template>
         <template v-slot:body-cell-status="props">
-          <q-td :props="props"><q-badge :color="statusColor(props.row.status)">{{ props.row.status }}</q-badge></q-td>
+          <q-td :props="props">
+            <q-badge :color="statusColor(props.row.status)">{{ statusLabel(props.row.status) }}</q-badge>
+            <div v-if="props.row.exception_summary" class="source-intake-exception-marker" :title="props.row.exception_summary">
+              <q-icon name="warning" size="14px" /> Exception
+            </div>
+          </q-td>
         </template>
         <template v-slot:body-cell-reference="props">
           <q-td :props="props">
-            <div>{{ props.row.external_reference || props.row.matched_entity_ref || '-' }}</div>
-            <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">{{ props.row.subject || '-' }}</div>
+            <div class="text-weight-medium ellipsis" :title="props.row.external_reference || props.row.matched_entity_ref">
+              {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
+            </div>
+            <div v-if="props.row.matched_entity_ref" class="text-caption text-grey-7 ellipsis">
+              {{ props.row.matched_entity_type || 'Matched' }}: {{ props.row.matched_entity_ref }}
+            </div>
           </q-td>
         </template>
         <template v-slot:body-cell-next_action="props">
-          <q-td :props="props" class="source-intake-next">{{ props.row.next_action || props.row.exception_summary || '-' }}</q-td>
+          <q-td
+            :props="props"
+            class="source-intake-next ellipsis"
+            :title="props.row.next_action || props.row.exception_summary || ''"
+          >{{ props.row.next_action || (props.row.exception_summary ? 'Review exception' : '-') }}</q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -81,39 +104,75 @@
     <q-dialog v-model="detailOpen" position="right">
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
-          <div class="text-h6">Source Record {{ detail ? detail.id : '' }}</div>
+          <div>
+            <div class="text-h6">Source Record {{ detail ? detail.id : '' }}</div>
+            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }}</div>
+          </div>
           <q-space />
           <q-btn flat round dense icon="close" v-close-popup aria-label="Close" />
         </q-card-section>
         <q-separator />
         <q-card-section v-if="detail">
+          <div class="source-intake-section-title">Source</div>
           <div class="source-intake-detail-grid">
-            <div><span>Status</span><strong>{{ detail.status }}</strong></div>
-            <div><span>Operation</span><strong>{{ detail.operation }}</strong></div>
-            <div><span>Document</span><strong>{{ detail.document_type }}</strong></div>
+            <div><span>Status</span><strong><q-badge :color="statusColor(detail.status)">{{ statusLabel(detail.status) }}</q-badge></strong></div>
+            <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
+            <div><span>Document</span><strong>{{ documentLabel(detail.document_type) }}</strong></div>
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
-            <div><span>Sender</span><strong>{{ detail.sender_email || '-' }}</strong></div>
+            <div><span>Sender</span><strong>{{ detail.sender_name || detail.sender_email || '-' }}</strong></div>
+            <div><span>Sender email</span><strong>{{ detail.sender_email || '-' }}</strong></div>
             <div><span>Mailbox</span><strong>{{ detail.mailbox_account || '-' }}</strong></div>
+            <div><span>Received</span><strong>{{ formatDate(detail.received_at) }}</strong></div>
+            <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
           </div>
           <q-separator class="q-my-md" />
-          <div class="text-caption text-grey-7">Subject</div>
-          <div class="q-mb-md">{{ detail.subject || '-' }}</div>
-          <div class="text-caption text-grey-7">Next step</div>
-          <div class="q-mb-md">{{ detail.next_action || '-' }}</div>
-          <div v-if="detail.exception_summary" class="source-intake-exception q-pa-sm q-mb-md">
-            {{ detail.exception_summary }}
+          <div class="source-intake-field-label">Subject</div>
+          <div class="q-mb-md source-intake-wrap">{{ detail.subject || '-' }}</div>
+          <div class="source-intake-section-title">Business Link</div>
+          <div class="source-intake-detail-grid">
+            <div><span>Matched entity</span><strong>{{ detail.matched_entity_type || '-' }}</strong></div>
+            <div><span>Entity reference</span><strong>{{ detail.matched_entity_ref || '-' }}</strong></div>
+            <div><span>Owner role</span><strong>{{ detail.owner_role || '-' }}</strong></div>
+            <div><span>Classification</span><strong>{{ confidenceLabel(detail.classification_confidence) }}</strong></div>
           </div>
-          <div class="text-subtitle2 q-mb-sm">Attachments</div>
+          <div class="source-intake-field-label q-mt-md">Next step</div>
+          <div class="q-mb-md source-intake-wrap">{{ detail.next_action || '-' }}</div>
+          <div v-if="detail.exception_summary" class="source-intake-exception q-pa-sm q-mb-md">
+            <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
+            <div>{{ detail.exception_summary }}</div>
+          </div>
+          <div class="source-intake-section-title">Extracted Fields</div>
+          <div v-if="extractionRows.length" class="source-intake-extractions">
+            <div v-for="item in extractionRows" :key="item.key" class="source-intake-extraction q-pa-sm q-mb-xs">
+              <div class="row items-center q-col-gutter-sm">
+                <div class="col text-weight-medium">{{ item.label }}</div>
+                <div v-if="item.confidence" class="col-auto text-caption text-grey-7">{{ item.confidence }}</div>
+              </div>
+              <div class="source-intake-wrap">{{ item.value }}</div>
+              <div v-if="item.source_location" class="text-caption text-grey-7">Source: {{ item.source_location }}</div>
+              <div v-if="item.flags" class="text-caption text-grey-7">{{ item.flags }}</div>
+            </div>
+          </div>
+          <div v-else class="text-caption text-grey-7 q-mb-md">No extracted fields recorded.</div>
+          <div class="source-intake-section-title">Attachments</div>
           <div v-if="detail.attachments && detail.attachments.length">
             <div v-for="attachment in detail.attachments" :key="attachment.id" class="source-intake-attachment q-pa-sm q-mb-xs">
-              <div>{{ attachment.attachment_name }}</div>
-              <div class="text-caption text-grey-7">{{ attachment.content_type || 'file' }} · {{ attachment.security_status }}</div>
+              <div class="text-weight-medium source-intake-wrap">{{ attachment.attachment_name }}</div>
+              <div class="text-caption text-grey-7">{{ attachment.content_type || 'file' }} · {{ attachment.security_status }} · {{ formatBytes(attachment.storage_size) }}</div>
+              <div v-if="attachment.source_location" class="text-caption text-grey-7">{{ attachment.source_location }}</div>
             </div>
           </div>
           <div v-else class="text-caption text-grey-7">No attachment metadata</div>
-          <div class="text-subtitle2 q-mt-md q-mb-sm">Processing events</div>
+          <div class="source-intake-section-title q-mt-md">Evidence</div>
+          <div class="source-intake-detail-grid">
+            <div><span>Message ID</span><strong>{{ detail.message_id || '-' }}</strong></div>
+            <div><span>Thread ID</span><strong>{{ detail.thread_id || '-' }}</strong></div>
+            <div><span>Storage</span><strong>{{ detail.storage_uri ? 'Stored · ' + formatBytes(detail.storage_size) : 'Not stored' }}</strong></div>
+            <div><span>Content hash</span><strong class="source-intake-hash" :title="detail.content_hash">{{ shortHash(detail.content_hash) }}</strong></div>
+          </div>
+          <div class="source-intake-section-title q-mt-md">Processing Events</div>
           <q-timeline color="primary" layout="dense">
-            <q-timeline-entry v-for="event in (detail.events || [])" :key="event.id" :title="event.event_type" :subtitle="formatDate(event.created_at)">
+            <q-timeline-entry v-for="event in (detail.events || [])" :key="event.id" :title="eventLabel(event.event_type)" :subtitle="formatDate(event.created_at)">
               {{ event.message || event.status }}
             </q-timeline-entry>
           </q-timeline>
@@ -139,15 +198,19 @@ export default {
       operation: '',
       search: '',
       counts: {},
+      total: 0,
       hasMore: false,
       pagination: { rowsPerPage: 0 },
       offset: 0,
       statusOptions: [
+        { label: 'Captured', value: 'CAPTURED' },
+        { label: 'Analyzing', value: 'ANALYZING' },
         { label: 'Review required', value: 'REVIEW_REQUIRED' },
-        { label: 'Approval required', value: 'APPROVAL_REQUIRED' },
         { label: 'Ready for preview', value: 'READY_FOR_PREVIEW' },
-        { label: 'Blocked', value: 'BLOCKED' },
+        { label: 'Approval required', value: 'APPROVAL_REQUIRED' },
+        { label: 'Executing', value: 'EXECUTING' },
         { label: 'Completed', value: 'COMPLETED' },
+        { label: 'Blocked', value: 'BLOCKED' },
         { label: 'Duplicate', value: 'DUPLICATE' },
         { label: 'Failed', value: 'FAILED' }
       ],
@@ -158,24 +221,36 @@ export default {
         { label: 'Unknown', value: 'UNKNOWN' }
       ],
       columns: [
-        { name: 'received_at', label: 'Received', field: 'received_at', align: 'left', style: 'width: 130px' },
-        { name: 'source', label: 'Source', field: 'document_type', align: 'left', style: 'width: 210px' },
-        { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 100px' },
-        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 190px' },
-        { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 150px' },
-        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left' },
+        { name: 'received_at', label: 'Received', field: 'received_at', align: 'left', style: 'width: 11%' },
+        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 14%' },
+        { name: 'sender', label: 'Sender', field: 'sender_email', align: 'left', style: 'width: 17%' },
+        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 13%' },
+        { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
+        { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
+        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 18%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
       ]
     }
   },
   computed: {
     countItems () {
-      return [
-        { key: 'REVIEW_REQUIRED', label: 'Review', color: 'orange-8' },
-        { key: 'APPROVAL_REQUIRED', label: 'Approval', color: 'blue-8' },
-        { key: 'BLOCKED', label: 'Blocked', color: 'negative' },
-        { key: 'COMPLETED', label: 'Completed', color: 'positive' }
+      const statuses = [
+        { key: 'CAPTURED', label: 'Captured' },
+        { key: 'ANALYZING', label: 'Analyzing' },
+        { key: 'REVIEW_REQUIRED', label: 'Review' },
+        { key: 'READY_FOR_PREVIEW', label: 'Ready' },
+        { key: 'APPROVAL_REQUIRED', label: 'Approval' },
+        { key: 'EXECUTING', label: 'Executing' },
+        { key: 'COMPLETED', label: 'Completed' },
+        { key: 'BLOCKED', label: 'Blocked' },
+        { key: 'DUPLICATE', label: 'Duplicate' },
+        { key: 'FAILED', label: 'Failed' }
       ]
+      return [{ key: '__TOTAL__', label: 'Total', color: 'grey-8', value: this.total }].concat(
+        statuses
+          .filter(item => Number(this.counts[item.key] || 0) > 0)
+          .map(item => ({ ...item, color: this.statusColor(item.key), value: this.counts[item.key] }))
+      )
     }
   },
   mounted () {
@@ -198,6 +273,7 @@ export default {
         .then(res => {
           this.rows = res.items || []
           this.counts = res.counts || {}
+          this.total = Number(res.total || 0)
           this.hasMore = Boolean(res.has_more)
         })
         .catch(() => {})
@@ -210,6 +286,7 @@ export default {
         .then(res => {
           this.rows = this.rows.concat(res.items || [])
           this.counts = res.counts || this.counts
+          this.total = Number(res.total || this.total)
           this.hasMore = Boolean(res.has_more)
           this.offset = nextOffset
         })
@@ -224,11 +301,93 @@ export default {
     formatDate (value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
     },
+    statusLabel (value) {
+      return {
+        CAPTURED: 'Captured',
+        ANALYZING: 'Analyzing',
+        REVIEW_REQUIRED: 'Review required',
+        READY_FOR_PREVIEW: 'Ready',
+        APPROVAL_REQUIRED: 'Approval required',
+        EXECUTING: 'Executing',
+        COMPLETED: 'Completed',
+        BLOCKED: 'Blocked',
+        DUPLICATE: 'Duplicate',
+        FAILED: 'Failed'
+      }[value] || value || 'Unknown'
+    },
+    operationLabel (value) {
+      return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', UNKNOWN: 'Unknown' }[value] || value || '-'
+    },
+    documentLabel (value) {
+      return {
+        INBOUND_NOTICE: 'Inbound notice',
+        PACK_LIST: 'Pack list',
+        PICK_TICKET: 'Pick ticket',
+        DELIVERY_REQUEST: 'Delivery request',
+        APPOINTMENT: 'Appointment',
+        QC_SCAN: 'QC / scan sheet',
+        OTHER: 'Other'
+      }[value] || value || 'Other'
+    },
+    sourceTypeLabel (value) {
+      return { EMAIL: 'Email', AI_AGENT: 'AI agent', WEB_FORM: 'Web form', CLI: 'CLI' }[value] || value || 'Source'
+    },
+    confidenceLabel (value) {
+      if (value === null || value === undefined || value === '') return 'Not recorded'
+      const numeric = Number(value)
+      return Number.isNaN(numeric) ? String(value) : `${Math.round(numeric * 100)}%`
+    },
+    extractionRows () {
+      if (!this.detail) return []
+      const items = (this.detail.extractions || []).map((item, index) => ({
+        key: `extraction-${index}-${item.field_name}`,
+        label: this.fieldLabel(item.field_name),
+        value: item.normalized_value || item.raw_value || '-',
+        source_location: item.source_location,
+        confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
+        flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
+      }))
+      if (items.length) return items
+      const metadata = this.detail.metadata || {}
+      const keys = ['container_no', 'eta', 'requested_delivery_date', 'customer', 'customer_address', 'receiving_address', 'warehouse', 'appointment_status', 'external_reference', 'business_operation']
+      return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
+        key: `metadata-${key}`,
+        label: this.fieldLabel(key),
+        value: this.formatValue(metadata[key]),
+        source_location: 'Email metadata',
+        confidence: '',
+        flags: ''
+      }))
+    },
+    fieldLabel (value) {
+      return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || 'Field'
+    },
+    formatValue (value) {
+      return typeof value === 'object' ? JSON.stringify(value) : String(value)
+    },
+    formatBytes (value) {
+      const bytes = Number(value || 0)
+      if (!bytes) return 'Size unavailable'
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    },
+    shortHash (value) {
+      if (!value) return '-'
+      const hash = String(value)
+      return hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash
+    },
+    eventLabel (value) {
+      return this.fieldLabel(value)
+    },
     statusColor (value) {
       return {
+        CAPTURED: 'grey-7',
+        ANALYZING: 'blue-grey-7',
         REVIEW_REQUIRED: 'orange-8',
-        APPROVAL_REQUIRED: 'blue-8',
         READY_FOR_PREVIEW: 'teal-7',
+        APPROVAL_REQUIRED: 'blue-8',
+        EXECUTING: 'indigo-7',
         BLOCKED: 'negative',
         FAILED: 'negative',
         COMPLETED: 'positive',
@@ -241,20 +400,30 @@ export default {
 
 <style scoped>
 .source-intake-page {
-  background: #f4f6f8;
+  background: #f5f5f5;
 }
 
 .source-intake-card {
   width: 100%;
+  box-shadow: 0 2px 12px rgba(25, 49, 74, 0.08);
 }
 
 .source-intake-table {
   margin-top: 12px;
+  table-layout: fixed;
+  width: 100%;
 }
 
 .source-intake-next {
-  min-width: 220px;
-  white-space: normal;
+  max-width: 0;
+  white-space: nowrap;
+}
+
+.source-intake-exception-marker {
+  color: #c76a00;
+  font-size: 11px;
+  margin-top: 3px;
+  white-space: nowrap;
 }
 
 .source-intake-detail {
@@ -281,6 +450,25 @@ export default {
   overflow-wrap: anywhere;
 }
 
+.source-intake-section-title {
+  color: #263238;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.source-intake-field-label {
+  color: #78909c;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.source-intake-wrap {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .source-intake-exception {
   background: #fff3e0;
   color: #8d4a00;
@@ -289,5 +477,14 @@ export default {
 .source-intake-attachment {
   background: #f5f7f9;
   border: 1px solid #e0e6ea;
+}
+
+.source-intake-extraction {
+  background: #f8fafb;
+  border: 1px solid #e0e6ea;
+}
+
+.source-intake-hash {
+  font-family: monospace;
 }
 </style>
