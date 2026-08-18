@@ -4,9 +4,9 @@ from .agent import is_agent_request
 
 
 class AgentPreviewPermission(BasePermission):
-    """Allow only authenticated CLI previews; operation roles are checked by the view."""
+    """Allow authenticated AI/CLI previews; operation roles are checked by the view."""
 
-    message = 'A valid operator identity is required for CLI workflow previews.'
+    message = 'A valid operator identity is required for AI/CLI workflow previews.'
 
     def has_permission(self, request, view):
         identity = getattr(request, 'auth', None)

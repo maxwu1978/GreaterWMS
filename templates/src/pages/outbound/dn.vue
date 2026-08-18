@@ -551,7 +551,28 @@
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="isEdit ? editDataCancel() : newDataCancel()">{{ $t('cancel') }}</q-btn>
-          <q-btn color="primary" @click="isEdit ? editDataSubmit() : newDataSubmit()">{{ $t('submit') }}</q-btn>
+          <q-btn color="primary" @click="isEdit ? editDataSubmit() : newDataSubmit()">{{ isEdit ? $t('submit') : 'Preview' }}</q-btn>
+        </div>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="webPreviewForm" persistent>
+      <q-card class="shadow-24 outbound-web-preview-card">
+        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>Review Outbound Preview</div>
+          <q-space />
+          <q-btn dense flat icon="close" @click="webPreviewCancel" />
+        </q-bar>
+        <q-card-section>
+          <div class="text-caption text-grey-7 q-mb-sm">Source: Web Form</div>
+          <div class="text-body2 q-mb-xs">Operator: {{ webPreviewSource.captured_by || login_name }}</div>
+          <div class="text-body2 q-mb-md">Source ID: {{ webPreviewSource.id || '-' }}</div>
+          <div class="text-subtitle2">Customer: {{ newFormData.customer }}</div>
+          <div class="text-body2">{{ newFormData.goods_code.length }} SKU(s) / {{ newFormData.goods_qty.reduce((sum, qty) => sum + Number(qty || 0), 0) }} unit(s)</div>
+          <div class="text-caption text-grey-7 q-mt-md">Approval writes the outbound order and its detail lines in one transaction.</div>
+        </q-card-section>
+        <div class="outbound-web-preview-actions">
+          <q-btn flat color="grey-7" @click="webPreviewCancel">Cancel</q-btn>
+          <q-btn color="primary" :loading="webPreviewBusy" @click="webPreviewApprove">Approve & Create Outbound</q-btn>
         </div>
       </q-card>
     </q-dialog>
@@ -959,6 +980,10 @@ export default {
         dn_code: '',
         cancellation_note: ''
       },
+      webPreviewForm: false,
+      webPreviewBusy: false,
+      webPreview: null,
+      webPreviewSource: {},
       printObj: {
         id: 'printMe',
         popTitle: this.$t('outbound.dn')
@@ -1179,21 +1204,14 @@ export default {
       var _this = this
       _this.isEdit = false
       _this.goodsDataClear()
+      _this.newFormData = {
+        dn_code: '',
+        customer: '',
+        goods_code: [],
+        goods_qty: [],
+        creater: _this.login_name
+      }
       _this.newForm = true
-      _this.newdn.creater = _this.login_name
-      postauth(_this.pathname + 'list/', _this.newdn)
-        .then(res => {
-          if (!res.detail) {
-            _this.newFormData.dn_code = res.dn_code
-          }
-        })
-        .catch(err => {
-          _this.$q.notify({
-            message: err.detail,
-            icon: 'close',
-            color: 'negative'
-          })
-        })
     },
     newDataSubmit () {
       var _this = this
@@ -1237,18 +1255,29 @@ export default {
         })
       }
       if (!cancelRequest) {
-        postauth(_this.pathname + 'detail/', _this.newFormData)
+        const previewPayload = {
+          header: {
+            customer: _this.newFormData.customer,
+            creater: _this.login_name,
+            picking_mode: 'SKU_QTY'
+          },
+          detail: {
+            customer: _this.newFormData.customer,
+            goods_code: _this.newFormData.goods_code,
+            goods_qty: _this.newFormData.goods_qty,
+            creater: _this.login_name
+          }
+        }
+        postauth('asn/serial/web/preview/', {
+          operation: 'outbound.create',
+          page: 'outbound.dn',
+          payload: previewPayload
+        })
           .then(res => {
-            _this.table_list = []
-            _this.getList()
-            _this.newDataCancel()
-            if (res.detail === 'success') {
-              _this.$q.notify({
-                message: 'Success Create',
-                icon: 'check',
-                color: 'green'
-              })
-            }
+            _this.webPreview = res
+            _this.webPreviewSource = res.source_evidence || {}
+            _this.newForm = false
+            _this.webPreviewForm = true
           })
           .catch(err => {
             _this.$q.notify({
@@ -1258,6 +1287,30 @@ export default {
             })
           })
       }
+    },
+    webPreviewApprove () {
+      if (!this.webPreview || !this.webPreview.preview_id) return
+      this.webPreviewBusy = true
+      postauth('asn/serial/web/preview/' + this.webPreview.preview_id + '/approve/', {})
+        .then(() => {
+          this.table_list = []
+          this.getList()
+          this.webPreviewForm = false
+          this.webPreview = null
+          this.webPreviewSource = {}
+          this.newDataCancel()
+          this.$q.notify({ message: 'Outbound order created', icon: 'check', color: 'green' })
+        })
+        .catch(err => {
+          this.$q.notify({ message: (err && err.detail) || 'Unable to approve outbound preview', icon: 'close', color: 'negative' })
+        })
+        .finally(() => { this.webPreviewBusy = false })
+    },
+    webPreviewCancel () {
+      this.webPreviewForm = false
+      this.webPreview = null
+      this.webPreviewSource = {}
+      this.newDataCancel()
     },
     newDataCancel () {
       var _this = this
@@ -1940,5 +1993,17 @@ export default {
 
 .outbound-pod-card {
   min-width: 500px;
+}
+
+.outbound-web-preview-card {
+  width: min(440px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.outbound-web-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 16px;
 }
 </style>

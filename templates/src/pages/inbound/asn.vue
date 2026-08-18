@@ -626,7 +626,28 @@
         </q-card-section>
         <div style="float: right; padding: 15px 15px 15px 0">
           <q-btn color="white" text-color="black" style="margin-right: 25px" @click="isEdit ? editDataCancel() : newDataCancel()">{{ $t('cancel') }}</q-btn>
-          <q-btn color="primary" @click="isEdit ? editDataSubmit() : newDataSubmit()">{{ $t('submit') }}</q-btn>
+          <q-btn color="primary" @click="isEdit ? editDataSubmit() : newDataSubmit()">{{ isEdit ? $t('submit') : 'Preview' }}</q-btn>
+        </div>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="webPreviewForm" persistent>
+      <q-card class="shadow-24 asn-web-preview-card">
+        <q-bar class="bg-light-blue-10 text-white rounded-borders" style="height: 50px">
+          <div>Review ASN Preview</div>
+          <q-space />
+          <q-btn dense flat icon="close" @click="webPreviewCancel" />
+        </q-bar>
+        <q-card-section>
+          <div class="text-caption text-grey-7 q-mb-sm">Source: Web Form</div>
+          <div class="text-body2 q-mb-xs">Operator: {{ webPreviewSource.captured_by || login_name }}</div>
+          <div class="text-body2 q-mb-md">Source ID: {{ webPreviewSource.id || '-' }}</div>
+          <div class="text-subtitle2">Supplier: {{ newFormData.supplier }}</div>
+          <div class="text-body2">{{ newFormData.goods_code.length }} SKU(s) / {{ newFormData.goods_qty.reduce((sum, qty) => sum + Number(qty || 0), 0) }} unit(s)</div>
+          <div class="text-caption text-grey-7 q-mt-md">Approval writes the ASN and its detail lines in one transaction.</div>
+        </q-card-section>
+        <div class="asn-web-preview-actions">
+          <q-btn flat color="grey-7" @click="webPreviewCancel">Cancel</q-btn>
+          <q-btn color="primary" :loading="webPreviewBusy" @click="webPreviewApprove">Approve & Create ASN</q-btn>
         </div>
       </q-card>
     </q-dialog>
@@ -989,6 +1010,18 @@
   max-width: calc(100vw - 32px);
 }
 
+.asn-web-preview-card {
+  width: min(440px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.asn-web-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
 .asn-time-dialog-section {
   width: 100%;
   box-sizing: border-box;
@@ -1145,7 +1178,11 @@ export default {
       paginationIpt: 1,
       serialPanelOpen: false,
       serialAsnCode: '',
-      serialAsnContext: {}
+      serialAsnContext: {},
+      webPreviewForm: false,
+      webPreviewBusy: false,
+      webPreview: null,
+      webPreviewSource: {}
     }
   },
   methods: {
@@ -1701,21 +1738,14 @@ export default {
       var _this = this
       _this.isEdit = false
       _this.goodsDataClear()
+      _this.newFormData = {
+        asn_code: '',
+        supplier: '',
+        goods_code: [],
+        goods_qty: [],
+        creater: _this.login_name
+      }
       _this.newForm = true
-      _this.newAsn.creater = _this.login_name
-      postauth(_this.pathname + 'list/', _this.newAsn)
-        .then(res => {
-          if (!res.detail) {
-            _this.newFormData.asn_code = res.asn_code
-          }
-        })
-        .catch(err => {
-          _this.$q.notify({
-            message: err.detail,
-            icon: 'close',
-            color: 'negative'
-          })
-        })
     },
     newDataSubmit () {
       var _this = this
@@ -1759,18 +1789,28 @@ export default {
         })
       }
       if (!cancelRequest) {
-        postauth(_this.pathname + 'detail/', _this.newFormData)
+        const previewPayload = {
+          header: {
+            supplier: _this.newFormData.supplier,
+            creater: _this.login_name
+          },
+          detail: {
+            supplier: _this.newFormData.supplier,
+            goods_code: _this.newFormData.goods_code,
+            goods_qty: _this.newFormData.goods_qty,
+            creater: _this.login_name
+          }
+        }
+        postauth('asn/serial/web/preview/', {
+          operation: 'asn.create',
+          page: 'inbound.asn',
+          payload: previewPayload
+        })
           .then(res => {
-            _this.table_list = []
-            _this.getList()
-            _this.newDataCancel()
-            if (res.detail === 'success') {
-              _this.$q.notify({
-                message: 'Success Create',
-                icon: 'check',
-                color: 'green'
-              })
-            }
+            _this.webPreview = res
+            _this.webPreviewSource = res.source_evidence || {}
+            _this.newForm = false
+            _this.webPreviewForm = true
           })
           .catch(err => {
             _this.$q.notify({
@@ -1780,6 +1820,30 @@ export default {
             })
           })
       }
+    },
+    webPreviewApprove () {
+      if (!this.webPreview || !this.webPreview.preview_id) return
+      this.webPreviewBusy = true
+      postauth('asn/serial/web/preview/' + this.webPreview.preview_id + '/approve/', {})
+        .then(() => {
+          this.table_list = []
+          this.getList()
+          this.webPreviewForm = false
+          this.webPreview = null
+          this.webPreviewSource = {}
+          this.newDataCancel()
+          this.$q.notify({ message: 'ASN created', icon: 'check', color: 'green' })
+        })
+        .catch(err => {
+          this.$q.notify({ message: (err && err.detail) || 'Unable to approve ASN preview', icon: 'close', color: 'negative' })
+        })
+        .finally(() => { this.webPreviewBusy = false })
+    },
+    webPreviewCancel () {
+      this.webPreviewForm = false
+      this.webPreview = null
+      this.webPreviewSource = {}
+      this.newDataCancel()
     },
     newDataCancel () {
       var _this = this

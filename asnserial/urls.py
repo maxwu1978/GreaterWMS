@@ -24,4 +24,10 @@ urlpatterns = [
     path('import/preview/', views.SerialImportPreviewView.as_view(), name='asn-serial-import-preview'),
     path('inspections/', views.InspectionBatchListView.as_view(), name='asn-serial-inspection-list'),
     path('agent/preview/', views.AgentCommandPreviewView.as_view(), name='asn-agent-command-preview'),
+    path('agent/preview/<int:pk>/approve/', views.AgentCommandApproveView.as_view(), name='asn-agent-command-approve'),
+    path('sources/capture/', views.SourceCaptureView.as_view(), name='source-evidence-capture'),
+    path('sources/', views.SourceEvidenceListView.as_view(), name='source-evidence-list'),
+    path('sources/audits/', views.OperationAuditListView.as_view(), name='operation-audit-list'),
+    path('web/preview/', views.WebWorkflowPreviewView.as_view(), name='web-workflow-preview'),
+    path('web/preview/<int:pk>/approve/', views.WebWorkflowApproveView.as_view(), name='web-workflow-approve'),
 ]

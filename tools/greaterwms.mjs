@@ -191,11 +191,13 @@ function authHeaders () {
   if (!process.env.GREATERWMS_TOKEN && session.url && normalizeUrl(session.url) !== baseUrl()) {
     throw new Error(`Local session targets ${session.url}; current target is ${baseUrl()}. Run login --env for the selected environment.`)
   }
+  const surface = String(process.env.GREATERWMS_AGENT_SURFACE || 'cli').toLowerCase()
   return {
     token,
     operator: process.env.GREATERWMS_OPERATOR || session.operator || '',
     language: process.env.GREATERWMS_LANGUAGE || 'en-US',
-    'x-agent-client': 'greaterwms-cli'
+    'x-agent-client': surface === 'ai' ? 'greaterwms-ai' : 'greaterwms-cli',
+    'x-agent-surface': surface
   }
 }
 
@@ -432,6 +434,7 @@ async function agentPreview (operation, payload, options = {}) {
       operation,
       resource_id: options.resourceId ? String(options.resourceId) : '',
       asn_code: options.asnCode ? String(options.asnCode) : '',
+      source_evidence_id: options.sourceEvidenceId || options['source-evidence-id'] || '',
       payload
     }
   })
@@ -443,8 +446,15 @@ function agentPayload (data) {
 
 async function runAgentJsonCommand ({ operation, endpoint, method = 'POST', data, options, json, resourceId = '', asnCode = '' }) {
   if (options['dry-run']) {
-    print(await agentPreview(operation, agentPayload(data), { resourceId, asnCode }), json)
+    print(await agentPreview(operation, agentPayload(data), {
+      resourceId,
+      asnCode,
+      sourceEvidenceId: options['source-evidence-id'] || '',
+    }), json)
     return
+  }
+  if (String(process.env.GREATERWMS_AGENT_SURFACE || '').toLowerCase() === 'ai') {
+    throw new Error('AI surface requires the structured approval action: run agent approve --id PREVIEW_ID. CLI confirmation tokens remain available on the default CLI surface.')
   }
   print(await request(endpoint, {
     method,
@@ -713,9 +723,12 @@ function help () {
   process.stdout.write('Receiving: receiving create|staging-assign|qc|resolve|putaway|reconcile|resolve-reconciliation --data JSON --dry-run|--confirm; receiving exceptions\n')
   process.stdout.write('Transport: transport create|assign|transition --data JSON --dry-run|--confirm; transport list\n')
   process.stdout.write('Outbound: outbound create; outbound-detail create; outbound release|order-release|pick|dispatch|pod|cancel-intransit --id ID --data JSON --dry-run|--confirm\n')
+  process.stdout.write('Source evidence: source capture --data JSON; source list [--operation OP]\n')
+  process.stdout.write('AI approval: GREATERWMS_AGENT_SURFACE=ai node tools/greaterwms.mjs agent approve --id PREVIEW_ID --json\n')
+  process.stdout.write('AI surface: set GREATERWMS_AGENT_SURFACE=ai, preview with --source-evidence-id SOURCE_ID, then approve with agent approve --id PREVIEW_ID. No CLI token is exposed on this surface.\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
   process.stdout.write('QC inspection operations: inspection list --asn-code ASN; inspection import --asn-code ASN --file FILE --allow-all --dry-run|--confirm\n')
-  process.stdout.write('Confirm writes with --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY.\n')
+  process.stdout.write('CLI compatibility writes use --confirmation-token TOKEN_FROM_PREVIEW and --idempotency-key KEY. AI writes use structured agent approve and do not use tokens.\n')
   process.stdout.write('Tenant cleanup: tenant cleanup --dry-run, then tenant cleanup --confirm with the preview token.\n')
   process.stdout.write('Inbound CLI test suite: node tools/inbound-cli-test-suite.mjs [--catalog|--live --env test --asn-id ID --asn-code ASN]\n')
   process.stdout.write('Outbound CLI test suite: node tools/outbound-cli-test-suite.mjs [--catalog|--live --env test --dn-id ID --dn-code DN]\n')
@@ -754,6 +767,35 @@ async function main () {
   }
   if (resource === 'auth' && action === 'status') {
     authStatus(json)
+    return
+  }
+
+  if (resource === 'agent' && action === 'approve') {
+    if (!options.id) throw new Error('--id is required for agent approve')
+    if (String(process.env.GREATERWMS_AGENT_SURFACE || '').toLowerCase() !== 'ai') {
+      throw new Error('agent approve is only available on GREATERWMS_AGENT_SURFACE=ai; use the legacy CLI confirmation token flow on the default surface.')
+    }
+    print(await request(`/asn/serial/agent/preview/${encodeURIComponent(String(options.id))}/approve/`, {
+      method: 'POST',
+      json: {}
+    }), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'capture') {
+    const data = parseData(options)
+    print(await request('/asn/serial/sources/capture/', {
+      method: 'POST',
+      json: data
+    }), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'list') {
+    const query = options.operation
+      ? `?operation=${encodeURIComponent(String(options.operation))}`
+      : ''
+    print(await request(`/asn/serial/sources/${query}`), json)
     return
   }
 

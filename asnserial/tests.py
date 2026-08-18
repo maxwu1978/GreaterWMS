@@ -1,3 +1,4 @@
+import hashlib
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -6,14 +7,29 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from openpyxl import Workbook
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
+from asn.views import (
+    AsnArrivalConfirmView,
+    AsnEtaUpdateView,
+    AsnPreLoadViewSet,
+    AsnPreSortViewSet,
+    AsnSortedViewSet,
+    MoveToBinViewSet,
+)
+from dn.models import DnDetailModel, DnListModel
 from asn.serializers import ASNListGetSerializer
 from binset.models import ListModel as Bin
 from driver.models import ListModel as Driver
 from stock.models import StockBinModel, StockListModel
+from staging.models import StagingAssignment
 from staff.models import ListModel as Staff
+from supplier.models import ListModel as Supplier
+from warehouse.models import ListModel as Warehouse
+from goods.models import ListModel as Goods
+from customer.models import ListModel as Customer
+from userprofile.models import Users
 
 from .models import (
     ACCEPT_FOR_PUTAWAY,
@@ -21,9 +37,14 @@ from .models import (
     REPAIR_REWORK,
     REJECT_RETURN,
     AsnSerialRecord,
+    AgentCommandPreview,
+    EntityProvenance,
+    OperationAudit,
     PackListDocument,
     PackListImportBatch,
     PackListLine,
+    SourceEvidence,
+    SourceExtraction,
 )
 from .views import (
     SerialExceptionResolveView,
@@ -36,8 +57,21 @@ from .views import (
     _scan,
     _serial_rows_from_workbook,
     _summary,
+    WebWorkflowApproveView,
+    WebWorkflowPreviewView,
+    AgentCommandApproveView,
 )
-from .agent import agent_roles_for_operation, complete_preview, consume_preview, create_preview, request_payload
+from .agent import (
+    agent_roles_for_operation,
+    approve_web_preview,
+    complete_preview,
+    consume_preview,
+    consume_web_preview,
+    create_source_capture,
+    create_preview,
+    create_web_preview,
+    request_payload,
+)
 from .permissions import AgentPreviewPermission
 
 
@@ -90,6 +124,618 @@ class AgentPreviewPermissionTests(TestCase):
         self.assertIsNone(replay)
         self.assertEqual(command.operation, 'asn.create')
         self.assertEqual(command.created_by, str(operator.id))
+
+
+class SourceProvenanceWorkflowTests(TestCase):
+    def setUp(self):
+        self.operator = Staff.objects.create(
+            staff_name='web-operator',
+            staff_type='Warehouse',
+            openid='tenant',
+        )
+        Users.objects.create(
+            name=self.operator.staff_name,
+            openid='tenant',
+            appid='test-app',
+            t_code='test-tenant',
+            ip='127.0.0.1',
+        )
+
+    def request(self, data=None, surface='web', client='browser'):
+        return SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True),
+            auth=SimpleNamespace(
+                openid='tenant',
+                staff_id=self.operator.id,
+                staff_name=self.operator.staff_name,
+                staff_type=self.operator.staff_type,
+                is_admin=False,
+            ),
+            META={
+                'HTTP_OPERATOR': str(self.operator.id),
+                'HTTP_X_AGENT_CLIENT': client,
+                'HTTP_X_AGENT_SURFACE': surface,
+            },
+            data=data or {},
+            GET={},
+            query_params={},
+            method='POST',
+        )
+
+    def test_web_preview_creates_source_and_requires_approval(self):
+        payload = {
+            'header': {'supplier': 'Delta', 'creater': self.operator.staff_name},
+            'detail': {
+                'supplier': 'Delta',
+                'goods_code': ['702-S'],
+                'goods_qty': [2],
+                'creater': self.operator.staff_name,
+            },
+        }
+        request = self.request()
+        preview = create_web_preview(request, 'asn.create', payload, page='inbound.asn')
+        command = AgentCommandPreview.objects.get(id=preview['preview_id'])
+        self.assertEqual(command.execution_surface, 'WEB')
+        self.assertEqual(command.source_evidence.source_type, SourceEvidence.WEB_FORM)
+        self.assertEqual(command.status, AgentCommandPreview.PENDING)
+
+        request.data = {'web_preview_id': command.id}
+        with self.assertRaises(ValidationError) as error:
+            consume_web_preview(request, 'asn.create', payload['header'], 'header')
+        self.assertEqual(error.exception.detail['code'], 'WEB_APPROVAL_REQUIRED')
+
+        approve_web_preview(request, command.id)
+        request.META['HTTP_WEB_WORKFLOW_STAGE'] = 'header'
+        command, replay = consume_web_preview(request, 'asn.create', payload['header'], 'header')
+        self.assertIsNotNone(command)
+        self.assertIsNone(replay)
+
+        request.META['HTTP_WEB_WORKFLOW_STAGE'] = 'detail'
+        changed = dict(payload['detail'], goods_qty=[3])
+        with self.assertRaises(ValidationError) as error:
+            consume_web_preview(request, 'asn.detail.create', changed, 'detail')
+        self.assertEqual(error.exception.detail['code'], 'WEB_PAYLOAD_CHANGED')
+
+    def test_ai_external_preview_requires_source_evidence(self):
+        request = self.request(
+            data={},
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        with self.assertRaises(ValidationError) as error:
+            create_preview(
+                request,
+                'asn.create',
+                {'supplier': 'Delta', 'creater': self.operator.staff_name},
+            )
+        self.assertEqual(error.exception.detail['code'], 'SOURCE_EVIDENCE_REQUIRED')
+
+    def test_web_preview_rejects_roles_outside_the_outbound_operation_matrix(self):
+        payload = {
+            'header': {'customer': 'Delta', 'creater': self.operator.staff_name},
+            'detail': {
+                'customer': 'Delta',
+                'goods_code': ['702-S'],
+                'goods_qty': [1],
+                'creater': self.operator.staff_name,
+            },
+        }
+        for staff_type in ('QC', 'StockControl', 'Inbound'):
+            self.operator.staff_type = staff_type
+            self.operator.save(update_fields=['staff_type'])
+            request = self.request(
+                data={'operation': 'outbound.create', 'payload': payload},
+            )
+            with self.assertRaises(PermissionDenied):
+                WebWorkflowPreviewView().post(request)
+        self.assertEqual(AgentCommandPreview.objects.count(), 0)
+        self.assertEqual(SourceEvidence.objects.count(), 0)
+
+    def test_web_approval_rechecks_role_after_preview_creation(self):
+        payload = {
+            'header': {'customer': 'Delta', 'creater': self.operator.staff_name},
+            'detail': {
+                'customer': 'Delta',
+                'goods_code': ['702-S'],
+                'goods_qty': [1],
+                'creater': self.operator.staff_name,
+            },
+        }
+        request = self.request(
+            data={'operation': 'outbound.create', 'payload': payload},
+        )
+        preview = WebWorkflowPreviewView().post(request)
+        command = AgentCommandPreview.objects.get(id=preview.data['preview_id'])
+
+        self.operator.staff_type = 'QC'
+        self.operator.save(update_fields=['staff_type'])
+        request.auth.staff_type = 'QC'
+        with self.assertRaises(PermissionDenied):
+            approve_web_preview(request, command.id)
+
+        command.refresh_from_db()
+        self.assertEqual(command.status, AgentCommandPreview.PENDING)
+        self.assertFalse(DnListModel.objects.filter(openid='tenant').exists())
+
+    def test_ai_external_preview_uses_structured_approval_without_token(self):
+        Supplier.objects.create(
+            supplier_name='Delta', supplier_city='Plano', supplier_address='A',
+            supplier_contact='A', supplier_manager='A', creater='tester', openid='tenant',
+        )
+        Warehouse.objects.create(
+            warehouse_name='Peak', warehouse_city='Lewisville', warehouse_address='A',
+            warehouse_contact='A', warehouse_manager='A', creater='tester', openid='tenant',
+        )
+        Goods.objects.create(
+            goods_code='702-S', goods_desc='Cooling system', goods_supplier='Delta',
+            goods_unit='EA', goods_class='Equipment', goods_brand='Delta', goods_color='N/A',
+            goods_shape='Box', goods_specs='Standard', goods_origin='US', creater='tester',
+            bar_code='702-S-BAR', openid='tenant',
+        )
+        request = self.request(surface='ai', client='greaterwms-ai')
+        source = create_source_capture(request, {
+            'source_type': 'EMAIL',
+            'operation': 'asn.create',
+            'metadata': {'message_id': '<ai-test@example.com>'},
+        })
+        payload = {
+            'header': {'supplier': 'Delta', 'creater': self.operator.staff_name},
+            'detail': {
+                'supplier': 'Delta',
+                'goods_code': ['702-S'],
+                'goods_qty': [2],
+                'creater': self.operator.staff_name,
+            },
+        }
+        preview = create_preview(
+            request,
+            'asn.create',
+            payload,
+            source_evidence_id=source.id,
+        )
+        self.assertNotIn('confirmation_token', preview)
+        command = AgentCommandPreview.objects.get(id=preview['preview_id'])
+        self.assertEqual(command.execution_surface, 'AI')
+        self.assertEqual(command.confirmation_token_hash, '')
+        request.data = {}
+        response = AgentCommandApproveView().post(request, command.id)
+        self.assertEqual(response.status_code, 201)
+        command.refresh_from_db()
+        self.assertEqual(command.status, AgentCommandPreview.EXECUTED)
+        self.assertTrue(
+            OperationAudit.objects.filter(
+                preview=command,
+                execution_surface='AI',
+                status=OperationAudit.SUCCEEDED,
+            ).exists()
+        )
+        self.assertTrue(
+            EntityProvenance.objects.filter(
+                source=source,
+                entity_type='ASN',
+                field_name='supplier',
+                entity_ref__startswith='ASN',
+            ).exists()
+        )
+
+    def test_web_asn_preview_approval_writes_parent_and_detail_atomically(self):
+        Supplier.objects.create(
+            supplier_name='Delta', supplier_city='Plano', supplier_address='A',
+            supplier_contact='A', supplier_manager='A', creater='tester', openid='tenant',
+        )
+        Warehouse.objects.create(
+            warehouse_name='Peak', warehouse_city='Lewisville', warehouse_address='A',
+            warehouse_contact='A', warehouse_manager='A', creater='tester', openid='tenant',
+        )
+        Goods.objects.create(
+            goods_code='702-S', goods_desc='Cooling system', goods_supplier='Delta',
+            goods_unit='EA', goods_class='Equipment', goods_brand='Delta', goods_color='N/A',
+            goods_shape='Box', goods_specs='Standard', goods_origin='US', creater='tester',
+            bar_code='702-S-BAR', openid='tenant',
+        )
+        payload = {
+            'header': {'supplier': 'Delta', 'creater': self.operator.staff_name},
+            'detail': {
+                'supplier': 'Delta', 'goods_code': ['702-S'], 'goods_qty': [2],
+                'creater': self.operator.staff_name,
+            },
+        }
+        request = self.request(data={'operation': 'asn.create', 'payload': payload})
+        preview_response = WebWorkflowPreviewView().post(request)
+        request.data = {}
+        result = WebWorkflowApproveView().post(request, preview_response.data['preview_id'])
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(AsnListModel.objects.filter(openid='tenant', supplier='Delta').count(), 1)
+        self.assertEqual(AsnDetailModel.objects.filter(openid='tenant', goods_code='702-S').count(), 1)
+        self.assertEqual(SourceEvidence.objects.filter(openid='tenant', status=SourceEvidence.USED).count(), 1)
+
+    def test_web_outbound_preview_approval_writes_parent_and_detail(self):
+        Customer.objects.create(
+            customer_name='Delta', customer_city='Plano', customer_address='A',
+            customer_contact='A', customer_manager='A', creater='tester', openid='tenant',
+        )
+        Warehouse.objects.create(
+            warehouse_name='Peak', warehouse_city='Lewisville', warehouse_address='A',
+            warehouse_contact='A', warehouse_manager='A', creater='tester', openid='tenant',
+        )
+        Goods.objects.create(
+            goods_code='702-S', goods_desc='Cooling system', goods_supplier='Delta',
+            goods_unit='EA', goods_class='Equipment', goods_brand='Delta', goods_color='N/A',
+            goods_shape='Box', goods_specs='Standard', goods_origin='US', creater='tester',
+            bar_code='702-S-BAR', openid='tenant', goods_price=100,
+        )
+        payload = {
+            'header': {
+                'customer': 'Delta', 'creater': self.operator.staff_name,
+                'picking_mode': 'SKU_QTY',
+            },
+            'detail': {
+                'customer': 'Delta', 'goods_code': ['702-S'], 'goods_qty': [1],
+                'creater': self.operator.staff_name,
+            },
+        }
+        request = self.request(data={'operation': 'outbound.create', 'payload': payload})
+        preview_response = WebWorkflowPreviewView().post(request)
+        request.data = {}
+        result = WebWorkflowApproveView().post(request, preview_response.data['preview_id'])
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(DnListModel.objects.filter(openid='tenant', customer='Delta').count(), 1)
+        self.assertEqual(DnDetailModel.objects.filter(openid='tenant', goods_code='702-S').count(), 1)
+
+    def test_email_to_asn_to_putaway_completes_inbound_without_inventory_drift(self):
+        """Exercise the source-backed AI intake and the physical ASN inbound path."""
+        supplier_name = 'Delta Electronics (USA) Inc.'
+        container_tracking = 'TRHU4217950'
+        email_hash = hashlib.sha256(b'simulated inbound email and attachments').hexdigest()
+        Supplier.objects.create(
+            supplier_name=supplier_name,
+            supplier_city='Plano',
+            supplier_address='601 Data Dr',
+            supplier_contact='Receiving',
+            supplier_manager='Mark Tang',
+            creater='tester',
+            openid='tenant',
+        )
+        Warehouse.objects.create(
+            warehouse_name='Peak Smart Lewisville',
+            warehouse_city='Lewisville',
+            warehouse_address='1991 Lakepointe Dr, Dock #24',
+            warehouse_contact='Receiving',
+            warehouse_manager='Warehouse Manager',
+            creater='tester',
+            openid='tenant',
+        )
+        Goods.objects.create(
+            goods_code='702-S',
+            goods_desc='CALLAN-MSFT 144KW Cooling System',
+            goods_supplier=supplier_name,
+            goods_unit='EA',
+            goods_class='Equipment',
+            goods_brand='Delta',
+            goods_color='N/A',
+            goods_shape='Box',
+            goods_specs='Standard',
+            goods_origin='US',
+            goods_cost=100,
+            goods_price=100,
+            creater='tester',
+            bar_code='702-S-BAR',
+            openid='tenant',
+        )
+        Driver.objects.create(
+            driver_name='Tom',
+            license_plate='SIM-TRUCK-01',
+            contact='N/A',
+            creater='tester',
+            openid='tenant',
+        )
+        Bin.objects.create(
+            bin_name='A1-01',
+            bin_size='STD',
+            bin_property='Normal',
+            location_role='STORAGE',
+            staging_flow='',
+            creater='tester',
+            bar_code='SIM-BIN-A1-01',
+            openid='tenant',
+        )
+
+        ai_request = self.request(surface='ai', client='greaterwms-ai')
+        source_payload = {
+            'source_type': 'EMAIL',
+            'operation': 'asn.create',
+            'mailbox_account': 'sales@texasranchenergy.com',
+            'metadata': {
+                'mailbox_account': 'sales@texasranchenergy.com',
+                'sender': 'Mark Tang',
+                'recipients': ['Peak Smart Logistics'],
+                'cc': ['DEUS Receiving'],
+                'subject': 'Delivery Request TRHU4217950, Delta IRHX Mesh & Fittings',
+                'message_id': '<sim-inbound-001@texasranchenergy.com>',
+                'thread_id': '<sim-thread-001@texasranchenergy.com>',
+                'sent_at': '2026-08-18T12:24:00-05:00',
+                'received_at': '2026-08-18T12:24:00-05:00',
+                'folder': 'Inbox',
+                'document_classification': 'Inbound List / Pack List reference',
+                'attachments': [{
+                    'name': 'inbound-list.pdf',
+                    'mime_type': 'application/pdf',
+                    'size': 18432,
+                    'sha256': hashlib.sha256(b'inbound-list.pdf').hexdigest(),
+                    'source_location': 'attachment, page 1',
+                }],
+                'conflicts': {
+                    'delivery_address': [
+                        'Delta Electronics, 601 Data Dr, Plano, TX',
+                        'Peak Smart Logistics, 1991 Lakepointe Dr, Dock #24, Lewisville, TX',
+                    ],
+                },
+            },
+            'content_hash': email_hash,
+            'storage_uri': 'test://encrypted-object-store/inbound-email-001.eml',
+            'storage_size': 18432,
+            'ai_session_id': 'sim-ai-session-inbound-001',
+            'extracted_fields': [
+                {
+                    'field_name': 'container_tracking',
+                    'raw_value': 'TRHU4217950',
+                    'normalized_value': container_tracking,
+                    'source_location': 'email body, Delivery Request subject',
+                    'confidence': '0.9900',
+                    'human_confirmed': True,
+                    'used_for_write': True,
+                },
+                {
+                    'field_name': 'supplier',
+                    'raw_value': 'Delta Electronics (USA) Inc.',
+                    'normalized_value': supplier_name,
+                    'source_location': 'attachment, page 1, Client',
+                    'confidence': '0.9900',
+                    'human_confirmed': True,
+                    'used_for_write': True,
+                },
+                {
+                    'field_name': 'expected_arrival_at',
+                    'raw_value': '2026-08-16',
+                    'normalized_value': '2026-08-16T00:00:00-05:00',
+                    'source_location': 'attachment, page 1, ETA',
+                    'confidence': '0.9800',
+                    'human_confirmed': True,
+                    'used_for_write': True,
+                },
+                {
+                    'field_name': 'goods_code',
+                    'raw_value': 'CL SAC144AD702-S',
+                    'normalized_value': '702-S',
+                    'source_location': 'attachment, page 1, SKU',
+                    'confidence': '0.9700',
+                    'human_confirmed': True,
+                    'used_for_write': True,
+                },
+                {
+                    'field_name': 'goods_qty',
+                    'raw_value': '2',
+                    'normalized_value': '2',
+                    'source_location': 'attachment, page 1, Item Qty',
+                    'confidence': '0.9900',
+                    'human_confirmed': True,
+                    'used_for_write': True,
+                },
+            ],
+        }
+        source = create_source_capture(ai_request, source_payload)
+        duplicate_source = create_source_capture(ai_request, source_payload)
+        self.assertEqual(duplicate_source.id, source.id)
+        self.assertEqual(SourceEvidence.objects.filter(openid='tenant').count(), 1)
+        self.assertEqual(SourceExtraction.objects.filter(source=source).count(), 5)
+
+        payload = {
+            'header': {
+                'supplier': supplier_name,
+                'container_tracking': container_tracking,
+                'creater': self.operator.staff_name,
+            },
+            'detail': {
+                'supplier': supplier_name,
+                'goods_code': ['702-S'],
+                'goods_qty': [2],
+                'creater': self.operator.staff_name,
+            },
+        }
+        preview = create_preview(
+            ai_request,
+            'asn.create',
+            payload,
+            source_evidence_id=source.id,
+        )
+        self.assertNotIn('confirmation_token', preview)
+        result = AgentCommandApproveView().post(ai_request, preview['preview_id'])
+        self.assertEqual(result.status_code, 201)
+        asn = AsnListModel.objects.get(openid='tenant', container_tracking=container_tracking)
+        asn_detail = AsnDetailModel.objects.get(openid='tenant', asn_code=asn.asn_code, goods_code='702-S')
+        stock = StockListModel.objects.get(openid='tenant', goods_code='702-S')
+        self.assertEqual(asn.asn_status, 1)
+        self.assertEqual(asn_detail.goods_qty, 2)
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.asn_stock, 2)
+
+        def cli_request(data):
+            return self.request(data=data, surface='cli', client='greaterwms-cli')
+
+        def cli_preview(operation, data, resource_id):
+            request = cli_request(data)
+            return request, create_preview(
+                request,
+                operation,
+                data,
+                resource_id=str(resource_id),
+                asn_code=asn.asn_code,
+            )
+
+        eta_data = {
+            'expected_arrival_at': '2026-08-16T00:00:00',
+            'source': 'CUSTOMER_EMAIL',
+            'note': 'ETA extracted from inbound list attachment',
+        }
+        eta_request, eta_preview = cli_preview('asn.eta', eta_data, asn.id)
+        eta_request.data = dict(
+            eta_data,
+            confirmation_token=eta_preview['confirmation_token'],
+            idempotency_key='sim-inbound-eta-001',
+        )
+        eta_response = AsnEtaUpdateView().post(eta_request, asn.id)
+        self.assertEqual(eta_response.status_code, 200)
+
+        arrival_data = {
+            'actual_arrival_at': '2026-08-18T13:30:00',
+            'source': 'WAREHOUSE',
+            'note': 'Truck arrived; unload authorized',
+        }
+        arrival_request, arrival_preview = cli_preview('asn.arrival', arrival_data, asn.id)
+        arrival_request.data = dict(
+            arrival_data,
+            confirmation_token=arrival_preview['confirmation_token'],
+            idempotency_key='sim-inbound-arrival-001',
+        )
+        arrival_response = AsnArrivalConfirmView().post(arrival_request, asn.id)
+        self.assertEqual(arrival_response.status_code, 200)
+
+        unload_data = {
+            'unload_driver': 'Tom',
+            'staging_bins': ['STAGE-LEFT-01', 'STAGE-LEFT-02'],
+        }
+        unload_request, unload_preview = cli_preview('asn.unload_start', unload_data, asn.id)
+        unload_request.data = dict(
+            unload_data,
+            confirmation_token=unload_preview['confirmation_token'],
+            idempotency_key='sim-inbound-unload-001',
+        )
+        unload_view = AsnPreLoadViewSet()
+        unload_view.request = unload_request
+        unload_view.action = 'create'
+        unload_view.format_kwarg = None
+        unload_response = unload_view.create(unload_request, asn.id)
+        self.assertEqual(unload_response.status_code, 200)
+        asn.refresh_from_db()
+        self.assertEqual(asn.asn_status, 2)
+        self.assertEqual(
+            StagingAssignment.objects.filter(
+                openid='tenant', reference_code=asn.asn_code,
+                flow=StagingAssignment.INBOUND,
+                status=StagingAssignment.RESERVED,
+            ).count(),
+            2,
+        )
+
+        finish_request, finish_preview = cli_preview('asn.unload_finish', {}, asn.id)
+        finish_request.data = {
+            'confirmation_token': finish_preview['confirmation_token'],
+            'idempotency_key': 'sim-inbound-unload-finish-001',
+        }
+        finish_view = AsnPreSortViewSet()
+        finish_view.request = finish_request
+        finish_view.action = 'create'
+        finish_view.format_kwarg = None
+        finish_view.get_object = lambda: AsnListModel.objects.get(id=asn.id)
+        finish_response = finish_view.create(finish_request, asn.id)
+        self.assertEqual(finish_response.status_code, 200)
+        asn.refresh_from_db()
+        self.assertEqual(asn.asn_status, 3)
+        self.assertEqual(
+            StagingAssignment.objects.filter(
+                openid='tenant', reference_code=asn.asn_code,
+                flow=StagingAssignment.INBOUND,
+                status=StagingAssignment.ACTIVE,
+            ).count(),
+            2,
+        )
+
+        receive_data = {
+            'asn_code': asn.asn_code,
+            'supplier': supplier_name,
+            'goodsData': [{'goods_code': '702-S', 'goods_actual_qty': 2}],
+        }
+        receive_request, receive_preview = cli_preview('asn.receive', receive_data, asn.id)
+        receive_request.data = dict(
+            receive_data,
+            confirmation_token=receive_preview['confirmation_token'],
+            idempotency_key='sim-inbound-receive-001',
+        )
+        receive_view = AsnSortedViewSet()
+        receive_view.request = receive_request
+        receive_view.action = 'create'
+        receive_view.format_kwarg = None
+        receive_view.get_object = lambda: AsnListModel.objects.get(id=asn.id)
+        receive_response = receive_view.create(receive_request, asn.id)
+        self.assertEqual(receive_response.status_code, 200)
+        asn.refresh_from_db()
+        asn_detail.refresh_from_db()
+        stock.refresh_from_db()
+        self.assertEqual(asn.asn_status, 4)
+        self.assertEqual(asn_detail.goods_actual_qty, 2)
+        self.assertEqual(asn_detail.sorted_qty, 0)
+        self.assertEqual(stock.pre_sort_stock, 0)
+        self.assertEqual(stock.sorted_stock, 2)
+        self.assertEqual(stock.goods_qty, 2)
+
+        putaway_data = {
+            'asn_code': asn.asn_code,
+            'goods_code': '702-S',
+            'qty': 2,
+            'bin_name': 'A1-01',
+            'putaway_driver': 'Tom',
+        }
+        putaway_request, putaway_preview = cli_preview('asn.putaway', putaway_data, asn_detail.id)
+        putaway_request.data = dict(
+            putaway_data,
+            confirmation_token=putaway_preview['confirmation_token'],
+            idempotency_key='sim-inbound-putaway-001',
+        )
+        putaway_view = MoveToBinViewSet()
+        putaway_view.request = putaway_request
+        putaway_view.action = 'create'
+        putaway_view.format_kwarg = None
+        putaway_view.get_object = lambda: AsnDetailModel.objects.get(id=asn_detail.id)
+        putaway_response = putaway_view.create(putaway_request, asn_detail.id)
+        self.assertEqual(putaway_response.status_code, 200)
+
+        asn.refresh_from_db()
+        asn_detail.refresh_from_db()
+        stock.refresh_from_db()
+        source.refresh_from_db()
+        self.assertEqual(asn.asn_status, 5)
+        self.assertEqual(asn_detail.asn_status, 5)
+        self.assertEqual(asn_detail.sorted_qty, 2)
+        self.assertEqual(asn.putaway_driver, 'Tom')
+        self.assertEqual(stock.goods_qty, 2)
+        self.assertEqual(stock.onhand_stock, 2)
+        self.assertEqual(stock.can_order_stock, 2)
+        self.assertEqual(stock.asn_stock, 0)
+        self.assertEqual(
+            StagingAssignment.objects.filter(
+                openid='tenant', reference_code=asn.asn_code,
+                flow=StagingAssignment.INBOUND,
+                status=StagingAssignment.RELEASED,
+            ).count(),
+            2,
+        )
+        self.assertEqual(source.status, SourceEvidence.USED)
+        self.assertTrue(
+            EntityProvenance.objects.filter(
+                source=source,
+                entity_type='ASN',
+                entity_ref=asn.asn_code,
+                field_name='container_tracking',
+            ).exists()
+        )
+        self.assertTrue(
+            OperationAudit.objects.filter(
+                source_evidence=source,
+                operation='asn.create',
+                status=OperationAudit.SUCCEEDED,
+                execution_surface='AI',
+            ).exists()
+        )
 
 
 class PackListWorkflowTests(TestCase):

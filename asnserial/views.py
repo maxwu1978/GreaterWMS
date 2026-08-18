@@ -32,18 +32,29 @@ from .models import (
     PackListDocument,
     PackListImportBatch,
     PackListLine,
+    AgentCommandPreview,
+    EntityProvenance,
+    OperationAudit,
+    SourceEvidence,
     PUTAWAY_APPROVED_RESOLUTIONS,
     resolution_allows_putaway,
 )
 from .agent import (
+    AI_AGENT_CLIENT,
     SUPPORTED_OPERATIONS,
     complete_preview,
     consume_preview,
     create_preview,
     is_agent_request,
+    is_web_request,
     request_payload,
     require_agent_role,
     agent_roles_for_operation,
+    approve_ai_preview,
+    approve_web_preview,
+    create_source_capture,
+    create_web_preview,
+    consume_web_preview,
 )
 from .permissions import AgentPreviewPermission
 
@@ -129,6 +140,7 @@ class AgentCommandPreviewView(APIView):
             reject('payload must be a JSON object')
         resource_id = _text(request.data.get('resource_id'))
         asn_code = _clean(request.data.get('asn_code'))
+        source_evidence_id = _text(request.data.get('source_evidence_id'))
         if operation in {'asn.eta', 'asn.arrival', 'asn.reserve_staging', 'asn.unload_start', 'asn.unload_finish', 'asn.receive'} and not resource_id:
             reject('resource_id is required for %s' % operation)
         if operation in {'asn.putaway', 'packlist.confirm', 'serial.resolve', 'serial.exception_move'} and not resource_id:
@@ -296,7 +308,227 @@ class AgentCommandPreviewView(APIView):
             payload,
             resource_id=resource_id,
             asn_code=asn_code,
+            source_evidence_id=source_evidence_id,
         ))
+
+
+class SourceCaptureView(APIView):
+    """Capture source metadata before an AI agent creates an external instruction."""
+
+    def post(self, request):
+        source = create_source_capture(request, request.data)
+        return Response({
+            'detail': 'Source evidence captured',
+            'source_evidence': {
+                'id': source.id,
+                'source_type': source.source_type,
+                'operation': source.operation,
+                'mailbox_account': source.mailbox_account,
+                'message_id': source.message_id,
+                'thread_id': source.thread_id,
+                'captured_at': source.captured_at.isoformat(),
+                'content_hash': source.content_hash,
+            },
+        }, status=201)
+
+
+class SourceEvidenceListView(APIView):
+    """Read source evidence and extraction summaries within the current tenant."""
+
+    def get(self, request):
+        queryset = SourceEvidence.objects.filter(openid=request.auth.openid)
+        operation = _clean(request.query_params.get('operation')).lower()
+        if operation:
+            queryset = queryset.filter(operation=operation)
+        results = []
+        for source in queryset.prefetch_related('extractions', 'provenance')[:200]:
+            results.append({
+                'id': source.id,
+                'source_type': source.source_type,
+                'operation': source.operation,
+                'status': source.status,
+                'captured_by': source.captured_by_name or source.captured_by,
+                'mailbox_account': source.mailbox_account,
+                'message_id': source.message_id,
+                'thread_id': source.thread_id,
+                'captured_at': source.captured_at,
+                'content_hash': source.content_hash,
+                'metadata': source.metadata,
+                'extractions': [
+                    {
+                        'field_name': item.field_name,
+                        'normalized_value': item.normalized_value,
+                        'source_location': item.source_location,
+                        'confidence': item.confidence,
+                        'human_confirmed': item.human_confirmed,
+                        'used_for_write': item.used_for_write,
+                    }
+                    for item in source.extractions.all()
+                ],
+                'provenance': [
+                    {
+                        'entity_type': item.entity_type,
+                        'entity_ref': item.entity_ref,
+                        'field_name': item.field_name,
+                        'normalized_value': item.normalized_value,
+                        'used_for_write': item.used_for_write,
+                    }
+                    for item in source.provenance.all()
+                ],
+            })
+        return Response({'count': queryset.count(), 'results': results})
+
+
+class OperationAuditListView(APIView):
+    """Expose safe audit summaries without tokens, passwords or raw payloads."""
+
+    def get(self, request):
+        queryset = OperationAudit.objects.filter(openid=request.auth.openid).select_related('source_evidence')
+        operation = _clean(request.query_params.get('operation')).lower()
+        status = _clean(request.query_params.get('status'))
+        if operation:
+            queryset = queryset.filter(operation=operation)
+        if status:
+            queryset = queryset.filter(status=status)
+        return Response({
+            'count': queryset.count(),
+            'results': [
+                {
+                    'id': audit.id,
+                    'operation': audit.operation,
+                    'execution_surface': audit.execution_surface,
+                    'status': audit.status,
+                    'operator_name': audit.operator_name,
+                    'operator_role': audit.operator_role,
+                    'payload_hash': audit.payload_hash,
+                    'source_evidence_id': audit.source_evidence_id,
+                    'created_at': audit.created_at,
+                    'approved_at': audit.approved_at,
+                    'failure_reason': audit.failure_reason,
+                    'result': audit.result,
+                }
+                for audit in queryset[:200]
+            ],
+        })
+
+
+class WebWorkflowPreviewView(APIView):
+    """Create a no-token Web preview and its automatic WEB_FORM source record."""
+
+    def post(self, request):
+        operation = _clean(request.data.get('operation')).lower()
+        payload = request.data.get('payload')
+        if not isinstance(payload, dict):
+            raise ValidationError({'payload': 'A JSON object is required'})
+        if not isinstance(payload.get('header'), dict) or not isinstance(payload.get('detail'), dict):
+            raise ValidationError({'payload': 'Web preview payload must contain header and detail objects'})
+        return Response(create_web_preview(
+            request,
+            operation,
+            payload,
+            page=request.data.get('page') or operation,
+        ))
+
+
+class _WorkflowRequest:
+    """Small request adapter used to keep Web approval atomic across two legacy writes."""
+
+    def __init__(self, parent, data, stage, surface='WEB'):
+        self.data = data
+        self.auth = parent.auth
+        self.user = parent.user
+        self.GET = getattr(parent, 'GET', {})
+        self.query_params = getattr(parent, 'query_params', self.GET)
+        self.META = dict(parent.META)
+        self.META['HTTP_%s_WORKFLOW_STAGE' % surface] = stage
+        self.method = 'POST'
+
+
+def _call_workflow_create(view_class, parent_request, data, stage, surface='WEB'):
+    view = view_class()
+    view.action = 'create'
+    view.format_kwarg = None
+    child_request = _WorkflowRequest(parent_request, data, stage, surface=surface)
+    view.request = child_request
+    return view.create(child_request)
+
+
+@transaction.atomic
+def _execute_external_workflow(request, pk, surface):
+    """Approve and execute an ASN/Outbound preview for one locked entry surface."""
+    command = approve_ai_preview(request, pk) if surface == 'AI' else approve_web_preview(request, pk)
+    if command.status == AgentCommandPreview.EXECUTED:
+        return command.result, 200
+
+    payload = command.preview_payload
+    header = dict(payload.get('header') or {})
+    detail = dict(payload.get('detail') or {})
+    control_field = 'agent_preview_id' if surface == 'AI' else 'web_preview_id'
+    header[control_field] = command.id
+    detail[control_field] = command.id
+    header['web_preview_stage'] = 'header'
+    detail['web_preview_stage'] = 'detail'
+
+    if command.operation == 'asn.create':
+        from asn.views import AsnDetailViewSet, AsnListViewSet
+        parent_response = _call_workflow_create(AsnListViewSet, request, header, 'header', surface=surface)
+        asn_code = parent_response.data.get('asn_code')
+        detail['asn_code'] = asn_code
+        detail['supplier'] = detail.get('supplier') or header.get('supplier')
+        detail_response = _call_workflow_create(AsnDetailViewSet, request, detail, 'detail', surface=surface)
+        result = {
+            'detail': 'ASN created',
+            'execution_surface': surface.lower(),
+            'preview_id': command.id,
+            'source_evidence_id': command.source_evidence_id,
+            'asn': parent_response.data,
+            'asn_detail': detail_response.data,
+        }
+    elif command.operation == 'outbound.create':
+        from dn.views import DnDetailViewSet, DnListViewSet
+        parent_response = _call_workflow_create(DnListViewSet, request, header, 'header', surface=surface)
+        dn_code = parent_response.data.get('dn_code')
+        detail['dn_code'] = dn_code
+        detail['customer'] = detail.get('customer') or header.get('customer')
+        detail_response = _call_workflow_create(DnDetailViewSet, request, detail, 'detail', surface=surface)
+        result = {
+            'detail': 'Outbound order created',
+            'execution_surface': surface.lower(),
+            'preview_id': command.id,
+            'source_evidence_id': command.source_evidence_id,
+            'outbound': parent_response.data,
+            'outbound_detail': detail_response.data,
+        }
+    else:
+        raise ValidationError({'detail': 'Unsupported %s workflow operation' % surface.lower()})
+
+    command.refresh_from_db()
+    if command.status != AgentCommandPreview.EXECUTED:
+        complete_preview(command, result)
+    return result, 201
+
+
+class AgentCommandApproveView(APIView):
+    """Structured AI approval: no CLI token is exposed or accepted."""
+
+    permission_classes = [AgentPreviewPermission]
+
+    def post(self, request, pk):
+        if request.META.get('HTTP_X_AGENT_CLIENT', '').strip().lower() != AI_AGENT_CLIENT:
+            raise ValidationError({'detail': 'AI approval requires the AI execution surface', 'code': 'AI_SURFACE_REQUIRED'})
+        result, status = _execute_external_workflow(request, pk, 'AI')
+        return Response(result, status=status)
+
+
+class WebWorkflowApproveView(APIView):
+    """Web button approval: execute the same workflow without a token."""
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not is_web_request(request):
+            raise ValidationError({'detail': 'Web approval cannot be called from the AI or CLI surface', 'code': 'WEB_SURFACE_REQUIRED'})
+        result, status = _execute_external_workflow(request, pk, 'WEB')
+        return Response(result, status=status)
 
 
 def _operator_name(request, openid):

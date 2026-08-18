@@ -158,7 +158,9 @@ dock. Use `Unknown` only when extraction failed or the source is ambiguous.
 2. Run the exact command with `--dry-run --json`.
 3. Check `ok`, entity, state before/after, validation messages, confirmation
    token, evidence ID, and tenant scope.
-4. Get confirmation of the reviewed dry-run before changing WMS state.
+4. Get confirmation of the reviewed dry-run before changing WMS state. In AI
+   mode, confirmation must be the structured approval action in the AI
+   conversation; do not treat a free-text "confirm" as authorization.
 5. Execute only with the server-issued confirmation token and stable idempotency
    key when supported.
 6. Re-read the record, events, dashboard queue, staging assignment, and
@@ -167,6 +169,28 @@ dock. Use `Unknown` only when extraction failed or the source is ambiguous.
    process exit code alone.
 
 ## Safe CLI Routing
+
+### AI source-backed intake
+
+Before an AI-originated ASN or outbound write, capture the source metadata and
+extracted fields first. The endpoint returns a source evidence ID; keep it
+server-side and bind it to the AI preview. Do not put passwords, bearer tokens,
+or confirmation tokens in the evidence payload.
+
+```bash
+node tools/greaterwms.mjs source capture --data-file source-evidence.json --json
+GREATERWMS_AGENT_SURFACE=ai node tools/greaterwms.mjs asn create \
+  --data-file asn.json --source-evidence-id SOURCE_ID --dry-run --json
+```
+
+The AI preview response includes the source summary and payload hash. The AI
+approval action calls the structured AI approval endpoint with the AI surface;
+the server keeps the preview state and executes the write without returning a
+CLI confirmation token. The browser Web flow does not use this token flow:
+its Preview button creates a `WEB_FORM` source record automatically, and its
+Approve button executes the write in the same Web workflow. The legacy CLI
+token flow remains available on the default CLI surface during the
+compatibility period.
 
 Examples below are preview-only planning commands, not permission to skip the
 confirmation gate:
@@ -206,4 +230,3 @@ The task is complete only after the source inventory is classified, facts are
 tied to evidence, WMS matches and exceptions are explicit, one next action and
 responsible role are identified, and any proposed write has a reviewed dry-run.
 After execution, verify WMS state and the dashboard next step.
-

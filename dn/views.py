@@ -39,7 +39,7 @@ from staging.services import StagingError, occupy_staging_slot, release_staging_
 from asnserial.models import AsnSerialRecord
 from receiving.models import ReceivingRecord, ReceivingSerial
 from transport.models import TransportOrder
-from asnserial.agent import complete_preview, consume_preview, is_agent_request, request_payload
+from asnserial.agent import complete_preview, consume_preview, consume_web_preview, is_agent_request, request_payload
 
 
 def _validate_outbound_detail_payload(data):
@@ -68,12 +68,13 @@ def _validate_outbound_detail_payload(data):
 
 
 def _agent_preview(request, operation, resource_id='', asn_code=''):
-    if not is_agent_request(request):
+    if operation not in {'outbound.create', 'outbound.detail.create'} and not is_agent_request(request):
         return None, None
-    return consume_preview(
+    return consume_web_preview(
         request,
         operation,
         request_payload(request),
+        'header' if operation == 'outbound.create' else 'detail',
         resource_id=str(resource_id or ''),
         asn_code=str(asn_code or ''),
     )

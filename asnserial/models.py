@@ -2,6 +2,121 @@ from django.db import models
 from django.db.models import Q
 
 
+class SourceEvidence(models.Model):
+    """Immutable-ish provenance record for an external warehouse instruction."""
+
+    WEB_FORM = 'WEB_FORM'
+    EMAIL = 'EMAIL'
+    AI_AGENT = 'AI_AGENT'
+    CLI = 'CLI'
+    SOURCE_TYPES = (
+        (WEB_FORM, 'Web form'),
+        (EMAIL, 'Email'),
+        (AI_AGENT, 'AI agent'),
+        (CLI, 'CLI'),
+    )
+
+    CAPTURED = 'CAPTURED'
+    USED = 'USED'
+    EXPIRED = 'EXPIRED'
+    STATUS_CHOICES = (
+        (CAPTURED, 'Captured'),
+        (USED, 'Used'),
+        (EXPIRED, 'Expired'),
+    )
+
+    openid = models.CharField(max_length=255)
+    mailbox_account = models.CharField(max_length=255, blank=True, default='')
+    message_id = models.CharField(max_length=512, blank=True, default='')
+    thread_id = models.CharField(max_length=512, blank=True, default='')
+    source_type = models.CharField(max_length=32, choices=SOURCE_TYPES)
+    operation = models.CharField(max_length=64)
+    content_hash = models.CharField(max_length=64, blank=True, default='')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=CAPTURED)
+    captured_by = models.CharField(max_length=255, blank=True, default='')
+    captured_by_name = models.CharField(max_length=255, blank=True, default='')
+    ai_session_id = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict)
+    storage_uri = models.CharField(max_length=1000, blank=True, default='')
+    storage_size = models.PositiveBigIntegerField(default=0)
+    captured_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'sourceevidence'
+        ordering = ['-captured_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'operation', 'captured_at']),
+            models.Index(fields=['openid', 'content_hash']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['openid', 'source_type', 'mailbox_account', 'message_id', 'content_hash'],
+                condition=Q(
+                    source_type='EMAIL',
+                    mailbox_account__gt='',
+                    message_id__gt='',
+                    content_hash__gt='',
+                ),
+                name='sourceevidence_email_message_hash_unique',
+            ),
+        ]
+
+
+class SourceExtraction(models.Model):
+    """A normalized field extracted from a source without storing credentials."""
+
+    source = models.ForeignKey(SourceEvidence, related_name='extractions', on_delete=models.CASCADE)
+    field_name = models.CharField(max_length=128)
+    raw_value = models.TextField(blank=True, default='')
+    normalized_value = models.TextField(blank=True, default='')
+    source_location = models.CharField(max_length=255, blank=True, default='')
+    confidence = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
+    human_confirmed = models.BooleanField(default=False)
+    used_for_write = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sourceextraction'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['source', 'field_name']),
+        ]
+
+
+class EntityProvenance(models.Model):
+    """Field-level link from a WMS entity back to captured source evidence."""
+
+    source = models.ForeignKey(
+        SourceEvidence,
+        related_name='provenance',
+        on_delete=models.PROTECT,
+    )
+    source_extraction = models.ForeignKey(
+        SourceExtraction,
+        blank=True,
+        null=True,
+        related_name='provenance',
+        on_delete=models.SET_NULL,
+    )
+    openid = models.CharField(max_length=255)
+    entity_type = models.CharField(max_length=64)
+    entity_ref = models.CharField(max_length=255)
+    field_name = models.CharField(max_length=128)
+    raw_value = models.TextField(blank=True, default='')
+    normalized_value = models.TextField(blank=True, default='')
+    used_for_write = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'entityprovenance'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['openid', 'entity_type', 'entity_ref']),
+            models.Index(fields=['source', 'field_name']),
+        ]
+
+
 class PackListImportBatch(models.Model):
     PACK_LIST = 'PACK_LIST'
     EXPECTED_SERIALS = 'EXPECTED_SERIALS'
@@ -139,6 +254,7 @@ class AgentCommandPreview(models.Model):
     """One-time server-side preview used by the GreaterWMS CLI."""
 
     PENDING = 'PENDING'
+    APPROVED = 'APPROVED'
     EXECUTED = 'EXECUTED'
 
     openid = models.CharField(max_length=255)
@@ -146,11 +262,19 @@ class AgentCommandPreview(models.Model):
     resource_id = models.CharField(max_length=255, blank=True, default='')
     asn_code = models.CharField(max_length=255, blank=True, default='')
     payload_hash = models.CharField(max_length=64)
-    confirmation_token_hash = models.CharField(max_length=64)
+    confirmation_token_hash = models.CharField(max_length=64, blank=True, default='')
     idempotency_key = models.CharField(max_length=255, blank=True, default='')
     preview_payload = models.JSONField(default=dict)
     result = models.JSONField(blank=True, null=True)
     status = models.CharField(max_length=16, default=PENDING)
+    execution_surface = models.CharField(max_length=16, default='CLI')
+    source_evidence = models.ForeignKey(
+        SourceEvidence,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='previews',
+    )
     created_by = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
@@ -163,6 +287,52 @@ class AgentCommandPreview(models.Model):
             models.Index(fields=['openid', 'operation', 'created_at']),
             models.Index(fields=['openid', 'confirmation_token_hash']),
             models.Index(fields=['openid', 'idempotency_key']),
+        ]
+
+
+class OperationAudit(models.Model):
+    """Append-only audit summary for AI, web and legacy CLI operations."""
+
+    PREVIEWED = 'PREVIEWED'
+    APPROVED = 'APPROVED'
+    SUCCEEDED = 'SUCCEEDED'
+    FAILED = 'FAILED'
+    REJECTED = 'REJECTED'
+
+    preview = models.ForeignKey(
+        AgentCommandPreview,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='operation_audits',
+    )
+    source_evidence = models.ForeignKey(
+        SourceEvidence,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='operation_audits',
+    )
+    openid = models.CharField(max_length=255)
+    operation = models.CharField(max_length=64)
+    execution_surface = models.CharField(max_length=16)
+    status = models.CharField(max_length=16)
+    operator_id = models.CharField(max_length=255, blank=True, default='')
+    operator_name = models.CharField(max_length=255, blank=True, default='')
+    operator_role = models.CharField(max_length=64, blank=True, default='')
+    ai_session_id = models.CharField(max_length=255, blank=True, default='')
+    payload_hash = models.CharField(max_length=64, blank=True, default='')
+    result = models.JSONField(default=dict)
+    failure_reason = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    approved_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'operationaudit'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'operation', 'created_at']),
+            models.Index(fields=['openid', 'execution_surface', 'status']),
         ]
 
 

@@ -26,6 +26,7 @@ from cyclecount.models import CyclecountModeDayModel as cyclecount
 from django.db.models import Q
 from django.db.models import Sum
 from django.db import transaction
+from django.conf import settings
 from .serializers import FileListRenderSerializer, FileDetailRenderSerializer
 from django.http import StreamingHttpResponse
 from django.utils import timezone
@@ -43,7 +44,7 @@ from asnserial.models import (
     PUTAWAY_APPROVED_RESOLUTIONS,
     REJECT_RETURN,
 )
-from asnserial.agent import complete_preview, consume_preview, request_payload
+from asnserial.agent import complete_preview, consume_preview, consume_web_preview, request_payload
 from staging.models import StagingAssignment
 from staging.services import (
     StagingError,
@@ -74,8 +75,13 @@ def _request_datetime(value, label):
         parsed = drf_serializers.DateTimeField().to_internal_value(value)
     except Exception as exc:
         raise APIException({'detail': '%s is invalid: %s' % (label, exc)})
-    if timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    if settings.USE_TZ:
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    elif timezone.is_aware(parsed):
+        # This project currently stores naive datetimes. DRF may still return
+        # an aware value for an ISO-8601 input, so normalize it before saving.
+        parsed = timezone.make_naive(parsed, timezone.get_current_timezone())
     return parsed
 
 
@@ -170,10 +176,11 @@ class AsnListViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = self.request.data
-        command, replay = consume_preview(
+        command, replay = consume_web_preview(
             request,
             'asn.create',
             request_payload(request),
+            'header',
         )
         if replay is not None:
             return Response(replay)
@@ -572,10 +579,11 @@ class AsnDetailViewSet(viewsets.ModelViewSet):
         )
         if reference_errors:
             raise ValidationError(reference_errors)
-        command, replay = consume_preview(
+        command, replay = consume_web_preview(
             request,
             'asn.detail.create',
             request_payload(request),
+            'detail',
             asn_code=str(data.get('asn_code') or '').strip(),
         )
         if replay is not None:
