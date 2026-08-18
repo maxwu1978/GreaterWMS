@@ -1,7 +1,6 @@
 from rest_framework.permissions import BasePermission
 
 from .agent import is_agent_request
-from .intake import INTAKE_ROLES
 
 
 class AgentPreviewPermission(BasePermission):
@@ -24,7 +23,12 @@ class AgentPreviewPermission(BasePermission):
 
 
 class SourceIntakePermission(BasePermission):
-    """Allow approved warehouse roles to read the source intake board."""
+    """Allow only platform administrators to read the source intake board.
+
+    AI/CLI mailbox capture and processing use AgentPreviewPermission and the
+    operation-role checks in the agent layer. This permission protects the
+    human-facing evidence board, which is intentionally admin-only.
+    """
 
     message = 'Your role cannot view source intake records.'
 
@@ -35,4 +39,4 @@ class SourceIntakePermission(BasePermission):
         if not getattr(identity, 'openid', None):
             return False
         role = str(getattr(identity, 'staff_type', '') or '').strip().casefold()
-        return role in {item.casefold() for item in INTAKE_ROLES}
+        return bool(getattr(identity, 'is_admin', False)) and role == 'admin'

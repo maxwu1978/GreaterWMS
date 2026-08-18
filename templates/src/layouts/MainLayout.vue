@@ -315,18 +315,7 @@
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
           <q-item
-            clickable
-            :to="{ name: 'cli-install' }"
-            @click="linkChange('cli-install')"
-            v-ripple
-            exact
-            :active="link === 'cli-install' && link !== ''"
-            :class="{ 'my-menu-link': link === 'cli-install' && link !== '' }"
-          >
-            <q-item-section avatar><q-icon name="terminal" /></q-item-section>
-            <q-item-section>{{ $t("menuItem.cli") }}</q-item-section>
-          </q-item>
-          <q-item
+            v-if="isPlatformAdmin"
             clickable
             :to="{ name: 'source-intake' }"
             @click="linkChange('source-intake')"
@@ -821,7 +810,14 @@ export default {
         password2: ''
       },
       needLogin: '',
-      activeTab: 'admin'
+      activeTab: 'admin',
+      staff_type: LocalStorage.getItem('staff_type') || ''
+    }
+  },
+  computed: {
+    isPlatformAdmin () {
+      return String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
+        String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1'
     }
   },
   methods: {
@@ -876,6 +872,8 @@ export default {
                 LocalStorage.set('login_id', res.data.user_id)
                 LocalStorage.set('staff_type', res.data.staff_type || '')
                 LocalStorage.set('login_mode', 'user')
+                _this.staff_type = res.data.staff_type || ''
+                _this.activeTab = 'user'
                 _this.authin = '1'
                 _this.login = false
                 _this.openid = res.data.tenant_openid || ''
@@ -935,6 +933,9 @@ export default {
                 LocalStorage.set('login_name', _this.login_name)
                 LocalStorage.set('login_id', _this.login_id)
                 LocalStorage.set('login_mode', 'admin')
+                LocalStorage.set('staff_type', 'Admin')
+                _this.staff_type = 'Admin'
+                _this.activeTab = 'admin'
                 _this.$q.notify({
                   message: 'Success Login',
                   icon: 'check',
@@ -969,6 +970,7 @@ export default {
       LocalStorage.remove('openid')
       LocalStorage.remove('admin_token')
       LocalStorage.remove('tenant_openid')
+      LocalStorage.remove('staff_type')
       SessionStorage.remove('axios_check')
       LocalStorage.set('login_name', '')
       LocalStorage.set('login_id', '')
@@ -1003,6 +1005,9 @@ export default {
             LocalStorage.set('login_name', _this.registerform.name)
             LocalStorage.set('login_id', _this.login_id)
             LocalStorage.set('auth', '1')
+            LocalStorage.set('staff_type', 'Admin')
+            _this.staff_type = 'Admin'
+            _this.activeTab = 'admin'
             _this.registerform = {
               name: '',
               password1: '',
@@ -1036,7 +1041,9 @@ export default {
     staffType () {
       var _this = this
       getauth('staff/?staff_name=' + _this.login_name).then((res) => {
-        LocalStorage.set('staff_type', res.results[0].staff_type)
+        const staffType = res.results && res.results[0] ? res.results[0].staff_type : ''
+        LocalStorage.set('staff_type', staffType)
+        _this.staff_type = staffType
       })
     },
     warehouseOptionsGet () {
@@ -1074,6 +1081,7 @@ export default {
       _this.openid = _this.warehouseOptions[e].openid
       LocalStorage.set('tenant_openid', _this.openid)
       LocalStorage.set('staff_type', 'Admin')
+      _this.staff_type = 'Admin'
       _this.login_name = ''
       LocalStorage.set('login_name', '')
       _this.authin = '0'

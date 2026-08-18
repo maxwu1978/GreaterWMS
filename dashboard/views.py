@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.db.models import Sum
 import re
 import math
+from types import SimpleNamespace
 from django.utils import timezone
 from staging.models import StagingAssignment
 from asnserial.views import _summary as receiving_summary
@@ -464,7 +465,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             is_delete=False,
         ).values(
             'asn_code', 'expected_arrival_at', 'actual_arrival_at', 'package_qty',
-            'unload_driver', 'putaway_driver',
+            'unload_driver', 'putaway_driver', 'supplier', 'container_tracking',
         )
         }
         staging_context = {}
@@ -500,6 +501,38 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             asn_status__in=history_statuses,
             is_delete=False,
         ).exclude(asn_code__in=linked_receipt_asns).order_by('-update_time', '-id'))
+        # A pre-arrival ASN may be created from an email or phone notice
+        # before the customer sends SKU-level detail. Keep that reservation
+        # visible on the active board instead of requiring a detail row.
+        if not history:
+            detail_asn_codes = {row.asn_code for row in rows}
+            for header in AsnListModel.objects.filter(
+                openid=openid,
+                asn_status=1,
+                is_delete=False,
+            ).exclude(asn_code__in=detail_asn_codes).exclude(
+                asn_code__in=linked_receipt_asns,
+            ).only(
+                'asn_code', 'asn_status', 'supplier', 'package_qty',
+                'create_time', 'update_time',
+            ):
+                rows.append(SimpleNamespace(
+                    asn_code=header.asn_code,
+                    asn_status=header.asn_status,
+                    supplier=header.supplier,
+                    goods_code='',
+                    goods_desc='',
+                    goods_qty=0,
+                    goods_actual_qty=0,
+                    sorted_qty=0,
+                    goods_shortage_qty=0,
+                    goods_more_qty=0,
+                    goods_damage_qty=0,
+                    create_time=header.create_time,
+                    update_time=header.update_time,
+                    header_only=True,
+                    package_qty=header.package_qty,
+                ))
         asn_codes = {row.asn_code for row in rows}
         putaway_bins_context = {}
         for movement in QTYRecorder.objects.filter(
@@ -571,6 +604,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
                 'history': history,
                 'history_roles': [],
                 'history_assignees': [],
+                'header_only': bool(getattr(row, 'header_only', False)),
             })
             if row.asn_status < current['status']:
                 current['status'] = row.asn_status
@@ -1245,7 +1279,10 @@ class OperationsBoardViewSet(viewsets.ViewSet):
         progress = min(item['progress_quantity'], quantity)
         task_qty = max(int(item.get('task_qty', max(quantity - progress, 0)) or 0), 0)
         task_total_qty = max(int(item.get('task_total_qty', quantity) or 0), 0)
-        if item.get('category') == 'transport' and not task_total_qty:
+        if item.get('header_only'):
+            package_qty = int(item.get('package_qty') or 0)
+            quantity_label = '%s pkg' % package_qty if package_qty else 'Pending'
+        elif item.get('category') == 'transport' and not task_total_qty:
             quantity_label = '—'
         else:
             quantity_label = '%s / %s' % (task_qty, task_total_qty)
@@ -1289,6 +1326,8 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'task_qty': task_qty,
             'task_total_qty': task_total_qty,
             'quantity_label': quantity_label,
+            'package_qty': item.get('package_qty', 0),
+            'header_only': bool(item.get('header_only', False)),
             'eta': eta_text,
             'eta_status': eta_status,
             'minutes_to_eta': minutes_to_eta,

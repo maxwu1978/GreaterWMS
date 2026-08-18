@@ -33,6 +33,43 @@ class OperationsBoardTests(TestCase):
         self.assertEqual(len(view._filter_for_identity(items, 'driver', 'Tony')), 0)
         self.assertEqual(len(view._filter_for_identity(items, 'manager', 'manager-user')), 4)
 
+    def test_prearrival_header_without_detail_is_visible_on_active_board(self):
+        openid = 'dashboard-header-only-tenant'
+        asn_code = 'ASN-DASHBOARD-HEADER-01'
+        expected_arrival = timezone.now() + timedelta(days=1)
+        AsnListModel.objects.create(
+            asn_code=asn_code,
+            asn_status=1,
+            expected_arrival_at=expected_arrival,
+            package_qty=18,
+            container_tracking='TRHU-HEADER-01',
+            supplier='Delta Electronics (USA) Inc.',
+            creater='tester',
+            bar_code='BAR-DASHBOARD-HEADER-01',
+            openid=openid,
+            transportation_fee={},
+        )
+
+        items = OperationsBoardViewSet()._inbound_items(openid, timezone.now())
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['reference'], asn_code)
+        self.assertEqual(items[0]['customer'], 'Delta Electronics')
+        self.assertEqual(items[0]['eta'], expected_arrival.strftime('%m/%d %H:%M'))
+        self.assertEqual(items[0]['package_qty'], 18)
+        self.assertTrue(items[0]['header_only'])
+        self.assertEqual(items[0]['quantity_label'], '18 pkg')
+        self.assertEqual(items[0]['business_status'], 'PENDING_ARRIVAL')
+        self.assertEqual(items[0]['next_action_label'], 'Set ETA')
+        self.assertNotIn(asn_code, {
+            item['reference']
+            for item in OperationsBoardViewSet()._inbound_items(
+                openid,
+                timezone.now(),
+                history=True,
+            )
+        })
+
     def test_putaway_asn_with_open_qc_exception_is_blocked_for_review(self):
         openid = 'dashboard-test-tenant'
         asn_code = 'ASN-DASHBOARD-01'

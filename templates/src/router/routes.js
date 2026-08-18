@@ -34,14 +34,14 @@ const routes = [{
       ]
     },
     {
-      path: 'cli',
-      name: 'cli-install',
-      component: () => import('pages/cli/cli.vue')
-    },
-    {
       path: 'source-intake',
       name: 'source-intake',
-      component: () => import('pages/sourceIntake.vue')
+      component: () => import('pages/sourceIntake.vue'),
+      beforeEnter: () => {
+        const role = String(localStorage.getItem('staff_type') || '').trim().toLowerCase()
+        const mode = String(localStorage.getItem('login_mode') || '').trim().toLowerCase()
+        return role === 'admin' || mode === 'admin' ? true : { name: 'dashboard' }
+      }
     },
     {
       path: 'inbound',

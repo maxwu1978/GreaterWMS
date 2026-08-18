@@ -87,7 +87,7 @@ from .agent import (
     _record_entity_provenance,
 )
 from .intake import ensure_source_intake_record, update_source_intake
-from .permissions import AgentPreviewPermission
+from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
 class AgentPreviewPermissionTests(TestCase):
@@ -139,6 +139,25 @@ class AgentPreviewPermissionTests(TestCase):
         self.assertIsNone(replay)
         self.assertEqual(command.operation, 'asn.create')
         self.assertEqual(command.created_by, str(operator.id))
+
+
+class SourceIntakePermissionTests(TestCase):
+    def request(self, staff_type, is_admin):
+        return SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True),
+            auth=SimpleNamespace(
+                openid='tenant',
+                staff_type=staff_type,
+                is_admin=is_admin,
+            ),
+        )
+
+    def test_source_intake_board_is_admin_only(self):
+        permission = SourceIntakePermission()
+
+        self.assertTrue(permission.has_permission(self.request('Admin', True), None))
+        self.assertFalse(permission.has_permission(self.request('Warehouse', False), None))
+        self.assertFalse(permission.has_permission(self.request('Manager', False), None))
 
 
 class SourceProvenanceWorkflowTests(TestCase):
