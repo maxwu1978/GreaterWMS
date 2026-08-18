@@ -69,6 +69,7 @@ from .views import (
     MailboxSyncRunCreateView,
     MailboxSyncStateView,
     SourceCaptureView,
+    SourceEvidenceListView,
     SourceIntakeDetailView,
     SourceIntakeListView,
     SourceIntakeUpdateView,
@@ -247,6 +248,28 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(SourceIntakeRecord.objects.count(), 1)
         self.assertEqual(SourceIntakeRecord.objects.get().status, SourceIntakeRecord.DUPLICATE)
         self.assertEqual(SourceIntakeEvent.objects.filter(event_type='DUPLICATE').count(), 1)
+
+    def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):
+        source = SourceEvidence.objects.create(
+            openid='tenant',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash='AbCd' + ('e' * 60),
+            mailbox_account='Sales@Example.com',
+            message_id='<Inbound-Case-001@example.com>',
+        )
+        request = self.request(surface='ai', client='greaterwms-ai')
+        request.query_params = {
+            'mailbox_account': 'Sales@Example.com',
+            'message_id': '<Inbound-Case-001@example.com>',
+            'content_hash': source.content_hash,
+        }
+
+        response = SourceEvidenceListView().get(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], source.id)
 
     def test_source_intake_status_transitions_are_logged_and_invalid_transition_is_rejected(self):
         source = SourceEvidence.objects.create(

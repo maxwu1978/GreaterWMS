@@ -708,9 +708,12 @@ class SourceEvidenceListView(APIView):
     def get(self, request):
         queryset = SourceEvidence.objects.filter(openid=request.auth.openid)
         operation = _clean(request.query_params.get('operation')).lower()
-        mailbox_account = _clean(request.query_params.get('mailbox_account'))
-        message_id = _clean(request.query_params.get('message_id'))
-        content_hash = _clean(request.query_params.get('content_hash'))
+        # Preserve case-sensitive evidence identifiers. `_clean()` uppercases
+        # values for business codes, which would break mailbox/message/hash
+        # lookups and make duplicate preflight unreliable.
+        mailbox_account = _text(request.query_params.get('mailbox_account'))[:255]
+        message_id = _text(request.query_params.get('message_id'))[:512]
+        content_hash = _text(request.query_params.get('content_hash'))[:64]
         if operation:
             queryset = queryset.filter(operation=operation)
         if mailbox_account:
