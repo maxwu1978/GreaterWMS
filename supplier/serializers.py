@@ -27,12 +27,12 @@ class SupplierPostSerializer(serializers.ModelSerializer):
     openid = serializers.CharField(read_only=False, required=False, validators=[datasolve.openid_validate])
     supplier_name = serializers.CharField(read_only=False,  required=True, validators=[datasolve.data_validate])
     supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
-    supplier_city = serializers.CharField(read_only=False,  required=True, validators=[datasolve.data_validate])
-    supplier_address = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_contact = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_manager = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_level = serializers.IntegerField(read_only=False, required=True, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
+    supplier_city = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_address = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_contact = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_manager = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_level = serializers.IntegerField(read_only=False, required=False, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
     class Meta:
         model = ListModel
         exclude = ['is_delete', ]
@@ -41,12 +41,12 @@ class SupplierPostSerializer(serializers.ModelSerializer):
 class SupplierUpdateSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
     supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
-    supplier_city = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_address = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_contact = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_manager = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    supplier_level = serializers.IntegerField(read_only=False, required=True, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
+    supplier_city = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_address = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_contact = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_manager = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_level = serializers.IntegerField(read_only=False, required=False, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
     class Meta:
         model = ListModel
         exclude = ['openid', 'is_delete', ]
@@ -55,12 +55,12 @@ class SupplierUpdateSerializer(serializers.ModelSerializer):
 class SupplierPartialUpdateSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
     supplier_short_name = serializers.CharField(read_only=False, required=False, allow_blank=True, max_length=64)
-    supplier_city = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    supplier_address = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    supplier_contact = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    supplier_manager = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
+    supplier_city = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_address = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_contact = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    supplier_manager = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
     supplier_level = serializers.IntegerField(read_only=False, required=False, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
     class Meta:
         model = ListModel
         exclude = ['openid', 'is_delete', ]

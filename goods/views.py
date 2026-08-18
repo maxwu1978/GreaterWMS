@@ -23,6 +23,60 @@ from .files import FileRenderCN, FileRenderEN
 from rest_framework.settings import api_settings
 from asn.models import AsnDetailModel
 from django.db.models import Q
+from django.db import transaction
+from django.utils import timezone
+from asnserial.models import SourceEvidence
+from .units import unit_volume_cubic_meters, weight_to_kg
+
+
+def _operator_name(request):
+    identity = getattr(request, 'auth', None)
+    return str(
+        getattr(identity, 'staff_name', '')
+        or request.META.get('HTTP_OPERATOR_NAME', '')
+        or getattr(getattr(request, 'user', None), 'username', '')
+        or 'system'
+    )
+
+
+def _goods_payload(request, data, instance=None):
+    payload = data.copy()
+    payload['openid'] = request.auth.openid
+    if not payload.get('creater'):
+        payload['creater'] = _operator_name(request)
+
+    if not payload.get('bar_code'):
+        code = payload.get('goods_code') or getattr(instance, 'goods_code', '')
+        if code:
+            payload['bar_code'] = Md5.md5(str(code))
+
+    dimensions = {
+        key: payload.get(key, getattr(instance, key, 0) if instance else 0)
+        for key in ('goods_w', 'goods_d', 'goods_h')
+    }
+    measurement_unit = payload.get(
+        'measurement_unit', getattr(instance, 'measurement_unit', '') if instance else ''
+    )
+    payload['unit_volume'] = unit_volume_cubic_meters(
+        dimensions['goods_w'], dimensions['goods_d'], dimensions['goods_h'], measurement_unit
+    )
+    return payload
+
+
+def _source_evidence_for_import(request, evidence_id):
+    try:
+        return SourceEvidence.objects.get(id=int(evidence_id), openid=request.auth.openid)
+    except (SourceEvidence.DoesNotExist, TypeError, ValueError):
+        raise APIException({'detail': 'Source evidence does not exist in this tenant'})
+
+
+def _create_scanner_tag(openid, goods_code, bar_code):
+    scanner.objects.update_or_create(
+        openid=openid,
+        mode='GOODS',
+        code=str(goods_code),
+        defaults={'bar_code': str(bar_code)},
+    )
 
 class SannerGoodsTagView(viewsets.ModelViewSet):
 
@@ -145,163 +199,51 @@ class APIViewSet(viewsets.ModelViewSet):
             return self.http_method_not_allowed(request=self.request)
 
     def create(self, request, *args, **kwargs):
-        data = self.request.data
-        data['openid'] = self.request.auth.openid
-        data['unit_volume'] = round(
-            (float(data['goods_w']) * float(data['goods_d']) * float(data['goods_h'])) / 1000000000, 4)
+        data = _goods_payload(request, self.request.data)
+        if not data.get('goods_code'):
+            raise APIException({'detail': 'Goods Code is required'})
         if ListModel.objects.filter(openid=data['openid'], goods_code=data['goods_code'], is_delete=False).exists():
             raise APIException({"detail": "Data Exists"})
-        else:
-            if supplier.objects.filter(openid=data['openid'], supplier_name=data['goods_supplier'],
-                                        is_delete=False).exists():
-                if goods_unit.objects.filter(openid=data['openid'], goods_unit=data['goods_unit'],
-                                           is_delete=False).exists():
-                    if goods_class.objects.filter(openid=data['openid'], goods_class=data['goods_class'],
-                                                 is_delete=False).exists():
-                        if goods_brand.objects.filter(openid=data['openid'], goods_brand=data['goods_brand'],
-                                                     is_delete=False).exists():
-                            if goods_color.objects.filter(openid=data['openid'], goods_color=data['goods_color'],
-                                                         is_delete=False).exists():
-                                if goods_shape.objects.filter(openid=data['openid'], goods_shape=data['goods_shape'],
-                                                             is_delete=False).exists():
-                                    if goods_specs.objects.filter(openid=data['openid'],
-                                                                 goods_specs=data['goods_specs'],
-                                                                 is_delete=False).exists():
-                                        if goods_origin.objects.filter(openid=data['openid'],
-                                                                     goods_origin=data['goods_origin'],
-                                                                     is_delete=False).exists():
-                                            data['bar_code'] = Md5.md5(data['goods_code'])
-                                            serializer = self.get_serializer(data=data)
-                                            serializer.is_valid(raise_exception=True)
-                                            serializer.save()
-                                            scanner.objects.create(openid=self.request.auth.openid, mode="GOODS",
-                                                                   code=data['goods_code'],
-                                                                   bar_code=data['bar_code'])
-                                            headers = self.get_success_headers(serializer.data)
-                                            return Response(serializer.data, status=200, headers=headers)
-                                        else:
-                                            raise APIException(
-                                                {"detail": "Goods Origin does not exists or it has been changed"})
-                                    else:
-                                        raise APIException(
-                                            {"detail": "Goods Specs does not exists or it has been changed"})
-                                else:
-                                    raise APIException({"detail": "Goods Shape does not exists or it has been changed"})
-                            else:
-                                raise APIException({"detail": "Goods Color does not exists or it has been changed"})
-                        else:
-                            raise APIException({"detail": "Goods Brand does not exists or it has been changed"})
-                    else:
-                        raise APIException({"detail": "Goods Class does not exists or it has been changed"})
-                else:
-                    raise APIException({"detail": "Goods Unit does not exists or it has been changed"})
-            else:
-                raise APIException({"detail": "Supplier does not exists or it has been changed"})
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _create_scanner_tag(data['openid'], data['goods_code'], data['bar_code'])
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=200, headers=headers)
 
     def update(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
             raise APIException({"detail": "Cannot update data which not yours"})
-        else:
-            data = self.request.data
-            data['unit_volume'] = round(
-                (float(data['goods_w']) * float(data['goods_d']) * float(data['goods_h'])) / 1000000000, 4)
-            if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=data['goods_supplier'],
-                                        is_delete=False).exists():
-                if goods_unit.objects.filter(openid=self.request.auth.openid, goods_unit=data['goods_unit'],
-                                               is_delete=False).exists():
-                    if goods_class.objects.filter(openid=self.request.auth.openid, goods_class=data['goods_class'],
-                                                  is_delete=False).exists():
-                        if goods_brand.objects.filter(openid=self.request.auth.openid, goods_brand=data['goods_brand'],
-                                                      is_delete=False).exists():
-                            if goods_color.objects.filter(openid=self.request.auth.openid, goods_color=data['goods_color'],
-                                                            is_delete=False).exists():
-                                if goods_shape.objects.filter(openid=self.request.auth.openid, goods_shape=data['goods_shape'],
-                                                                is_delete=False).exists():
-                                    if goods_specs.objects.filter(openid=self.request.auth.openid,
-                                                                  goods_specs=data['goods_specs'],
-                                                                  is_delete=False).exists():
-                                        if goods_origin.objects.filter(openid=self.request.auth.openid,
-                                                                       goods_origin=data['goods_origin'],
-                                                                       is_delete=False).exists():
-                                            scanner.objects.filter(openid=self.request.auth.openid,
-                                                                   mode='GOODS',
-                                                                   code=qs.goods_code).update(code=str(data['goods_code']))
-                                            serializer = self.get_serializer(qs, data=data)
-                                            serializer.is_valid(raise_exception=True)
-                                            serializer.save()
-                                            headers = self.get_success_headers(serializer.data)
-                                            return Response(serializer.data, status=200, headers=headers)
-                                        else:
-                                            raise APIException(
-                                                {"detail": "Goods Origin does not exists or it has been changed"})
-                                    else:
-                                        raise APIException(
-                                            {"detail": "Goods Specs does not exists or it has been changed"})
-                                else:
-                                    raise APIException({"detail": "Goods Shape does not exists or it has been changed"})
-                            else:
-                                raise APIException({"detail": "Goods Color does not exists or it has been changed"})
-                        else:
-                            raise APIException({"detail": "Goods Brand does not exists or it has been changed"})
-                    else:
-                        raise APIException({"detail": "Goods Class does not exists or it has been changed"})
-                else:
-                    raise APIException({"detail": "Goods Unit does not exists or it has been changed"})
-            else:
-                raise APIException({"detail": "Supplier does not exists or it has been changed"})
+        data = _goods_payload(request, self.request.data, qs)
+        next_code = str(data.get('goods_code') or qs.goods_code)
+        if ListModel.objects.filter(
+            openid=self.request.auth.openid, goods_code=next_code, is_delete=False
+        ).exclude(id=qs.id).exists():
+            raise APIException({"detail": "Data Exists"})
+        serializer = self.get_serializer(qs, data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _create_scanner_tag(self.request.auth.openid, next_code, data.get('bar_code'))
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=200, headers=headers)
 
     def partial_update(self, request, pk):
         qs = self.get_object()
         if qs.openid != self.request.auth.openid:
             raise APIException({"detail": "Cannot partial_update data which not yours"})
-        else:
-            data = self.request.data
-            if supplier.objects.filter(openid=self.request.auth.openid, supplier_name=data['goods_supplier'],
-                                        is_delete=False).exists():
-                if goods_unit.objects.filter(openid=self.request.auth.openid, goods_unit=data['goods_unit'],
-                                               is_delete=False).exists():
-                    if goods_class.objects.filter(openid=self.request.auth.openid, goods_class=data['goods_class'],
-                                                  is_delete=False).exists():
-                        if goods_brand.objects.filter(openid=self.request.auth.openid, goods_brand=data['goods_brand'],
-                                                      is_delete=False).exists():
-                            if goods_color.objects.filter(openid=self.request.auth.openid, goods_color=data['goods_color'],
-                                                            is_delete=False).exists():
-                                if goods_shape.objects.filter(openid=self.request.auth.openid, goods_shape=data['goods_shape'],
-                                                                is_delete=False).exists():
-                                    if goods_specs.objects.filter(openid=self.request.auth.openid,
-                                                                  goods_specs=data['goods_specs'],
-                                                                  is_delete=False).exists():
-                                        if goods_origin.objects.filter(openid=self.request.auth.openid,
-                                                                       goods_origin=data['goods_origin'],
-                                                                       is_delete=False).exists():
-                                            scanner.objects.filter(openid=self.request.auth.openid,
-                                                                   mode='GOODS',
-                                                                   code=qs.goods_code).update(
-                                                code=str(data['goods_code']))
-                                            serializer = self.get_serializer(qs, data=data, partial=True)
-                                            serializer.is_valid(raise_exception=True)
-                                            serializer.save()
-                                            headers = self.get_success_headers(serializer.data)
-                                            return Response(serializer.data, status=200, headers=headers)
-                                        else:
-                                            raise APIException(
-                                                {"detail": "Goods Origin does not exists or it has been changed"})
-                                    else:
-                                        raise APIException(
-                                            {"detail": "Goods Specs does not exists or it has been changed"})
-                                else:
-                                    raise APIException({"detail": "Goods Shape does not exists or it has been changed"})
-                            else:
-                                raise APIException({"detail": "Goods Color does not exists or it has been changed"})
-                        else:
-                            raise APIException({"detail": "Goods Brand does not exists or it has been changed"})
-                    else:
-                        raise APIException({"detail": "Goods Class does not exists or it has been changed"})
-                else:
-                    raise APIException({"detail": "Goods Unit does not exists or it has been changed"})
-            else:
-                raise APIException({"detail": "Supplier does not exists or it has been changed"})
+        data = _goods_payload(request, self.request.data, qs)
+        next_code = str(data.get('goods_code') or qs.goods_code)
+        if ListModel.objects.filter(
+            openid=self.request.auth.openid, goods_code=next_code, is_delete=False
+        ).exclude(id=qs.id).exists():
+            raise APIException({"detail": "Data Exists"})
+        serializer = self.get_serializer(qs, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        _create_scanner_tag(self.request.auth.openid, next_code, data.get('bar_code'))
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=200, headers=headers)
 
     def destroy(self, request, pk):
         qs = self.get_object()
@@ -313,6 +255,63 @@ class APIViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(qs, many=False)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=200, headers=headers)
+
+class SourceImportView(viewsets.ViewSet):
+    """Import source-traced SKUs without requiring lookup-table placeholders."""
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        raw_items = request.data.get('items') if hasattr(request.data, 'get') else None
+        items = raw_items if isinstance(raw_items, list) else [request.data]
+        if not items:
+            raise APIException({'detail': 'At least one SKU is required'})
+        if len(items) > 1000:
+            raise APIException({'detail': 'A single source import cannot exceed 1000 SKUs'})
+
+        created = []
+        reused = []
+        evidence_ids = set()
+        for raw in items:
+            data = raw.copy()
+            evidence_id = data.get('source_evidence_id') or request.data.get('source_evidence_id')
+            evidence = _source_evidence_for_import(request, evidence_id)
+            evidence_ids.add(evidence.id)
+            data['source_evidence_id'] = evidence.id
+            data = _goods_payload(request, data)
+            if not data.get('goods_code'):
+                raise APIException({'detail': 'Goods Code is required'})
+
+            existing = ListModel.objects.filter(
+                openid=request.auth.openid,
+                goods_code=str(data['goods_code']),
+                is_delete=False,
+            ).first()
+            if existing:
+                if existing.source_evidence_id == evidence.id:
+                    reused.append(existing.id)
+                    continue
+                raise APIException({
+                    'detail': f"Goods Code {data['goods_code']} already exists from another source"
+                })
+
+            serializer = serializers.GoodsSourceImportSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            instance = serializer.save(openid=request.auth.openid)
+            _create_scanner_tag(request.auth.openid, instance.goods_code, instance.bar_code)
+            created.append(instance.id)
+
+        SourceEvidence.objects.filter(
+            openid=request.auth.openid,
+            id__in=evidence_ids,
+        ).update(status=SourceEvidence.USED, used_at=timezone.now())
+        return Response({
+            'detail': 'source SKU import complete',
+            'created_ids': created,
+            'reused_ids': reused,
+            'created_count': len(created),
+            'reused_count': len(reused),
+        }, status=200)
+
 
 class FileDownloadView(viewsets.ModelViewSet):
     renderer_classes = (FileRenderCN, ) + tuple(api_settings.DEFAULT_RENDERER_CLASSES)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "WMS Master Data Configurator"
+  short_description: "Review email data and safely configure WMS master data"
+  default_prompt: "Use $wms-master-data-configurator with the WMS administrator session to review these emails, show the proposed master-data batch, and wait for my confirmation before writing."

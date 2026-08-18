@@ -23,6 +23,10 @@ class GoodsGetSerializer(serializers.ModelSerializer):
     goods_price = serializers.FloatField(read_only=True, required=False)
     creater = serializers.CharField(read_only=True, required=False)
     bar_code = serializers.CharField(read_only=True, required=False)
+    measurement_unit = serializers.CharField(read_only=True, required=False)
+    customer_sku = serializers.CharField(read_only=True, required=False)
+    source_evidence_id = serializers.IntegerField(read_only=True, required=False)
+    source_note = serializers.CharField(read_only=True, required=False)
     create_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
     update_time = serializers.DateTimeField(read_only=True, format='%Y-%m-%d %H:%M:%S')
 
@@ -36,24 +40,28 @@ class GoodsPostSerializer(serializers.ModelSerializer):
     openid = serializers.CharField(read_only=False, required=False, validators=[datasolve.openid_validate])
     goods_code = serializers.CharField(read_only=False, required=True, min_length=1,
                                        validators=[datasolve.data_validate])
-    goods_desc = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_supplier = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_weight = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_w = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_d = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_h = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    unit_volume = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_unit = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_class = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_brand = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_color = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_shape = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_specs = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_origin = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_cost = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_price = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    bar_code = serializers.CharField(read_only=False, required=True)
+    goods_desc = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_supplier = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_weight = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_w = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_d = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_h = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    unit_volume = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_unit = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_class = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_brand = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_color = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_shape = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_specs = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_origin = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_cost = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_price = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    bar_code = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    measurement_unit = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    customer_sku = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    source_evidence_id = serializers.IntegerField(read_only=False, required=False, allow_null=True)
+    source_note = serializers.CharField(read_only=False, required=False, allow_blank=True)
 
     class Meta:
         model = ListModel
@@ -67,24 +75,28 @@ class GoodsPostSerializer(serializers.ModelSerializer):
 class GoodsUpdateSerializer(serializers.ModelSerializer):
     goods_code = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate],
                                        min_length=1)
-    goods_desc = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_supplier = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_weight = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_w = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_d = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_h = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    unit_volume = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_unit = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_class = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_brand = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_color = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_shape = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_specs = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_origin = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_cost = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    goods_price = serializers.FloatField(read_only=False, required=True, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=True, validators=[datasolve.data_validate])
-    bar_code = serializers.CharField(read_only=False, required=False)
+    goods_desc = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_supplier = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_weight = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_w = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_d = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_h = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    unit_volume = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_unit = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_class = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_brand = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_color = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_shape = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_specs = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_origin = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_cost = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_price = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    bar_code = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    measurement_unit = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    customer_sku = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    source_evidence_id = serializers.IntegerField(read_only=False, required=False, allow_null=True)
+    source_note = serializers.CharField(read_only=False, required=False, allow_blank=True)
 
     class Meta:
         model = ListModel
@@ -94,30 +106,47 @@ class GoodsUpdateSerializer(serializers.ModelSerializer):
 class GoodsPartialUpdateSerializer(serializers.ModelSerializer):
     goods_code = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate],
                                        min_length=1)
-    goods_desc = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_supplier = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_weight = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_w = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_d = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_h = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    unit_volume = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_unit = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_class = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_brand = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_color = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_shape = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_specs = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_origin = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_cost = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    goods_price = serializers.FloatField(read_only=False, required=False, validators=[datasolve.data_validate])
-    creater = serializers.CharField(read_only=False, required=False, validators=[datasolve.data_validate])
-    bar_code = serializers.CharField(read_only=False, required=False)
+    goods_desc = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_supplier = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_weight = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_w = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_d = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_h = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    unit_volume = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_unit = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_class = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_brand = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_color = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_shape = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_specs = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_origin = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    goods_cost = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    goods_price = serializers.FloatField(read_only=False, required=False, allow_null=True, validators=[datasolve.data_validate])
+    creater = serializers.CharField(read_only=False, required=False, allow_blank=True, validators=[datasolve.data_validate])
+    bar_code = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    measurement_unit = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    customer_sku = serializers.CharField(read_only=False, required=False, allow_blank=True)
+    source_evidence_id = serializers.IntegerField(read_only=False, required=False, allow_null=True)
+    source_note = serializers.CharField(read_only=False, required=False, allow_blank=True)
 
 
     class Meta:
         model = ListModel
         exclude = ['openid', 'is_delete', ]
         read_only_fields = ['id', 'create_time', 'update_time', ]
+
+
+class GoodsSourceImportSerializer(GoodsPostSerializer):
+    """Relaxed serializer used only by the source-traced CLI import endpoint."""
+
+    # The tenant is injected from the authenticated request by the view. The
+    # normal goods serializer's openid validator is intentionally not used for
+    # this server-side tenant-scoped import path.
+    openid = serializers.CharField(read_only=True, required=False)
+    source_evidence_id = serializers.IntegerField(required=True, min_value=1)
+
+    class Meta(GoodsPostSerializer.Meta):
+        pass
 
 class FileRenderSerializer(serializers.ModelSerializer):
     goods_code = serializers.CharField(read_only=False, required=False)

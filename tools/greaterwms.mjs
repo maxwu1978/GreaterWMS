@@ -321,11 +321,12 @@ async function request (path, options = {}) {
     headers['content-type'] = 'application/json'
     body = JSON.stringify(options.json)
   }
+  const timeoutMs = Number(process.env.GREATERWMS_TIMEOUT_MS || options.timeoutMs || 30000)
   const response = await fetch(`${baseUrl()}${path}`, {
     method: options.method || 'GET',
     headers,
     body,
-    signal: AbortSignal.timeout(options.timeoutMs || 30000)
+    signal: AbortSignal.timeout(timeoutMs)
   })
   const text = await response.text()
   let payload
@@ -502,6 +503,7 @@ function validateReceivingCreateData (data) {
 async function readResource (resource, action, options, json) {
   if (resource === 'receiving' && !['list', 'get'].includes(action)) return false
   if (resource === 'transport' && !['list', 'get'].includes(action)) return false
+  if (resource === 'sku' && action === 'import') return false
   const path = READ_RESOURCES[resource]
   if (!path) return false
   if (action === 'list') {
@@ -530,6 +532,26 @@ async function readAction (command, options, json) {
 async function writeResource (resource, action, options, json) {
   const definition = WRITE_RESOURCES[resource]
   if (!definition) return false
+  if (resource === 'sku' && action === 'import') {
+    requireConfirmation(options, 'sku source import')
+    const data = parseData(options)
+    if (!data.source_evidence_id && !data.items?.every(item => item.source_evidence_id)) {
+      throw new Error('sku import requires source_evidence_id in --data or on every item')
+    }
+    if (options['dry-run']) {
+      print({
+        dry_run: true,
+        method: 'POST',
+        endpoint: '/goods/import/',
+        resource,
+        action,
+        data
+      }, json)
+      return true
+    }
+    print(await request('/goods/import/', { method: 'POST', json: data }), json)
+    return true
+  }
   if (action === 'delete') return false
   if (!['create', 'update'].includes(action)) {
     throw new Error(`'${resource} ${action}' is not enabled yet. Delete remains disabled in this phase.`)
@@ -723,7 +745,9 @@ function help () {
   process.stdout.write('Receiving: receiving create|staging-assign|qc|resolve|putaway|reconcile|resolve-reconciliation --data JSON --dry-run|--confirm; receiving exceptions\n')
   process.stdout.write('Transport: transport create|assign|transition --data JSON --dry-run|--confirm; transport list\n')
   process.stdout.write('Outbound: outbound create; outbound-detail create; outbound release|order-release|pick|dispatch|pod|cancel-intransit --id ID --data JSON --dry-run|--confirm\n')
-  process.stdout.write('Source evidence: source capture --data JSON; source list [--operation OP]\n')
+  process.stdout.write('Source intake: source sync-state --mailbox-account EMAIL; source sync-start --mailbox-account EMAIL; source capture --data JSON --json; source intake [--status STATUS] [--operation INBOUND|OUTBOUND] [--json]\n')
+  process.stdout.write('Source SKU import: sku import --data-file /tmp/sku-import.json --dry-run|--confirm --json; requires source_evidence_id and accepts blank optional master-data fields.\n')
+  process.stdout.write('Source detail/update: source intake-get --id ID; source intake-update --id ID --data JSON --dry-run|--confirm; source sync-finish --id RUN_ID --data JSON\n')
   process.stdout.write('AI approval: GREATERWMS_AGENT_SURFACE=ai node tools/greaterwms.mjs agent approve --id PREVIEW_ID --json\n')
   process.stdout.write('AI surface: set GREATERWMS_AGENT_SURFACE=ai, preview with --source-evidence-id SOURCE_ID, then approve with agent approve --id PREVIEW_ID. No CLI token is exposed on this surface.\n')
   process.stdout.write('Late Pack List: add --replace --late-reference after preview; the prior Pack List and receiving history remain preserved.\n\n')
@@ -792,10 +816,76 @@ async function main () {
   }
 
   if (resource === 'source' && action === 'list') {
-    const query = options.operation
-      ? `?operation=${encodeURIComponent(String(options.operation))}`
-      : ''
-    print(await request(`/asn/serial/sources/${query}`), json)
+    const params = new URLSearchParams()
+    for (const [option, queryName] of [
+      ['operation', 'operation'],
+      ['mailbox-account', 'mailbox_account'],
+      ['message-id', 'message_id'],
+      ['content-hash', 'content_hash']
+    ]) {
+      if (options[option]) params.set(queryName, String(options[option]))
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    print(await request(`/asn/serial/sources/${suffix}`), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'intake') {
+    print(await request(queryPath('/asn/serial/intake/', options)), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'intake-get') {
+    if (!options.id) throw new Error('--id is required for source intake-get')
+    print(await request(`/asn/serial/intake/${encodeURIComponent(String(options.id))}/`), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'intake-update') {
+    if (!options.id) throw new Error('--id is required for source intake-update')
+    const data = parseData(options)
+    if (options['dry-run']) {
+      print({
+        dry_run: true,
+        method: 'POST',
+        endpoint: `/asn/serial/intake/${encodeURIComponent(String(options.id))}/update/`,
+        data
+      }, json)
+      return
+    }
+    if (!options.confirm) throw new Error('source intake-update requires --confirm after reviewing the source record')
+    print(await request(`/asn/serial/intake/${encodeURIComponent(String(options.id))}/update/`, {
+      method: 'POST',
+      json: data
+    }), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'sync-start') {
+    const data = parseData(options)
+    if (!data.mailbox_account) data.mailbox_account = options['mailbox-account']
+    if (!data.mailbox_account) throw new Error('source sync-start requires --mailbox-account or mailbox_account in --data')
+    print(await request('/asn/serial/intake/sync-runs/', {
+      method: 'POST',
+      json: data
+    }), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'sync-state') {
+    const mailboxAccount = options['mailbox-account'] || parseData(options).mailbox_account
+    if (!mailboxAccount) throw new Error('source sync-state requires --mailbox-account or mailbox_account in --data')
+    print(await request(`/asn/serial/intake/sync-state/?mailbox_account=${encodeURIComponent(String(mailboxAccount))}`), json)
+    return
+  }
+
+  if (resource === 'source' && action === 'sync-finish') {
+    if (!options.id) throw new Error('--id is required for source sync-finish')
+    const data = parseData(options)
+    print(await request(`/asn/serial/intake/sync-runs/${encodeURIComponent(String(options.id))}/complete/`, {
+      method: 'POST',
+      json: data
+    }), json)
     return
   }
 
