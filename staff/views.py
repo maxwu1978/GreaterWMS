@@ -1,5 +1,8 @@
 import json
+import hashlib
 
+from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -18,6 +21,57 @@ from django.http import StreamingHttpResponse
 from .files import FileRenderCN, FileRenderEN
 from rest_framework.settings import api_settings
 from .auth import issue_session_token, revoke_staff_tokens
+
+
+def _staff_login_client_ip(request):
+    """Use the address supplied by the deployment proxy when available."""
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip() or 'unknown'
+    return request.META.get('REMOTE_ADDR') or 'unknown'
+
+
+def _staff_login_cache_key(scope, value):
+    digest = hashlib.sha256(str(value).encode('utf-8')).hexdigest()
+    return 'greaterwms:staff-login:%s:%s' % (scope, digest)
+
+
+def _increment_login_counter(key, timeout):
+    """Increment a short-lived counter; fail open if cache is unavailable."""
+    try:
+        if cache.add(key, 1, timeout=timeout):
+            return 1
+        return cache.incr(key)
+    except (ValueError, TypeError):
+        # A cache restart between add/incr should not make every operator
+        # unable to log in. The account-level lockout is no longer used here.
+        try:
+            cache.set(key, 1, timeout=timeout)
+        except Exception:
+            pass
+        return 1
+    except Exception:
+        return 1
+
+
+def _staff_login_rate_limited(request, staff_name):
+    timeout = settings.STAFF_LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    client_ip = _staff_login_client_ip(request)
+    account = str(staff_name).strip().casefold()
+    account_key = _staff_login_cache_key('account-ip', '%s\x00%s' % (client_ip, account))
+    ip_key = _staff_login_cache_key('ip', client_ip)
+    account_count = _increment_login_counter(account_key, timeout)
+    ip_count = _increment_login_counter(ip_key, timeout)
+    return (
+        account_count > settings.STAFF_LOGIN_ACCOUNT_RATE_LIMIT
+        or ip_count > settings.STAFF_LOGIN_IP_RATE_LIMIT
+    )
+
+
+def _clear_staff_login_account_counter(request, staff_name):
+    client_ip = _staff_login_client_ip(request)
+    account = str(staff_name).strip().casefold()
+    cache.delete(_staff_login_cache_key('account-ip', '%s\x00%s' % (client_ip, account)))
 
 
 @csrf_exempt
@@ -43,6 +97,12 @@ def staff_login(request, *args, **kwargs):
     raw_check_code = post_data.get('check_code')
     if not staff_name or raw_check_code in (None, ''):
         return JsonResponse({'detail': 'Staff name and check code are required'}, status=400)
+
+    if _staff_login_rate_limited(request, staff_name):
+        return JsonResponse(
+            {'detail': 'Too many login attempts. Please try again later'},
+            status=429,
+        )
 
     try:
         check_code = int(raw_check_code)
@@ -71,21 +131,11 @@ def staff_login(request, *args, **kwargs):
             )
 
         if staff_record.check_code != check_code:
-            counter = max(0, int(staff_record.error_check_code_counter or 0)) + 1
-            if counter >= 3:
-                staff_record.is_lock = True
-                staff_record.error_check_code_counter = 0
-                staff_record.save(update_fields=['is_lock', 'error_check_code_counter', 'update_time'])
-                return JsonResponse(
-                    {'detail': 'Staff account is locked. Please contact an administrator'},
-                    status=423,
-                )
-            staff_record.error_check_code_counter = counter
-            staff_record.save(update_fields=['error_check_code_counter', 'update_time'])
             return JsonResponse({'detail': 'Invalid staff credentials'}, status=401)
 
         staff_record.error_check_code_counter = 0
         staff_record.save(update_fields=['error_check_code_counter', 'update_time'])
+        _clear_staff_login_account_counter(request, staff_name)
         api_token = issue_session_token(staff_record, token_kind='staff')
 
     ret = FBMsg.ret()

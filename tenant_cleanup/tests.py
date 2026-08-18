@@ -1,9 +1,10 @@
 from types import SimpleNamespace
 from datetime import timedelta
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
+from rest_framework.exceptions import PermissionDenied
 
 from asnserial.models import AgentCommandPreview
 from company.models import ListModel as Company
@@ -16,6 +17,10 @@ from .service import CLEANUP_PAYLOAD, build_cleanup_plan, execute_cleanup
 from .views import TenantCleanupPreviewView
 
 
+@override_settings(
+    TENANT_CLEANUP_ENABLED=True,
+    TENANT_CLEANUP_ALLOWED_OPENIDS={'tenant-cleanup-test'},
+)
 class TenantCleanupServiceTests(TestCase):
     def setUp(self):
         self.tenant = 'tenant-cleanup-test'
@@ -95,6 +100,11 @@ class TenantCleanupServiceTests(TestCase):
         self.assertEqual(plan['deletions']['company.ListModel'], 1)
         self.assertEqual(plan['protected']['admin_staff_id'], self.admin.id)
         self.assertEqual(plan['protected']['session_id'], self.session.id)
+
+    @override_settings(TENANT_CLEANUP_ALLOWED_OPENIDS=set())
+    def test_cleanup_requires_an_explicitly_allowlisted_tenant(self):
+        with self.assertRaises(PermissionDenied):
+            build_cleanup_plan(self.request)
 
     def test_execute_deletes_tenant_data_but_preserves_admin_context_and_seed(self):
         command = AgentCommandPreview.objects.create(

@@ -66,6 +66,31 @@ class AgentPreviewPermissionTests(TestCase):
         self.assertNotIn('warehouse', agent_roles_for_operation('tenant.cleanup'))
         self.assertNotIn('warehouse', agent_roles_for_operation('outbound.cancel_intransit'))
 
+    def test_warehouse_can_preview_and_consume_inbound_command(self):
+        operator = Staff.objects.create(
+            staff_name='warehouse-operator',
+            staff_type='Warehouse',
+            openid='tenant',
+        )
+        payload = {
+            'container_tracking': 'SIM-WAREHOUSE-001',
+            'creater': operator.staff_name,
+        }
+        request = self.request(staff_id=operator.id, operator=str(operator.id))
+        request.data = payload
+
+        preview = create_preview(request, 'asn.create', payload)
+        request.data = {
+            'confirmation_token': preview['confirmation_token'],
+            'idempotency_key': 'warehouse-asn-create-001',
+        }
+        command, replay = consume_preview(request, 'asn.create', payload)
+
+        self.assertIsNotNone(command)
+        self.assertIsNone(replay)
+        self.assertEqual(command.operation, 'asn.create')
+        self.assertEqual(command.created_by, str(operator.id))
+
 
 class PackListWorkflowTests(TestCase):
     def setUp(self):

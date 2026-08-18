@@ -1,13 +1,28 @@
 import json
 
+from django.core.cache import cache
 from django.test import Client, TestCase
+from django.test.utils import override_settings
 
 from staff.models import ListModel, StaffSessionToken
+from staff.serializers import (
+    FileRenderSerializer,
+    StaffGetSerializer,
+    StaffPartialUpdateSerializer,
+    StaffPostSerializer,
+    StaffUpdateSerializer,
+)
 
 
+@override_settings(
+    STAFF_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60,
+    STAFF_LOGIN_ACCOUNT_RATE_LIMIT=3,
+    STAFF_LOGIN_IP_RATE_LIMIT=10,
+)
 class DirectStaffLoginTests(TestCase):
     def setUp(self):
         self.client = Client()
+        cache.clear()
         self.staff = ListModel.objects.create(
             staff_name='op10@peaksmartlogistics.com',
             staff_type='Warehouse',
@@ -41,15 +56,24 @@ class DirectStaffLoginTests(TestCase):
             1,
         )
 
-    def test_wrong_check_code_locks_after_three_attempts(self):
+    def test_wrong_check_code_does_not_lock_shared_account(self):
         for _ in range(2):
             response = self.post_login(check_code=999999)
             self.assertEqual(response.status_code, 401)
         response = self.post_login(check_code=999999)
-        self.assertEqual(response.status_code, 423)
+        self.assertEqual(response.status_code, 401)
         self.staff.refresh_from_db()
-        self.assertTrue(self.staff.is_lock)
+        self.assertFalse(self.staff.is_lock)
         self.assertEqual(self.staff.error_check_code_counter, 0)
+
+    def test_repeated_wrong_codes_are_rate_limited_without_locking_account(self):
+        for _ in range(3):
+            response = self.post_login(check_code=999999)
+            self.assertEqual(response.status_code, 401)
+        response = self.post_login(check_code=999999)
+        self.assertEqual(response.status_code, 429)
+        self.staff.refresh_from_db()
+        self.assertFalse(self.staff.is_lock)
 
     def test_locked_staff_cannot_login(self):
         self.staff.is_lock = True
@@ -72,3 +96,10 @@ class DirectStaffLoginTests(TestCase):
     def test_invalid_method_is_rejected(self):
         response = self.client.get('/staff/login/')
         self.assertEqual(response.status_code, 405)
+
+    def test_staff_serializers_never_return_check_code(self):
+        self.assertNotIn('check_code', StaffGetSerializer(self.staff).data)
+        self.assertNotIn('check_code', FileRenderSerializer(self.staff).data)
+        self.assertNotIn('check_code', StaffPostSerializer(self.staff).data)
+        self.assertNotIn('check_code', StaffUpdateSerializer(self.staff).data)
+        self.assertNotIn('check_code', StaffPartialUpdateSerializer(self.staff).data)

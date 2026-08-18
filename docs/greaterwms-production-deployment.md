@@ -24,6 +24,9 @@ ALLOWED_HOSTS=greaterwms-production.onrender.com,maxsmartwms.online,app.maxsmart
 CORS_ALLOWED_ORIGINS=https://greaterwms-production.onrender.com,https://maxsmartwms.online,https://app.maxsmartwms.online
 CORS_ALLOW_CREDENTIALS=False
 SECURE_HSTS_SECONDS=31536000
+# Keep tenant cleanup disabled in production; no cleanup allowlist is needed.
+# TENANT_CLEANUP_ENABLED=False
+# TENANT_CLEANUP_ALLOWED_OPENIDS=
 ```
 
 Set the Render health-check path to `/health/`. The endpoint performs a small

@@ -5,6 +5,7 @@ does not connect to or mutate the production database outside Django's API.
 """
 
 from django.apps import apps
+from django.conf import settings
 from django.db import transaction
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -97,6 +98,13 @@ def _require_admin_context(request):
         raise PermissionDenied('Only the platform administrator can clean tenant data')
 
     tenant_openid = str(getattr(identity, 'openid', '') or '')
+    if (
+        not settings.TENANT_CLEANUP_ENABLED
+        or tenant_openid not in settings.TENANT_CLEANUP_ALLOWED_OPENIDS
+    ):
+        raise PermissionDenied(
+            'Tenant cleanup is disabled unless this tenant is explicitly allowlisted as disposable'
+        )
     admin_id = getattr(identity, 'staff_id', None)
     admin = Staff.objects.filter(
         id=admin_id,
@@ -162,8 +170,8 @@ def _ordered_tenant_models():
             yield model
 
 
-def build_cleanup_plan(request, protected_preview_id=None):
-    context = _require_admin_context(request)
+def build_cleanup_plan(request, protected_preview_id=None, context=None):
+    context = context or _require_admin_context(request)
     deletions = {}
     protected = {
         'admin_staff_id': context['admin'].id,
@@ -193,12 +201,17 @@ def execute_cleanup(request, command):
         if locked_command.status == AgentCommandPreview.EXECUTED:
             return locked_command.result
 
-        plan = build_cleanup_plan(request, protected_preview_id=locked_command.id)
+        context = _require_admin_context(request)
+        plan = build_cleanup_plan(
+            request,
+            protected_preview_id=locked_command.id,
+            context=context,
+        )
         deleted = {}
         for model in _ordered_tenant_models():
             queryset = _query_for_model(
                 model,
-                _require_admin_context(request),
+                context,
                 protected_preview_id=locked_command.id,
             )
             before = queryset.count()
@@ -207,7 +220,6 @@ def execute_cleanup(request, command):
             deleted[model._meta.label] = before
 
         remaining = {}
-        context = _require_admin_context(request)
         for model in _tenant_models():
             remaining_count = _query_for_model(
                 model,

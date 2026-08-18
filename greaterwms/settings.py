@@ -47,6 +47,28 @@ DEBUG = _env_bool('DEBUG', default=False)
 ALLOW_LEGACY_OPENID_AUTH = _env_bool('ALLOW_LEGACY_OPENID_AUTH', default=False)
 AUTH_SESSION_TTL_DAYS = max(1, int(os.environ.get('AUTH_SESSION_TTL_DAYS', '30')))
 
+# Tenant cleanup is a destructive operation intended only for explicitly
+# allowlisted disposable tenants.  It is disabled by default, including in
+# production even when an administrator has a valid session.
+TENANT_CLEANUP_ENABLED = _env_bool('TENANT_CLEANUP_ENABLED', default=False)
+TENANT_CLEANUP_ALLOWED_OPENIDS = frozenset(
+    _env_list('TENANT_CLEANUP_ALLOWED_OPENIDS', [])
+)
+
+# Direct staff login is intentionally rate-limited in the shared cache.  Do
+# not use the account row's global failure counter here: an unauthenticated
+# caller must not be able to lock out every operator in the tenant.
+STAFF_LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(
+    60, int(os.environ.get('STAFF_LOGIN_RATE_LIMIT_WINDOW_SECONDS', '600'))
+)
+STAFF_LOGIN_ACCOUNT_RATE_LIMIT = max(
+    3, int(os.environ.get('STAFF_LOGIN_ACCOUNT_RATE_LIMIT', '5'))
+)
+STAFF_LOGIN_IP_RATE_LIMIT = max(
+    STAFF_LOGIN_ACCOUNT_RATE_LIMIT,
+    int(os.environ.get('STAFF_LOGIN_IP_RATE_LIMIT', '30'))
+)
+
 ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', [
     'localhost',
     '127.0.0.1',

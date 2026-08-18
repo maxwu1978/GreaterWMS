@@ -24,8 +24,11 @@ Content-Type: application/json
 The response contains `data.token`. Use that value as `HTTP_TOKEN` for the
 staff member's subsequent requests. The staff name must identify exactly one
 active non-administrator account across the system; duplicate names are
-rejected so a login cannot select the wrong tenant. Three consecutive failed
-check codes lock the account and require administrator intervention.
+rejected so a login cannot select the wrong tenant. Direct-login failures are
+rate-limited by client IP and staff name. They do not increment the shared
+account lock counter, so a caller cannot lock every operator by submitting
+three bad codes. An administrator can still lock an account explicitly, and a
+locked account requires administrator intervention.
 
 For compatibility, an administrator can still validate a staff name and check
 code from an existing administrator session:
@@ -46,3 +49,17 @@ rejected. Administrator sessions may act without an operator header.
 The previous behavior of accepting a tenant `openid` directly as an API token
 is disabled by default. `ALLOW_LEGACY_OPENID_AUTH=true` is available only for
 a controlled migration and must not be enabled in production.
+
+## Tenant cleanup
+
+Tenant cleanup is a destructive test-data operation. It is disabled by default,
+including for production administrators. To use it in an isolated disposable
+environment, set both variables in that environment only:
+
+```text
+TENANT_CLEANUP_ENABLED=true
+TENANT_CLEANUP_ALLOWED_OPENIDS=<explicit-disposable-tenant-openid>
+```
+
+The production service must not set either variable. A valid administrator
+session alone is not sufficient to authorize cleanup.
