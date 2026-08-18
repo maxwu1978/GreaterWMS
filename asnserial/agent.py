@@ -15,6 +15,7 @@ from .models import (
     OperationAudit,
     SourceEvidence,
     SourceExtraction,
+    SourceIntakeRecord,
 )
 
 
@@ -254,6 +255,7 @@ def create_source_evidence(request, source_type, operation, metadata=None, extra
             content_hash=normalized_hash,
         ).first()
         if existing is not None:
+            existing._capture_reused = True
             return existing
     source = SourceEvidence.objects.create(
         openid=request.auth.openid,
@@ -270,6 +272,7 @@ def create_source_evidence(request, source_type, operation, metadata=None, extra
         storage_uri=str(storage_uri or '')[:1000],
         storage_size=max(int(storage_size or 0), 0),
     )
+    source._capture_reused = False
     for field in extracted_fields or []:
         if not isinstance(field, dict) or not str(field.get('field_name') or '').strip():
             continue
@@ -403,8 +406,28 @@ def create_web_preview(request, operation, payload, page=''):
         request,
         SourceEvidence.WEB_FORM,
         operation,
-        metadata={'page': str(page or operation), 'entry_point': 'WMS web'},
+        metadata={
+            'page': str(page or operation),
+            'entry_point': 'WMS web',
+            'business_operation': operation,
+            'document_type': 'Inbound Notice' if operation == 'asn.create' else 'Delivery Request',
+        },
         content_hash=payload_hash(payload),
+    )
+    # Web entry uses the same source board, without asking the operator to
+    # create a separate evidence record by hand.
+    from .intake import ensure_source_intake_record, update_source_intake
+    intake, _ = ensure_source_intake_record(source)
+    update_source_intake(
+        intake,
+        {
+            'status': SourceIntakeRecord.APPROVAL_REQUIRED,
+            'owner_role': str(getattr(identity, 'staff_type', '') or '').upper(),
+            'next_action': 'Review the web preview and approve or discard it.',
+        },
+        actor_type='WEB_USER',
+        actor_name=str(getattr(identity, 'staff_name', '') or ''),
+        event_type='WEB_PREVIEW_CREATED',
     )
     now = timezone.now()
     command = AgentCommandPreview.objects.create(
@@ -569,7 +592,7 @@ def create_source_capture(request, data):
     source_type = str(data.get('source_type') or SourceEvidence.EMAIL).upper()
     if source_type not in {SourceEvidence.EMAIL, SourceEvidence.AI_AGENT, SourceEvidence.CLI}:
         raise ValidationError({'source_type': 'AI source capture supports EMAIL, AI_AGENT or CLI'})
-    return create_source_evidence(
+    source = create_source_evidence(
         request,
         source_type,
         data.get('operation') or 'external.instruction',
@@ -580,6 +603,11 @@ def create_source_capture(request, data):
         storage_size=data.get('storage_size') or 0,
         ai_session_id=data.get('ai_session_id') or '',
     )
+    from .intake import ensure_source_intake_record
+    # Backfill the board record for legacy SourceEvidence rows as well. The
+    # API view applies the DUPLICATE state only after this canonical lookup.
+    ensure_source_intake_record(source)
+    return source
 
 
 def create_preview(request, operation, payload, resource_id='', asn_code='', source_evidence_id=''):
@@ -612,6 +640,27 @@ def create_preview(request, operation, payload, resource_id='', asn_code='', sou
         expires_at=now + timedelta(minutes=15),
     )
     _record_operation_audit(command, OperationAudit.PREVIEWED, request=request)
+    if source is not None:
+        from .intake import update_source_intake
+        intake = SourceIntakeRecord.objects.filter(source=source).first()
+        if intake is not None and intake.status not in {
+            SourceIntakeRecord.COMPLETED,
+            SourceIntakeRecord.DUPLICATE,
+        }:
+            update_source_intake(
+                intake,
+                {
+                    'status': SourceIntakeRecord.APPROVAL_REQUIRED,
+                    'next_action': (
+                        'Use the structured AI approval action.'
+                        if surface == 'AI'
+                        else 'Review the dry-run and confirm the CLI operation.'
+                    ),
+                },
+                actor_type='AI_AGENT' if surface == 'AI' else 'CLI',
+                actor_name=str(getattr(request.auth, 'staff_name', '') or ''),
+                event_type='PREVIEW_CREATED',
+            )
     return {
         'detail': 'preview',
         'operation': operation,
@@ -691,6 +740,29 @@ def complete_preview(command, result):
             status=SourceEvidence.USED,
             used_at=timezone.now(),
         )
+        from .intake import update_source_intake
+        try:
+            intake = command.source_evidence.intake_record
+        except SourceIntakeRecord.DoesNotExist:
+            intake = None
+        if intake is not None:
+            if intake.status != SourceIntakeRecord.EXECUTING:
+                update_source_intake(
+                    intake,
+                    {'status': SourceIntakeRecord.EXECUTING, 'next_action': 'Write is in progress.'},
+                    actor_type='SYSTEM',
+                    event_type='WRITE_STARTED',
+                )
+            update_source_intake(
+                intake,
+                {
+                    'status': SourceIntakeRecord.COMPLETED,
+                    'completed_at': timezone.now(),
+                    'next_action': 'No further source action.',
+                },
+                actor_type='SYSTEM',
+                event_type='WRITE_COMPLETED',
+            )
     _record_operation_audit(
         command,
         OperationAudit.SUCCEEDED,

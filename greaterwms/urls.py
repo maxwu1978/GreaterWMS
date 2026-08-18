@@ -22,9 +22,14 @@ urlpatterns = [
     path('cli/install/', views.cli_install, name='cli-install'),
     path('cli/download/', views.cli_download, name='cli-download'),
     path(
-        'skills/wms-email-intake-operator/download/',
+        'skills/wms-scheduled-email-intake/download/',
         views.email_intake_skill_download,
-        name='email-intake-skill-download',
+        name='scheduled-email-intake-skill-download',
+    ),
+    path(
+        'skills/wms-email-intake-operator/download/',
+        views.legacy_email_intake_skill_download,
+        name='legacy-email-intake-skill-download',
     ),
     path('asn/', include('asn.urls')),
     path('asn/serial/', include('asnserial.urls')),

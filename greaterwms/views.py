@@ -103,6 +103,7 @@ def cli_install(request):
             ],
             'first_commands': [
                 'node tools/greaterwms.mjs auth status --json',
+                'node tools/greaterwms.mjs source intake --env production --json',
                 'node tools/greaterwms.mjs dashboard-operations list --env production --json',
                 'node tools/greaterwms.mjs receiving list --env production --json',
             ],
@@ -115,14 +116,14 @@ def cli_install(request):
         },
         'skills': [
             {
-                'name': 'wms-email-intake-operator',
-                'version': '1.0.0',
-                'description': 'Read warehouse emails and attachments, classify documents, reconcile GreaterWMS data, and prepare the next safe workflow step.',
-                'download_url': 'https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/',
+                'name': 'wms-scheduled-email-intake',
+                'version': '2.0.0',
+                'description': 'Use the local Mail CLI to scan warehouse email, classify documents, reconcile GreaterWMS data, and prepare the next safe workflow step.',
+                'download_url': 'https://api.maxsmartwms.online/skills/wms-scheduled-email-intake/download/',
                 'archive': 'zip',
                 'install_commands': [
-                    'mkdir -p ~/.codex/skills && curl -fsSL https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/ -o /tmp/wms-email-intake-operator.zip',
-                    'unzip -q -o /tmp/wms-email-intake-operator.zip -d ~/.codex/skills',
+                    'mkdir -p ~/.codex/skills && curl -fsSL https://api.maxsmartwms.online/skills/wms-scheduled-email-intake/download/ -o /tmp/wms-scheduled-email-intake.zip',
+                    'unzip -q -o /tmp/wms-scheduled-email-intake.zip -d ~/.codex/skills',
                 ],
                 'safety': [
                     'The Skill is read-only by default and requires GreaterWMS dry-run and confirmation gates before writes.',
@@ -154,7 +155,7 @@ def cli_download(request):
     return response
 
 
-def email_intake_skill_download(request):
+def email_intake_skill_download(request, archive_name='wms-scheduled-email-intake'):
     """Download the governed warehouse email intake Skill as a ZIP bundle."""
     if request.method != 'GET':
         return JsonResponse({'detail': 'Method not allowed'}, status=405)
@@ -163,7 +164,7 @@ def email_intake_skill_download(request):
         settings.BASE_DIR,
         'tools',
         'skills',
-        'wms-email-intake-operator',
+        'wms-scheduled-email-intake',
     )
     skill_files = (
         'SKILL.md',
@@ -178,10 +179,15 @@ def email_intake_skill_download(request):
         for relative_path in skill_files:
             bundle.write(
                 os.path.join(skill_root, relative_path),
-                arcname=os.path.join('wms-email-intake-operator', relative_path),
+                arcname=os.path.join(archive_name, relative_path),
             )
 
     response = HttpResponse(archive.getvalue(), content_type='application/zip')
-    response['Content-Disposition'] = 'attachment; filename="wms-email-intake-operator.zip"'
+    response['Content-Disposition'] = f'attachment; filename="{archive_name}.zip"'
     response['Cache-Control'] = 'no-store'
     return response
+
+
+def legacy_email_intake_skill_download(request):
+    """Compatibility URL for the pre-scheduled Skill name."""
+    return email_intake_skill_download(request, archive_name='wms-email-intake-operator')

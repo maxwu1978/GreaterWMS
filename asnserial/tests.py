@@ -39,12 +39,17 @@ from .models import (
     AsnSerialRecord,
     AgentCommandPreview,
     EntityProvenance,
+    MailboxSyncRun,
+    MailboxSyncState,
     OperationAudit,
     PackListDocument,
     PackListImportBatch,
     PackListLine,
     SourceEvidence,
+    SourceAttachment,
     SourceExtraction,
+    SourceIntakeEvent,
+    SourceIntakeRecord,
 )
 from .views import (
     SerialExceptionResolveView,
@@ -60,6 +65,13 @@ from .views import (
     WebWorkflowApproveView,
     WebWorkflowPreviewView,
     AgentCommandApproveView,
+    MailboxSyncRunCompleteView,
+    MailboxSyncRunCreateView,
+    MailboxSyncStateView,
+    SourceCaptureView,
+    SourceIntakeDetailView,
+    SourceIntakeListView,
+    SourceIntakeUpdateView,
 )
 from .agent import (
     agent_roles_for_operation,
@@ -72,6 +84,7 @@ from .agent import (
     create_web_preview,
     request_payload,
 )
+from .intake import ensure_source_intake_record, update_source_intake
 from .permissions import AgentPreviewPermission
 
 
@@ -162,6 +175,237 @@ class SourceProvenanceWorkflowTests(TestCase):
             method='POST',
         )
 
+    def test_email_capture_creates_source_intake_and_attachment_records(self):
+        request = self.request(
+            data={
+                'source_type': 'EMAIL',
+                'operation': 'external.instruction',
+                'content_hash': 'a' * 64,
+                'sync_run_id': '',
+                'metadata': {
+                    'mailbox_account': 'sales@example.com',
+                    'message_id': '<message-1@example.com>',
+                    'thread_id': 'thread-1',
+                    'sender_name': 'Mark Tang',
+                    'sender_email': 'mark@example.com',
+                    'subject': 'Inbound Notice TRHU4217950',
+                    'document_type': 'Inbound Notice',
+                    'business_operation': 'inbound',
+                    'external_reference': 'TRHU4217950',
+                    'attachments': [{
+                        'name': 'inbound-list.xlsx',
+                        'content_type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'sha256': 'b' * 64,
+                        'size': 1024,
+                        'security_status': 'STORED',
+                    }],
+                },
+                'extracted_fields': [{
+                    'field_name': 'container_no',
+                    'raw_value': 'TRHU4217950',
+                    'normalized_value': 'TRHU4217950',
+                    'source_location': 'email body',
+                    'confidence': 0.98,
+                }],
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        response = SourceCaptureView().post(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(SourceEvidence.objects.count(), 1)
+        self.assertEqual(SourceIntakeRecord.objects.count(), 1)
+        self.assertEqual(SourceAttachment.objects.count(), 1)
+        intake = SourceIntakeRecord.objects.get()
+        self.assertEqual(intake.operation, SourceIntakeRecord.INBOUND)
+        self.assertEqual(intake.document_type, SourceIntakeRecord.INBOUND_NOTICE)
+        self.assertEqual(intake.external_reference, 'TRHU4217950')
+        self.assertEqual(intake.status, SourceIntakeRecord.CAPTURED)
+        self.assertEqual(SourceIntakeEvent.objects.filter(intake=intake).count(), 1)
+
+    def test_duplicate_email_capture_is_recorded_without_duplicate_source(self):
+        data = {
+            'source_type': 'EMAIL',
+            'operation': 'external.instruction',
+            'content_hash': 'c' * 64,
+            'metadata': {
+                'mailbox_account': 'sales@example.com',
+                'message_id': '<message-duplicate@example.com>',
+                'document_type': 'Pack List',
+                'business_operation': 'inbound',
+            },
+        }
+        first_request = self.request(data=dict(data), surface='ai', client='greaterwms-ai')
+        first = SourceCaptureView().post(first_request)
+        second_request = self.request(data=dict(data), surface='ai', client='greaterwms-ai')
+        second = SourceCaptureView().post(second_request)
+
+        self.assertFalse(first.data['duplicate'])
+        self.assertTrue(second.data['duplicate'])
+        self.assertEqual(SourceEvidence.objects.count(), 1)
+        self.assertEqual(SourceIntakeRecord.objects.count(), 1)
+        self.assertEqual(SourceIntakeRecord.objects.get().status, SourceIntakeRecord.DUPLICATE)
+        self.assertEqual(SourceIntakeEvent.objects.filter(event_type='DUPLICATE').count(), 1)
+
+    def test_source_intake_status_transitions_are_logged_and_invalid_transition_is_rejected(self):
+        source = SourceEvidence.objects.create(
+            openid='tenant',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash='d' * 64,
+            mailbox_account='sales@example.com',
+            message_id='<message-transition@example.com>',
+        )
+        intake, _ = ensure_source_intake_record(source)
+        update_source_intake(intake, {'status': SourceIntakeRecord.ANALYZING}, actor_type='AI_AGENT')
+        update_source_intake(intake, {
+            'status': SourceIntakeRecord.READY_FOR_PREVIEW,
+            'next_action': 'Create inbound preview',
+        }, actor_type='AI_AGENT')
+
+        with self.assertRaises(ValidationError):
+            update_source_intake(intake, {'status': SourceIntakeRecord.COMPLETED}, actor_type='AI_AGENT')
+        self.assertEqual(intake.events.count(), 3)
+
+    def test_mailbox_sync_run_is_closed_with_counters(self):
+        request = self.request(
+            data={
+                'mailbox_account': 'sales@example.com',
+                'automation_run_id': 'codex-20260819-01',
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        created = MailboxSyncRunCreateView().post(request)
+        run_id = created.data['id']
+        complete_request = self.request(
+            data={
+                'status': 'PARTIAL',
+                'fetched_count': 4,
+                'captured_count': 2,
+                'duplicate_count': 1,
+                'review_count': 1,
+                'failed_count': 0,
+                'cursor_after': 'cursor-2',
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        completed = MailboxSyncRunCompleteView().post(complete_request, run_id)
+
+        self.assertEqual(completed.data['status'], MailboxSyncRun.PARTIAL)
+        run = MailboxSyncRun.objects.get(id=run_id)
+        self.assertEqual(run.fetched_count, 4)
+        self.assertEqual(run.cursor_after, 'cursor-2')
+
+    def test_mailbox_sync_run_rejects_unknown_trigger_source(self):
+        request = self.request(
+            data={
+                'mailbox_account': 'sales@example.com',
+                'trigger_source': 'UNKNOWN_SCHEDULER',
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        with self.assertRaises(ValidationError):
+            MailboxSyncRunCreateView().post(request)
+
+    def test_mailbox_sync_cursor_advances_only_after_success(self):
+        first_request = self.request(
+            data={
+                'mailbox_account': 'cursor@example.com',
+                'automation_run_id': 'cursor-run-1',
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        first = MailboxSyncRunCreateView().post(first_request)
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.data['cursor_before'], '')
+
+        partial = MailboxSyncRunCompleteView().post(
+            self.request(
+                data={
+                    'status': 'PARTIAL',
+                    'cursor_after': '100|message-1',
+                    'failed_count': 1,
+                },
+                surface='ai',
+                client='greaterwms-ai',
+            ),
+            first.data['id'],
+        )
+        self.assertEqual(partial.status_code, 200)
+        state = MailboxSyncState.objects.get(openid='tenant', mailbox_account='cursor@example.com')
+        self.assertEqual(state.cursor, '')
+
+        second = MailboxSyncRunCreateView().post(
+            self.request(
+                data={
+                    'mailbox_account': 'cursor@example.com',
+                    'automation_run_id': 'cursor-run-2',
+                },
+                surface='ai',
+                client='greaterwms-ai',
+            )
+        )
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(second.data['cursor_before'], '')
+        completed = MailboxSyncRunCompleteView().post(
+            self.request(
+                data={
+                    'status': 'SUCCEEDED',
+                    'cursor_after': '200|message-2',
+                },
+                surface='ai',
+                client='greaterwms-ai',
+            ),
+            second.data['id'],
+        )
+        self.assertEqual(completed.data['state_cursor'], '200|message-2')
+
+        third = MailboxSyncRunCreateView().post(
+            self.request(
+                data={
+                    'mailbox_account': 'cursor@example.com',
+                    'automation_run_id': 'cursor-run-3',
+                },
+                surface='ai',
+                client='greaterwms-ai',
+            )
+        )
+        self.assertEqual(third.status_code, 201)
+        self.assertEqual(third.data['cursor_before'], '200|message-2')
+
+    def test_mailbox_sync_rejects_concurrent_run_and_exposes_state(self):
+        first = MailboxSyncRunCreateView().post(
+            self.request(
+                data={'mailbox_account': 'locked@example.com'},
+                surface='ai',
+                client='greaterwms-ai',
+            )
+        )
+        self.assertEqual(first.status_code, 201)
+
+        blocked = MailboxSyncRunCreateView().post(
+            self.request(
+                data={'mailbox_account': 'locked@example.com'},
+                surface='ai',
+                client='greaterwms-ai',
+            )
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.data['code'], 'MAILBOX_SYNC_IN_PROGRESS')
+
+        state = MailboxSyncStateView().get(SimpleNamespace(
+            auth=SimpleNamespace(openid='tenant', staff_id=self.operator.id, staff_type=self.operator.staff_type),
+            META={'HTTP_OPERATOR': str(self.operator.id), 'HTTP_X_AGENT_CLIENT': 'greaterwms-ai'},
+            query_params={'mailbox_account': 'locked@example.com'},
+        ))
+        self.assertTrue(state.data['active'])
+        self.assertEqual(state.data['active_run_id'], first.data['id'])
+
     def test_web_preview_creates_source_and_requires_approval(self):
         payload = {
             'header': {'supplier': 'Delta', 'creater': self.operator.staff_name},
@@ -177,6 +421,10 @@ class SourceProvenanceWorkflowTests(TestCase):
         command = AgentCommandPreview.objects.get(id=preview['preview_id'])
         self.assertEqual(command.execution_surface, 'WEB')
         self.assertEqual(command.source_evidence.source_type, SourceEvidence.WEB_FORM)
+        intake = SourceIntakeRecord.objects.get(source=command.source_evidence)
+        self.assertEqual(intake.operation, SourceIntakeRecord.INBOUND)
+        self.assertEqual(intake.status, SourceIntakeRecord.APPROVAL_REQUIRED)
+        self.assertEqual(intake.events.filter(event_type='WEB_PREVIEW_CREATED').count(), 1)
         self.assertEqual(command.status, AgentCommandPreview.PENDING)
 
         request.data = {'web_preview_id': command.id}
@@ -302,6 +550,10 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 201)
         command.refresh_from_db()
         self.assertEqual(command.status, AgentCommandPreview.EXECUTED)
+        self.assertEqual(
+            SourceIntakeRecord.objects.get(source=source).status,
+            SourceIntakeRecord.COMPLETED,
+        )
         self.assertTrue(
             OperationAudit.objects.filter(
                 preview=command,
@@ -348,6 +600,10 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(AsnListModel.objects.filter(openid='tenant', supplier='Delta').count(), 1)
         self.assertEqual(AsnDetailModel.objects.filter(openid='tenant', goods_code='702-S').count(), 1)
         self.assertEqual(SourceEvidence.objects.filter(openid='tenant', status=SourceEvidence.USED).count(), 1)
+        self.assertEqual(
+            SourceIntakeRecord.objects.get(source__source_type=SourceEvidence.WEB_FORM).status,
+            SourceIntakeRecord.COMPLETED,
+        )
 
     def test_web_outbound_preview_approval_writes_parent_and_detail(self):
         Customer.objects.create(

@@ -28,6 +28,12 @@ urlpatterns = [
     path('sources/capture/', views.SourceCaptureView.as_view(), name='source-evidence-capture'),
     path('sources/', views.SourceEvidenceListView.as_view(), name='source-evidence-list'),
     path('sources/audits/', views.OperationAuditListView.as_view(), name='operation-audit-list'),
+    path('intake/', views.SourceIntakeListView.as_view(), name='source-intake-list'),
+    path('intake/sync-runs/', views.MailboxSyncRunCreateView.as_view(), name='mailbox-sync-run-create'),
+    path('intake/sync-state/', views.MailboxSyncStateView.as_view(), name='mailbox-sync-state'),
+    path('intake/sync-runs/<int:pk>/complete/', views.MailboxSyncRunCompleteView.as_view(), name='mailbox-sync-run-complete'),
+    path('intake/<int:pk>/', views.SourceIntakeDetailView.as_view(), name='source-intake-detail'),
+    path('intake/<int:pk>/update/', views.SourceIntakeUpdateView.as_view(), name='source-intake-update'),
     path('web/preview/', views.WebWorkflowPreviewView.as_view(), name='web-workflow-preview'),
     path('web/preview/<int:pk>/approve/', views.WebWorkflowApproveView.as_view(), name='web-workflow-approve'),
 ]

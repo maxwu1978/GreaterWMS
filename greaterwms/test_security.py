@@ -28,7 +28,7 @@ class ProductionSecurityTests(TestCase):
         self.assertEqual(payload['cli']['download_url'], 'https://api.maxsmartwms.online/cli/download/')
         self.assertEqual(
             payload['skills'][0]['download_url'],
-            'https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/',
+            'https://api.maxsmartwms.online/skills/wms-scheduled-email-intake/download/',
         )
         self.assertIn('~/.codex/skills', payload['skills'][0]['install_commands'][0])
         self.assertIn('/staff/login/', [item['endpoint'] for item in payload['cli']['auth']])
@@ -48,30 +48,41 @@ class ProductionSecurityTests(TestCase):
         response = self.client.post('/cli/download/', {})
         self.assertEqual(response.status_code, 405)
 
-    def test_email_intake_skill_download_contains_only_skill_bundle(self):
-        response = self.client.get('/skills/wms-email-intake-operator/download/')
+    def test_scheduled_email_intake_skill_download_contains_only_skill_bundle(self):
+        response = self.client.get('/skills/wms-scheduled-email-intake/download/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response['Content-Disposition'],
-            'attachment; filename="wms-email-intake-operator.zip"',
+            'attachment; filename="wms-scheduled-email-intake.zip"',
         )
         self.assertEqual(response['Cache-Control'], 'no-store')
         with ZipFile(BytesIO(response.content)) as bundle:
             self.assertEqual(
                 sorted(bundle.namelist()),
                 [
-                    'wms-email-intake-operator/SKILL.md',
-                    'wms-email-intake-operator/agents/openai.yaml',
-                    'wms-email-intake-operator/references/document-mapping.md',
+                    'wms-scheduled-email-intake/SKILL.md',
+                    'wms-scheduled-email-intake/agents/openai.yaml',
+                    'wms-scheduled-email-intake/references/document-mapping.md',
                 ],
             )
-            skill_text = bundle.read('wms-email-intake-operator/SKILL.md')
-            self.assertIn(b'wms-email-intake-operator', skill_text)
+            skill_text = bundle.read('wms-scheduled-email-intake/SKILL.md')
+            self.assertIn(b'wms-scheduled-email-intake', skill_text)
             self.assertNotIn(b'Authorization: Bearer', skill_text)
             self.assertNotIn(b'SECRET_KEY=', skill_text)
 
-    def test_email_intake_skill_download_rejects_non_get_requests(self):
-        response = self.client.post('/skills/wms-email-intake-operator/download/', {})
+    def test_legacy_email_intake_skill_download_remains_compatible(self):
+        response = self.client.get('/skills/wms-email-intake-operator/download/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="wms-email-intake-operator.zip"',
+        )
+        with ZipFile(BytesIO(response.content)) as bundle:
+            self.assertIn('wms-email-intake-operator/SKILL.md', bundle.namelist())
+            self.assertIn(b'wms-scheduled-email-intake', bundle.read('wms-email-intake-operator/SKILL.md'))
+
+    def test_scheduled_email_intake_skill_download_rejects_non_get_requests(self):
+        response = self.client.post('/skills/wms-scheduled-email-intake/download/', {})
         self.assertEqual(response.status_code, 405)
 
     def test_cli_install_manifest_rejects_non_get_requests(self):

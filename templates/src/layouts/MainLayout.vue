@@ -326,6 +326,18 @@
             <q-item-section avatar><q-icon name="terminal" /></q-item-section>
             <q-item-section>{{ $t("menuItem.cli") }}</q-item-section>
           </q-item>
+          <q-item
+            clickable
+            :to="{ name: 'source-intake' }"
+            @click="linkChange('source-intake')"
+            v-ripple
+            exact
+            :active="link === 'source-intake' && link !== ''"
+            :class="{ 'my-menu-link': link === 'source-intake' && link !== '' }"
+          >
+            <q-item-section avatar><q-icon name="mail_outline" /></q-item-section>
+            <q-item-section>Source Intake</q-item-section>
+          </q-item>
           <q-separator />
           <q-item
             clickable

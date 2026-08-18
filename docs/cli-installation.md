@@ -39,7 +39,7 @@ authentication assumption.
 
 ## Warehouse Email Intake Skill
 
-The production site also publishes the `wms-email-intake-operator` Skill. It
+The production site also publishes the `wms-scheduled-email-intake` Skill. It
 reads customer email and attachments, distinguishes Inbound Notice, Pack List,
 Pick Ticket, and QC/Scan Sheet documents, reconciles them with GreaterWMS, and
 guides the operator to the next safe step. It does not send email or write WMS
@@ -49,9 +49,9 @@ Install it into the Codex Skill directory:
 
 ```shell
 mkdir -p ~/.codex/skills
-curl -fsSL https://api.maxsmartwms.online/skills/wms-email-intake-operator/download/ \
-  -o /tmp/wms-email-intake-operator.zip
-unzip -q -o /tmp/wms-email-intake-operator.zip -d ~/.codex/skills
+curl -fsSL https://api.maxsmartwms.online/skills/wms-scheduled-email-intake/download/ \
+  -o /tmp/wms-scheduled-email-intake.zip
+unzip -q -o /tmp/wms-scheduled-email-intake.zip -d ~/.codex/skills
 ```
 
 The machine-readable `/cli/install/` manifest and the `CLI Setup` page expose

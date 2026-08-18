@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scheduled WMS Email Intake"
+  short_description: "Scan warehouse email and prepare safe WMS next steps"
+  default_prompt: "Use $wms-scheduled-email-intake to scan the configured mailbox with the local Mail CLI, classify warehouse documents, and prepare the next safe GreaterWMS step."

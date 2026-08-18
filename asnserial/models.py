@@ -63,6 +63,259 @@ class SourceEvidence(models.Model):
         ]
 
 
+class MailboxSyncRun(models.Model):
+    """One Codex Automation mailbox scan, kept separate from business writes."""
+
+    CODEX_AUTOMATION = 'CODEX_AUTOMATION'
+    MANUAL = 'MANUAL'
+    TRIGGER_CHOICES = (
+        (CODEX_AUTOMATION, 'Codex Automation'),
+        (MANUAL, 'Manual'),
+    )
+
+    RUNNING = 'RUNNING'
+    SUCCEEDED = 'SUCCEEDED'
+    PARTIAL = 'PARTIAL'
+    FAILED = 'FAILED'
+    STATUS_CHOICES = (
+        (RUNNING, 'Running'),
+        (SUCCEEDED, 'Succeeded'),
+        (PARTIAL, 'Partial'),
+        (FAILED, 'Failed'),
+    )
+
+    openid = models.CharField(max_length=255)
+    mailbox_account = models.CharField(max_length=255)
+    trigger_source = models.CharField(max_length=32, choices=TRIGGER_CHOICES, default=CODEX_AUTOMATION)
+    automation_run_id = models.CharField(max_length=255, blank=True, default='')
+    cursor_before = models.CharField(max_length=1000, blank=True, default='')
+    cursor_after = models.CharField(max_length=1000, blank=True, default='')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=RUNNING)
+    fetched_count = models.PositiveIntegerField(default=0)
+    captured_count = models.PositiveIntegerField(default=0)
+    duplicate_count = models.PositiveIntegerField(default=0)
+    review_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    error_summary = models.TextField(blank=True, default='')
+    metadata = models.JSONField(default=dict)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'mailboxsyncrun'
+        ordering = ['-started_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'mailbox_account', 'started_at']),
+            models.Index(fields=['openid', 'status', 'started_at']),
+        ]
+
+
+class MailboxSyncState(models.Model):
+    """Durable cursor and lease for one tenant mailbox automation stream."""
+
+    openid = models.CharField(max_length=255)
+    mailbox_account = models.CharField(max_length=255)
+    cursor = models.CharField(max_length=1000, blank=True, default='')
+    active_run = models.ForeignKey(
+        MailboxSyncRun,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+    )
+    last_successful_run = models.ForeignKey(
+        MailboxSyncRun,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+    )
+    lease_expires_at = models.DateTimeField(blank=True, null=True)
+    last_error = models.TextField(blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'mailboxsyncstate'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['openid', 'mailbox_account'],
+                name='mailboxsyncstate_tenant_account_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['openid', 'mailbox_account']),
+            models.Index(fields=['openid', 'lease_expires_at']),
+        ]
+
+
+class SourceAttachment(models.Model):
+    """Metadata for an email attachment; bytes live outside the WMS database."""
+
+    PENDING = 'PENDING'
+    STORED = 'STORED'
+    REJECTED = 'REJECTED'
+    SECURITY_STATUS_CHOICES = (
+        (PENDING, 'Pending'),
+        (STORED, 'Stored'),
+        (REJECTED, 'Rejected'),
+    )
+
+    source = models.ForeignKey(
+        SourceEvidence,
+        related_name='attachments',
+        on_delete=models.PROTECT,
+    )
+    openid = models.CharField(max_length=255)
+    attachment_name = models.CharField(max_length=512)
+    content_type = models.CharField(max_length=255, blank=True, default='')
+    content_hash = models.CharField(max_length=64)
+    storage_uri = models.CharField(max_length=1000, blank=True, default='')
+    storage_size = models.PositiveBigIntegerField(default=0)
+    security_status = models.CharField(max_length=16, choices=SECURITY_STATUS_CHOICES, default=PENDING)
+    source_location = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sourceattachment'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['openid', 'content_hash']),
+            models.Index(fields=['source', 'attachment_name']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['source', 'content_hash'],
+                name='sourceattachment_source_hash_unique',
+            ),
+        ]
+
+
+class SourceIntakeRecord(models.Model):
+    """Current processing state for one captured external source."""
+
+    INBOUND = 'INBOUND'
+    OUTBOUND = 'OUTBOUND'
+    SUPPORTING = 'SUPPORTING'
+    UNKNOWN = 'UNKNOWN'
+    OPERATION_CHOICES = (
+        (INBOUND, 'Inbound'),
+        (OUTBOUND, 'Outbound'),
+        (SUPPORTING, 'Supporting'),
+        (UNKNOWN, 'Unknown'),
+    )
+
+    INBOUND_NOTICE = 'INBOUND_NOTICE'
+    PACK_LIST = 'PACK_LIST'
+    PICK_TICKET = 'PICK_TICKET'
+    DELIVERY_REQUEST = 'DELIVERY_REQUEST'
+    APPOINTMENT = 'APPOINTMENT'
+    QC_SCAN = 'QC_SCAN'
+    OTHER = 'OTHER'
+    DOCUMENT_CHOICES = (
+        (INBOUND_NOTICE, 'Inbound notice'),
+        (PACK_LIST, 'Pack List'),
+        (PICK_TICKET, 'Pick Ticket'),
+        (DELIVERY_REQUEST, 'Delivery request'),
+        (APPOINTMENT, 'Appointment'),
+        (QC_SCAN, 'QC / scan sheet'),
+        (OTHER, 'Other'),
+    )
+
+    CAPTURED = 'CAPTURED'
+    ANALYZING = 'ANALYZING'
+    REVIEW_REQUIRED = 'REVIEW_REQUIRED'
+    READY_FOR_PREVIEW = 'READY_FOR_PREVIEW'
+    APPROVAL_REQUIRED = 'APPROVAL_REQUIRED'
+    EXECUTING = 'EXECUTING'
+    COMPLETED = 'COMPLETED'
+    BLOCKED = 'BLOCKED'
+    DUPLICATE = 'DUPLICATE'
+    FAILED = 'FAILED'
+    STATUS_CHOICES = (
+        (CAPTURED, 'Captured'),
+        (ANALYZING, 'Analyzing'),
+        (REVIEW_REQUIRED, 'Review required'),
+        (READY_FOR_PREVIEW, 'Ready for preview'),
+        (APPROVAL_REQUIRED, 'Approval required'),
+        (EXECUTING, 'Executing'),
+        (COMPLETED, 'Completed'),
+        (BLOCKED, 'Blocked'),
+        (DUPLICATE, 'Duplicate'),
+        (FAILED, 'Failed'),
+    )
+
+    source = models.OneToOneField(
+        SourceEvidence,
+        related_name='intake_record',
+        on_delete=models.PROTECT,
+    )
+    sync_run = models.ForeignKey(
+        MailboxSyncRun,
+        related_name='intake_records',
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    openid = models.CharField(max_length=255)
+    mailbox_account = models.CharField(max_length=255, blank=True, default='')
+    operation = models.CharField(max_length=16, choices=OPERATION_CHOICES, default=UNKNOWN)
+    document_type = models.CharField(max_length=32, choices=DOCUMENT_CHOICES, default=OTHER)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=CAPTURED)
+    sender_name = models.CharField(max_length=255, blank=True, default='')
+    sender_email = models.CharField(max_length=255, blank=True, default='')
+    subject = models.CharField(max_length=1000, blank=True, default='')
+    external_reference = models.CharField(max_length=255, blank=True, default='')
+    matched_entity_type = models.CharField(max_length=64, blank=True, default='')
+    matched_entity_ref = models.CharField(max_length=255, blank=True, default='')
+    owner_role = models.CharField(max_length=64, blank=True, default='')
+    next_action = models.CharField(max_length=1000, blank=True, default='')
+    exception_summary = models.TextField(blank=True, default='')
+    last_error = models.TextField(blank=True, default='')
+    classification_confidence = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
+    metadata = models.JSONField(default=dict)
+    received_at = models.DateTimeField(blank=True, null=True)
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sourceintakerecord'
+        ordering = ['-updated_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'status', 'updated_at']),
+            models.Index(fields=['openid', 'operation', 'updated_at']),
+            models.Index(fields=['openid', 'mailbox_account', 'received_at']),
+            models.Index(fields=['openid', 'matched_entity_type', 'matched_entity_ref']),
+        ]
+
+
+class SourceIntakeEvent(models.Model):
+    """Append-only state changes for the source intake board."""
+
+    intake = models.ForeignKey(
+        SourceIntakeRecord,
+        related_name='events',
+        on_delete=models.PROTECT,
+    )
+    openid = models.CharField(max_length=255)
+    status = models.CharField(max_length=32)
+    event_type = models.CharField(max_length=64)
+    message = models.TextField(blank=True, default='')
+    actor_type = models.CharField(max_length=64, blank=True, default='')
+    actor_name = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sourceintakeevent'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'intake', 'created_at']),
+            models.Index(fields=['openid', 'status', 'created_at']),
+        ]
+
+
 class SourceExtraction(models.Model):
     """A normalized field extracted from a source without storing credentials."""
 

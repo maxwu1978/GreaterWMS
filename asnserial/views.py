@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from io import BytesIO
 
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.response import Response
@@ -36,6 +37,9 @@ from .models import (
     EntityProvenance,
     OperationAudit,
     SourceEvidence,
+    SourceIntakeRecord,
+    MailboxSyncRun,
+    MailboxSyncState,
     PUTAWAY_APPROVED_RESOLUTIONS,
     resolution_allows_putaway,
 )
@@ -56,7 +60,8 @@ from .agent import (
     create_web_preview,
     consume_web_preview,
 )
-from .permissions import AgentPreviewPermission
+from .intake import INTAKE_ROLES, ensure_source_intake_record, update_source_intake
+from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
 EXCEPTION_STATUSES = {
@@ -316,9 +321,24 @@ class SourceCaptureView(APIView):
     """Capture source metadata before an AI agent creates an external instruction."""
 
     def post(self, request):
+        sync_run = None
+        sync_run_id = request.data.get('sync_run_id')
+        if sync_run_id:
+            sync_run = MailboxSyncRun.objects.filter(
+                id=sync_run_id,
+                openid=request.auth.openid,
+            ).first()
+            if sync_run is None:
+                raise ValidationError({'sync_run_id': 'Mailbox sync run does not exist for this tenant'})
         source = create_source_capture(request, request.data)
+        intake, created = ensure_source_intake_record(
+            source,
+            sync_run=sync_run,
+            duplicate=bool(getattr(source, '_capture_reused', False)),
+        )
         return Response({
             'detail': 'Source evidence captured',
+            'duplicate': bool(getattr(source, '_capture_reused', False)),
             'source_evidence': {
                 'id': source.id,
                 'source_type': source.source_type,
@@ -329,7 +349,357 @@ class SourceCaptureView(APIView):
                 'captured_at': source.captured_at.isoformat(),
                 'content_hash': source.content_hash,
             },
+            'intake_record': {
+                'id': intake.id,
+                'status': intake.status,
+                'operation': intake.operation,
+                'document_type': intake.document_type,
+                'created': created,
+                'next_action': intake.next_action,
+            },
         }, status=201)
+
+
+def _safe_source_metadata(metadata):
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if str(key).strip().lower() not in {'body', 'raw_body', 'password', 'token', 'authorization'}
+    }
+
+
+def _intake_payload(record, detail=False):
+    source = record.source
+    payload = {
+        'id': record.id,
+        'source_evidence_id': source.id,
+        'sync_run_id': record.sync_run_id,
+        'status': record.status,
+        'operation': record.operation,
+        'document_type': record.document_type,
+        'mailbox_account': record.mailbox_account,
+        'sender_name': record.sender_name,
+        'sender_email': record.sender_email,
+        'subject': record.subject,
+        'external_reference': record.external_reference,
+        'matched_entity_type': record.matched_entity_type,
+        'matched_entity_ref': record.matched_entity_ref,
+        'owner_role': record.owner_role,
+        'next_action': record.next_action,
+        'exception_summary': record.exception_summary,
+        'last_error': record.last_error,
+        'classification_confidence': record.classification_confidence,
+        'received_at': record.received_at,
+        'updated_at': record.updated_at,
+        'source_type': source.source_type,
+        'source_status': source.status,
+        'message_id': source.message_id,
+        'thread_id': source.thread_id,
+        'content_hash': source.content_hash,
+        'captured_at': source.captured_at,
+    }
+    if detail:
+        payload.update({
+            'metadata': _safe_source_metadata(record.metadata),
+            'storage_uri': source.storage_uri,
+            'storage_size': source.storage_size,
+            'extractions': [
+                {
+                    'field_name': item.field_name,
+                    'raw_value': item.raw_value,
+                    'normalized_value': item.normalized_value,
+                    'source_location': item.source_location,
+                    'confidence': item.confidence,
+                    'human_confirmed': item.human_confirmed,
+                    'used_for_write': item.used_for_write,
+                }
+                for item in source.extractions.all()
+            ],
+            'attachments': [
+                {
+                    'id': item.id,
+                    'attachment_name': item.attachment_name,
+                    'content_type': item.content_type,
+                    'content_hash': item.content_hash,
+                    'storage_uri': item.storage_uri,
+                    'storage_size': item.storage_size,
+                    'security_status': item.security_status,
+                    'source_location': item.source_location,
+                }
+                for item in source.attachments.all()
+            ],
+            'events': [
+                {
+                    'id': item.id,
+                    'status': item.status,
+                    'event_type': item.event_type,
+                    'message': item.message,
+                    'actor_type': item.actor_type,
+                    'actor_name': item.actor_name,
+                    'created_at': item.created_at,
+                }
+                for item in record.events.all()[:100]
+            ],
+        })
+    return payload
+
+
+class SourceIntakeListView(APIView):
+    """Independent source intake board API with bounded pagination."""
+
+    permission_classes = [SourceIntakePermission]
+
+    def get(self, request):
+        queryset = SourceIntakeRecord.objects.filter(
+            openid=request.auth.openid,
+        ).select_related('source', 'sync_run')
+        for field in ('status', 'operation', 'document_type', 'mailbox_account'):
+            value = str(request.query_params.get(field) or '').strip()
+            if value:
+                queryset = queryset.filter(**{field: value.upper() if field != 'mailbox_account' else value})
+        search = str(request.query_params.get('q') or '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(subject__icontains=search)
+                | Q(sender_email__icontains=search)
+                | Q(external_reference__icontains=search)
+                | Q(matched_entity_ref__icontains=search)
+            )
+        try:
+            limit = min(max(int(request.query_params.get('limit', 50)), 1), 200)
+            offset = max(int(request.query_params.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            return Response({'detail': 'limit and offset must be integers'}, status=400)
+        total = queryset.count()
+        counts = {
+            row['status']: row['count']
+            for row in queryset.values('status').annotate(count=Count('id'))
+        }
+        return Response({
+            'items': [_intake_payload(record) for record in queryset[offset:offset + limit]],
+            'total': total,
+            'offset': offset,
+            'limit': limit,
+            'has_more': offset + limit < total,
+            'counts': counts,
+        })
+
+
+class SourceIntakeDetailView(APIView):
+    permission_classes = [SourceIntakePermission]
+
+    def get(self, request, pk):
+        record = SourceIntakeRecord.objects.filter(
+            id=pk,
+            openid=request.auth.openid,
+        ).select_related('source', 'sync_run').prefetch_related(
+            'source__extractions', 'source__attachments', 'events',
+        ).first()
+        if record is None:
+            return Response({'detail': 'Source intake record not found'}, status=404)
+        return Response(_intake_payload(record, detail=True))
+
+
+class SourceIntakeUpdateView(APIView):
+    """Update classification/state from Codex without touching WMS business data."""
+
+    permission_classes = [AgentPreviewPermission]
+
+    def post(self, request, pk):
+        from .agent import require_agent_role
+
+        require_agent_role(request, INTAKE_ROLES)
+        record = SourceIntakeRecord.objects.filter(
+            id=pk,
+            openid=request.auth.openid,
+        ).select_related('source').first()
+        if record is None:
+            return Response({'detail': 'Source intake record not found'}, status=404)
+        actor_type = 'AI_AGENT' if str(request.META.get('HTTP_X_AGENT_CLIENT') or '').lower() == 'greaterwms-ai' else 'CLI'
+        actor_name = str(getattr(request.auth, 'staff_name', '') or '')
+        updated = update_source_intake(
+            record,
+            request.data,
+            actor_type=actor_type,
+            actor_name=actor_name,
+        )
+        return Response(_intake_payload(updated))
+
+
+class MailboxSyncRunCreateView(APIView):
+    """Start a Codex Automation mailbox scan."""
+
+    permission_classes = [AgentPreviewPermission]
+
+    def post(self, request):
+        from .agent import require_agent_role
+
+        require_agent_role(request, INTAKE_ROLES)
+        mailbox_account = str(request.data.get('mailbox_account') or '').strip()
+        if not mailbox_account:
+            raise ValidationError({'mailbox_account': 'mailbox_account is required'})
+        trigger_source = str(
+            request.data.get('trigger_source') or MailboxSyncRun.CODEX_AUTOMATION
+        ).strip().upper()
+        if trigger_source not in {MailboxSyncRun.CODEX_AUTOMATION, MailboxSyncRun.MANUAL}:
+            raise ValidationError({'trigger_source': 'Use CODEX_AUTOMATION or MANUAL'})
+        automation_run_id = str(request.data.get('automation_run_id') or '')[:255]
+        metadata = request.data.get('metadata') if isinstance(request.data.get('metadata'), dict) else {}
+        with transaction.atomic():
+            state, _ = MailboxSyncState.objects.get_or_create(
+                openid=request.auth.openid,
+                mailbox_account=mailbox_account[:255],
+            )
+            state = MailboxSyncState.objects.select_for_update().get(id=state.id)
+            now = timezone.now()
+            if state.active_run_id and state.lease_expires_at and state.lease_expires_at > now:
+                active_run = MailboxSyncRun.objects.filter(
+                    id=state.active_run_id,
+                    status=MailboxSyncRun.RUNNING,
+                ).first()
+                if active_run is not None:
+                    return Response({
+                        'detail': 'A mailbox sync is already running for this account',
+                        'code': 'MAILBOX_SYNC_IN_PROGRESS',
+                        'run_id': active_run.id,
+                        'cursor': state.cursor,
+                        'lease_expires_at': state.lease_expires_at,
+                    }, status=409)
+            run = MailboxSyncRun.objects.create(
+                openid=request.auth.openid,
+                mailbox_account=mailbox_account[:255],
+                trigger_source=trigger_source,
+                automation_run_id=automation_run_id,
+                cursor_before=state.cursor,
+                metadata=metadata,
+            )
+            state.active_run = run
+            state.lease_expires_at = now + timedelta(minutes=30)
+            state.last_error = ''
+            state.save(update_fields=['active_run', 'lease_expires_at', 'last_error', 'updated_at'])
+        return Response({
+            'id': run.id,
+            'status': run.status,
+            'mailbox_account': run.mailbox_account,
+            'cursor_before': run.cursor_before,
+            'lease_expires_at': state.lease_expires_at,
+            'started_at': run.started_at,
+        }, status=201)
+
+
+class MailboxSyncStateView(APIView):
+    """Return the durable cursor for one tenant mailbox."""
+
+    permission_classes = [AgentPreviewPermission]
+
+    def get(self, request):
+        from .agent import require_agent_role
+
+        require_agent_role(request, INTAKE_ROLES)
+        mailbox_account = str(request.query_params.get('mailbox_account') or '').strip()
+        if not mailbox_account:
+            raise ValidationError({'mailbox_account': 'mailbox_account is required'})
+        state = MailboxSyncState.objects.filter(
+            openid=request.auth.openid,
+            mailbox_account=mailbox_account,
+        ).select_related('active_run', 'last_successful_run').first()
+        if state is None:
+            return Response({
+                'mailbox_account': mailbox_account,
+                'cursor': '',
+                'active': False,
+            })
+        active = bool(
+            state.active_run_id
+            and state.active_run
+            and state.active_run.status == MailboxSyncRun.RUNNING
+            and state.lease_expires_at
+            and state.lease_expires_at > timezone.now()
+        )
+        return Response({
+            'mailbox_account': state.mailbox_account,
+            'cursor': state.cursor,
+            'active': active,
+            'active_run_id': state.active_run_id if active else None,
+            'lease_expires_at': state.lease_expires_at if active else None,
+            'last_successful_run_id': state.last_successful_run_id,
+            'last_error': state.last_error,
+        })
+
+
+class MailboxSyncRunCompleteView(APIView):
+    """Close a Codex Automation mailbox scan with counters and cursor."""
+
+    permission_classes = [AgentPreviewPermission]
+
+    def post(self, request, pk):
+        from .agent import require_agent_role
+
+        require_agent_role(request, INTAKE_ROLES)
+        with transaction.atomic():
+            run = MailboxSyncRun.objects.select_for_update().filter(
+                id=pk,
+                openid=request.auth.openid,
+            ).first()
+            if run is None:
+                return Response({'detail': 'Mailbox sync run not found'}, status=404)
+            if run.status != MailboxSyncRun.RUNNING:
+                return Response({
+                    'id': run.id,
+                    'status': run.status,
+                    'cursor_after': run.cursor_after,
+                    'detail': 'Mailbox sync run was already completed',
+                })
+            status = str(request.data.get('status') or MailboxSyncRun.SUCCEEDED).strip().upper()
+            if status not in {MailboxSyncRun.SUCCEEDED, MailboxSyncRun.PARTIAL, MailboxSyncRun.FAILED}:
+                raise ValidationError({'status': 'Sync run must finish as SUCCEEDED, PARTIAL or FAILED'})
+            state = MailboxSyncState.objects.select_for_update().filter(
+                openid=run.openid,
+                mailbox_account=run.mailbox_account,
+            ).first()
+            if state is not None and state.active_run_id not in (None, run.id):
+                return Response({
+                    'detail': 'This sync run no longer owns the mailbox lease',
+                    'code': 'MAILBOX_SYNC_LEASE_LOST',
+                }, status=409)
+            for field in ('fetched_count', 'captured_count', 'duplicate_count', 'review_count', 'failed_count'):
+                if field in request.data:
+                    try:
+                        setattr(run, field, max(int(request.data.get(field)), 0))
+                    except (TypeError, ValueError):
+                        raise ValidationError({field: 'must be a non-negative integer'})
+            run.status = status
+            run.cursor_after = str(request.data.get('cursor_after') or '')[:1000]
+            run.error_summary = str(request.data.get('error_summary') or '')[:4000]
+            run.completed_at = timezone.now()
+            run.save(update_fields=[
+                'status', 'cursor_after', 'error_summary', 'completed_at',
+                'fetched_count', 'captured_count', 'duplicate_count', 'review_count', 'failed_count',
+            ])
+            if state is not None:
+                if status == MailboxSyncRun.SUCCEEDED and run.cursor_after:
+                    state.cursor = run.cursor_after
+                    state.last_successful_run = run
+                state.active_run = None
+                state.lease_expires_at = None
+                state.last_error = run.error_summary if status != MailboxSyncRun.SUCCEEDED else ''
+                state.save(update_fields=[
+                    'cursor', 'last_successful_run', 'active_run', 'lease_expires_at',
+                    'last_error', 'updated_at',
+                ])
+        return Response({
+            'id': run.id,
+            'status': run.status,
+            'fetched_count': run.fetched_count,
+            'captured_count': run.captured_count,
+            'duplicate_count': run.duplicate_count,
+            'review_count': run.review_count,
+            'failed_count': run.failed_count,
+            'state_cursor': state.cursor if state is not None else run.cursor_after,
+            'completed_at': run.completed_at,
+        })
 
 
 class SourceEvidenceListView(APIView):
@@ -338,8 +708,17 @@ class SourceEvidenceListView(APIView):
     def get(self, request):
         queryset = SourceEvidence.objects.filter(openid=request.auth.openid)
         operation = _clean(request.query_params.get('operation')).lower()
+        mailbox_account = _clean(request.query_params.get('mailbox_account'))
+        message_id = _clean(request.query_params.get('message_id'))
+        content_hash = _clean(request.query_params.get('content_hash'))
         if operation:
             queryset = queryset.filter(operation=operation)
+        if mailbox_account:
+            queryset = queryset.filter(mailbox_account=mailbox_account)
+        if message_id:
+            queryset = queryset.filter(message_id=message_id)
+        if content_hash:
+            queryset = queryset.filter(content_hash=content_hash)
         results = []
         for source in queryset.prefetch_related('extractions', 'provenance')[:200]:
             results.append({

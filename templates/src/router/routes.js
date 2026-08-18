@@ -39,6 +39,11 @@ const routes = [{
       component: () => import('pages/cli/cli.vue')
     },
     {
+      path: 'source-intake',
+      name: 'source-intake',
+      component: () => import('pages/sourceIntake.vue')
+    },
+    {
       path: 'inbound',
       name: 'inbound',
       component: () => import('pages/inbound/inbound.vue'),
