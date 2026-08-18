@@ -354,14 +354,26 @@ def _record_entity_provenance(command, result):
     source = command.source_evidence
     if source is None or not isinstance(result, dict):
         return
-    entity_sections = (
-        ('ASN', 'asn', 'header'),
-        ('ASN_DETAIL', 'asn_detail', 'detail'),
-        ('OUTBOUND', 'outbound', 'header'),
-        ('OUTBOUND_DETAIL', 'outbound_detail', 'detail'),
-    )
+    # AI/Web approval returns a nested workflow result, while the legacy CLI
+    # writes each endpoint directly and returns a flat serializer payload.
+    # Normalize both shapes before creating field-level provenance links.
+    if command.operation == 'asn.create' and 'asn' not in result:
+        entity_sections = (('ASN', '', ''),)
+    elif command.operation == 'asn.detail.create' and 'asn_detail' not in result:
+        entity_sections = (('ASN_DETAIL', '', ''),)
+    elif command.operation == 'outbound.create' and 'outbound' not in result:
+        entity_sections = (('OUTBOUND', '', ''),)
+    elif command.operation == 'outbound.detail.create' and 'outbound_detail' not in result:
+        entity_sections = (('OUTBOUND_DETAIL', '', ''),)
+    else:
+        entity_sections = (
+            ('ASN', 'asn', 'header'),
+            ('ASN_DETAIL', 'asn_detail', 'detail'),
+            ('OUTBOUND', 'outbound', 'header'),
+            ('OUTBOUND_DETAIL', 'outbound_detail', 'detail'),
+        )
     for entity_type, result_key, payload_key in entity_sections:
-        entity = result.get(result_key)
+        entity = result if not result_key else result.get(result_key)
         if not isinstance(entity, dict):
             continue
         entity_ref = str(
@@ -372,7 +384,11 @@ def _record_entity_provenance(command, result):
         )
         if not entity_ref:
             continue
-        payload = command.preview_payload.get(payload_key) or {}
+        payload = (
+            command.preview_payload
+            if not payload_key
+            else command.preview_payload.get(payload_key) or {}
+        )
         if not isinstance(payload, dict):
             continue
         for field_name, value in payload.items():

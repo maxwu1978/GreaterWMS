@@ -84,6 +84,7 @@ from .agent import (
     create_preview,
     create_web_preview,
     request_payload,
+    _record_entity_provenance,
 )
 from .intake import ensure_source_intake_record, update_source_intake
 from .permissions import AgentPreviewPermission
@@ -270,6 +271,48 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['id'], source.id)
+
+    def test_cli_flat_result_records_entity_provenance(self):
+        source = SourceEvidence.objects.create(
+            openid='tenant',
+            source_type=SourceEvidence.EMAIL,
+            operation='asn.create',
+            content_hash='f' * 64,
+            mailbox_account='sales@example.com',
+            message_id='<cli-flat-result@example.com>',
+        )
+        SourceExtraction.objects.create(
+            source=source,
+            field_name='container_tracking',
+            normalized_value='CLI-FLAT-001',
+            used_for_write=True,
+        )
+        command = AgentCommandPreview.objects.create(
+            openid='tenant',
+            operation='asn.create',
+            payload_hash='a' * 64,
+            preview_payload={
+                'supplier': 'Delta',
+                'container_tracking': 'CLI-FLAT-001',
+            },
+            execution_surface='CLI',
+            source_evidence=source,
+            expires_at=timezone.now(),
+        )
+
+        _record_entity_provenance(command, {
+            'id': 7,
+            'asn_code': 'ASN-CLI-FLAT-001',
+            'supplier': 'Delta',
+        })
+
+        self.assertTrue(EntityProvenance.objects.filter(
+            source=source,
+            entity_type='ASN',
+            entity_ref='ASN-CLI-FLAT-001',
+            field_name='container_tracking',
+            source_extraction__field_name='container_tracking',
+        ).exists())
 
     def test_source_intake_status_transitions_are_logged_and_invalid_transition_is_rejected(self):
         source = SourceEvidence.objects.create(
