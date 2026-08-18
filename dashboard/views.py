@@ -1316,6 +1316,7 @@ class OperationsBoardViewSet(viewsets.ViewSet):
             'customer': item.get('customer', ''),
             'customer_short_name': item.get('customer_short_name') or item.get('customer', ''),
             'customer_full_name': item.get('customer_full_name', ''),
+            'container_tracking': item.get('container_tracking', ''),
             'location': item['location'],
             'source_location': source_location,
             'target_location': target_location,

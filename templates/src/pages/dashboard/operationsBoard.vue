@@ -142,6 +142,8 @@
             <div>{{ selectedItem.location_summary || selectedItem.location || '—' }}</div>
             <div class="operations-board__detail-label">{{ label('operations_board.quantity', 'Qty') }}</div>
             <div>{{ selectedItem.quantity_label || '—' }}</div>
+            <div v-if="selectedItem.container_tracking" class="operations-board__detail-label">Container</div>
+            <div v-if="selectedItem.container_tracking">{{ selectedItem.container_tracking }}</div>
             <div class="operations-board__detail-label">{{ label('operations_board.eta', 'ETA') }}</div>
             <div>{{ selectedItem.eta ? compactDateTime(selectedItem.eta) : label('operations_board.eta_not_provided', 'Not Provided') }}</div>
             <div v-if="selectedItem.linked_reference" class="operations-board__detail-label">Linked Ref</div>
