@@ -114,13 +114,51 @@ unless the full body is needed in a local test result; the body remains in the
 local `message-body.txt` by default.
 
 When building `source-evidence.json`, preserve the source timeline and content
-explicitly. Put the customer's sent timestamp in `metadata.sent_at`, the
-mailbox arrival timestamp in `metadata.received_at`, and the plain-text body in
-`metadata.body` when the source must be reviewable in GreaterWMS. Keep the
-Message-ID, thread ID, subject, sender, attachment names, hashes, and source
-locations in the same payload. If the body is not captured, omit it rather than
-copying a summary into the body field; Source Intake will show the structured
-fields and attachments and mark the original body as not captured.
+explicitly. If the message is forwarded or contains a nested `.eml`, the
+nested customer message is the business source and the outer message is
+forwarding context. Never use the outer forwarder's sender, subject, or sent
+time as the customer source. Use this shape:
+
+```json
+{
+  "metadata": {
+    "mailbox_account": "admin@example.com",
+    "message_id": "outer-message-id",
+    "thread_id": "outer-thread-id",
+    "sender_name": "Forwarder",
+    "sender_email": "forwarder@example.com",
+    "subject": "Fwd: customer instruction",
+    "received_at": "2026-08-18T13:22:17-05:00",
+    "forwarded_email": {
+      "sender_name": "Forwarder",
+      "sender_email": "forwarder@example.com",
+      "subject": "Fwd: customer instruction"
+    },
+    "original_email": {
+      "sender_name": "Customer contact",
+      "sender_email": "customer@example.com",
+      "from_raw": "customer@example.com On Behalf Of Customer Team",
+      "sent_at": "2026-08-14T09:20:00",
+      "to": ["Receiving <receiving@example.com>"],
+      "cc": [],
+      "subject": "Delivery Request TRHU4217950",
+      "message_id": "nested-message-id",
+      "thread_id": "nested-thread-id",
+      "body": "Complete original email body",
+      "source_location": "nested .eml, original headers and body"
+    }
+  }
+}
+```
+
+The WMS uses `original_email` first for sender, subject, sent time, body, and
+business references, while retaining the outer headers for traceability. Put
+the customer's sent timestamp in `original_email.sent_at`, the mailbox arrival
+timestamp in root `metadata.received_at`, and the plain-text body in
+`original_email.body`. Keep Message-ID, thread ID, recipients, attachment
+names, hashes, and source locations. If the body is not captured, omit it
+rather than copying a summary into the body field; Source Intake will show the
+structured fields and attachments and mark the original body as not captured.
 
 Process every exported attachment according to
 [attachment-processing.md](references/attachment-processing.md). A nested

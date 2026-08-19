@@ -89,6 +89,56 @@ def _metadata_value(metadata, *keys):
     return ''
 
 
+def _original_email(metadata):
+    """Return the first structured nested/original email package."""
+    if not isinstance(metadata, dict):
+        return {}
+    for key in ('original_email', 'nested_email', 'original_source', 'original'):
+        value = metadata.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _source_value(metadata, *keys):
+    """Prefer values from the original message, then fall back to the wrapper."""
+    original = _original_email(metadata)
+    value = _metadata_value(original, *keys)
+    if value not in (None, ''):
+        return value
+    return _metadata_value(metadata, *keys)
+
+
+def _original_value(metadata, *keys):
+    return _metadata_value(_original_email(metadata), *keys)
+
+
+def _forwarded_value(metadata, *keys):
+    """Read only the outer forwarded message, never the nested original."""
+    if not isinstance(metadata, dict):
+        return ''
+    forwarded = metadata.get('forwarded_email')
+    if isinstance(forwarded, dict):
+        value = _metadata_value(forwarded, *keys)
+        if value not in (None, ''):
+            return value
+    return _metadata_value(metadata, *keys)
+
+
+def safe_source_metadata(metadata):
+    """Remove body and credential fields while retaining provenance metadata."""
+    if isinstance(metadata, list):
+        return [safe_source_metadata(item) for item in metadata]
+    if not isinstance(metadata, dict):
+        return metadata
+    hidden = {'body', 'raw_body', 'text_body', 'email_body', 'password', 'token', 'authorization'}
+    return {
+        key: safe_source_metadata(value)
+        for key, value in metadata.items()
+        if str(key).strip().lower() not in hidden
+    }
+
+
 def _parse_datetime(value):
     if not value:
         return None
@@ -213,25 +263,53 @@ def ensure_source_intake_record(source, sync_run=None, duplicate=False):
         'operation': _operation(metadata, source),
         'document_type': _document_type(metadata),
         'status': SourceIntakeRecord.DUPLICATE if duplicate else SourceIntakeRecord.CAPTURED,
-        'sender_name': _text(_metadata_value(metadata, 'sender_name', 'from_name'), 255),
-        'sender_email': _text(_metadata_value(metadata, 'sender_email', 'from_email', 'sender'), 255),
-        'subject': _text(_metadata_value(metadata, 'subject'), 1000),
-        'external_reference': _text(_metadata_value(metadata, 'external_reference', 'reference', 'container_tracking'), 255),
+        'sender_name': _text(_source_value(metadata, 'sender_name', 'from_name'), 255),
+        'sender_email': _text(_source_value(metadata, 'sender_email', 'from_email', 'sender'), 255),
+        'subject': _text(_source_value(metadata, 'subject'), 1000),
+        'external_reference': _text(_source_value(metadata, 'external_reference', 'reference', 'container_tracking'), 255),
         'owner_role': _text(_metadata_value(metadata, 'owner_role'), 64),
         'next_action': _text(_metadata_value(metadata, 'next_action'), 1000),
         'exception_summary': _text(_metadata_value(metadata, 'exception_summary', 'conflict_summary'), 4000),
         'classification_confidence': _confidence(metadata.get('classification_confidence')),
-        'metadata': {
-            key: value for key, value in metadata.items()
-            if key not in {'body', 'raw_body', 'password', 'token', 'authorization'}
-        },
-        'sent_at': source.sent_at or _parse_datetime(_metadata_value(metadata, 'sent_at', 'email_sent_at')),
+        'metadata': safe_source_metadata(metadata),
+        'sent_at': source.sent_at or _parse_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
         'received_at': _parse_datetime(_metadata_value(metadata, 'received_at', 'email_received_at')),
     }
     record, created = SourceIntakeRecord.objects.get_or_create(source=source, defaults=defaults)
     if not created and (sync_run_id := getattr(sync_run, 'id', None)):
         if record.sync_run_id is None:
             SourceIntakeRecord.objects.filter(id=record.id).update(sync_run_id=sync_run_id)
+    if not created:
+        # A later nested .eml parse can reveal the real customer message after
+        # the outer forwarded message was captured. Reconcile only source
+        # fields; never change the workflow state during provenance repair.
+        current = {
+            'sender_name': _text(_source_value(metadata, 'sender_name', 'from_name'), 255),
+            'sender_email': _text(_source_value(metadata, 'sender_email', 'from_email', 'sender'), 255),
+            'subject': _text(_source_value(metadata, 'subject'), 1000),
+            'external_reference': _text(_source_value(metadata, 'external_reference', 'reference', 'container_tracking'), 255),
+            'sent_at': source.sent_at or _parse_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
+            'metadata': safe_source_metadata(metadata),
+        }
+        changed_fields = []
+        for field, value in current.items():
+            if field == 'metadata':
+                if value != record.metadata:
+                    setattr(record, field, value)
+                    changed_fields.append(field)
+            elif value not in ('', None) and value != getattr(record, field):
+                setattr(record, field, value)
+                changed_fields.append(field)
+        if changed_fields:
+            record.save(update_fields=changed_fields + ['updated_at'])
+            _event(
+                record,
+                record.status,
+                'ORIGINAL_EMAIL_RECONCILED',
+                'Original nested email metadata superseded forwarded wrapper fields.',
+                actor_type='CODEX_AUTOMATION',
+                metadata={'changed_fields': changed_fields},
+            )
     if created:
         _event(
             record,

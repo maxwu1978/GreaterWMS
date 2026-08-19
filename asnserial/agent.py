@@ -18,6 +18,7 @@ from .models import (
     SourceExtraction,
     SourceIntakeRecord,
 )
+from .intake import _source_value
 
 
 AGENT_CLIENT = 'greaterwms-cli'
@@ -243,6 +244,49 @@ def _evidence_datetime(value):
     return parsed
 
 
+def _merge_source_metadata(existing, incoming):
+    """Merge a richer re-read without discarding earlier source metadata."""
+    if not isinstance(existing, dict):
+        existing = {}
+    if not isinstance(incoming, dict):
+        return dict(existing)
+    merged = dict(existing)
+    for key, value in incoming.items():
+        old_value = merged.get(key)
+        if isinstance(old_value, dict) and isinstance(value, dict):
+            merged[key] = _merge_source_metadata(old_value, value)
+        elif value not in (None, '', [], {}):
+            merged[key] = value
+        elif key not in merged:
+            merged[key] = value
+    return merged
+
+
+def _merge_source_extractions(source, extracted_fields):
+    """Add newly discovered fields while keeping the append-only evidence set."""
+    for field in extracted_fields or []:
+        if not isinstance(field, dict) or not str(field.get('field_name') or '').strip():
+            continue
+        field_name = str(field.get('field_name')).strip()
+        if field_name.lower() in _SENSITIVE_EVIDENCE_KEYS:
+            continue
+        if source.extractions.filter(
+            field_name=field_name[:128],
+            normalized_value=str(field.get('normalized_value') or ''),
+        ).exists():
+            continue
+        SourceExtraction.objects.create(
+            source=source,
+            field_name=field_name[:128],
+            raw_value=str(field.get('raw_value') or ''),
+            normalized_value=str(field.get('normalized_value') or ''),
+            source_location=str(field.get('source_location') or '')[:255],
+            confidence=field.get('confidence'),
+            human_confirmed=bool(field.get('human_confirmed', False)),
+            used_for_write=bool(field.get('used_for_write', False)),
+        )
+
+
 def create_source_evidence(request, source_type, operation, metadata=None, extracted_fields=None,
                            content_hash='', storage_uri='', storage_size=0, ai_session_id=''):
     """Capture source metadata before an AI or web preview is created."""
@@ -270,6 +314,20 @@ def create_source_evidence(request, source_type, operation, metadata=None, extra
             content_hash=normalized_hash,
         ).first()
         if existing is not None:
+            merged_metadata = _merge_source_metadata(existing.metadata, metadata)
+            updates = []
+            if merged_metadata != existing.metadata:
+                existing.metadata = merged_metadata
+                updates.append('metadata')
+            original_sent_at = _evidence_datetime(
+                _source_value(merged_metadata, 'sent_at', 'email_sent_at')
+            )
+            if original_sent_at is not None and existing.sent_at != original_sent_at:
+                existing.sent_at = original_sent_at
+                updates.append('sent_at')
+            if updates:
+                existing.save(update_fields=updates)
+            _merge_source_extractions(existing, extracted_fields)
             existing._capture_reused = True
             return existing
     source = SourceEvidence.objects.create(

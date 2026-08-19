@@ -283,6 +283,78 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(SourceIntakeRecord.objects.get().status, SourceIntakeRecord.DUPLICATE)
         self.assertEqual(SourceIntakeEvent.objects.filter(event_type='DUPLICATE').count(), 1)
 
+    def test_nested_original_email_supersedes_forwarded_wrapper_and_is_reconciled(self):
+        base_metadata = {
+            'mailbox_account': 'admin@example.com',
+            'message_id': 'outer-166504',
+            'thread_id': 'outer-thread',
+            'sender_name': 'Li Liu',
+            'sender_email': 'sales@example.com',
+            'subject': 'Fwd: Delivery Request TRHU4217950',
+            'received_at': '2026-08-18T13:22:17-05:00',
+            'document_type': 'Delivery Request',
+            'business_operation': 'inbound',
+            'external_reference': 'TRHU4217950',
+        }
+        first = self.request(
+            data={
+                'source_type': 'EMAIL',
+                'operation': 'external.instruction',
+                'content_hash': 'nested-' + ('a' * 55),
+                'metadata': base_metadata,
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        SourceCaptureView().post(first)
+
+        enriched_metadata = dict(base_metadata)
+        enriched_metadata['original_email'] = {
+            'sender_name': 'ESI Dallas',
+            'sender_email': 'djudge@eaglegroup.com',
+            'from_raw': 'djudge@eaglegroup.com On Behalf Of ESI Dallas',
+            'sent_at': '2026-08-14T09:20:00-05:00',
+            'to': [
+                'Moises Altamirano/ATELAX <moises.altamirano@us.airtiger.com>',
+                'DEUS Receiving <DEUS.Receiving@deltaww.com>',
+            ],
+            'subject': 'Delivery Request TRHU4217950',
+            'thread_id': 'original-thread',
+            'reference': 'LIQUID COOLING',
+            'body': 'Requested Delivery Date: Monday 8/17\nContainer: TRHU4217950',
+            'source_location': 'nested .eml, original headers and body',
+        }
+        second = self.request(
+            data={
+                'source_type': 'EMAIL',
+                'operation': 'external.instruction',
+                'content_hash': 'nested-' + ('a' * 55),
+                'metadata': enriched_metadata,
+            },
+            surface='ai',
+            client='greaterwms-ai',
+        )
+        response = SourceCaptureView().post(second)
+
+        self.assertTrue(response.data['duplicate'])
+        self.assertEqual(SourceEvidence.objects.count(), 1)
+        source = SourceEvidence.objects.get()
+        intake = SourceIntakeRecord.objects.get()
+        self.assertEqual(intake.sender_name, 'ESI Dallas')
+        self.assertEqual(intake.sender_email, 'djudge@eaglegroup.com')
+        self.assertEqual(intake.subject, 'Delivery Request TRHU4217950')
+        self.assertEqual(intake.external_reference, 'LIQUID COOLING')
+        self.assertIsNotNone(source.sent_at)
+        self.assertEqual(SourceIntakeEvent.objects.filter(event_type='ORIGINAL_EMAIL_RECONCILED').count(), 1)
+
+        detail_request = self.request(surface='web', client='browser')
+        detail = SourceIntakeDetailView().get(detail_request, intake.id)
+        self.assertEqual(detail.data['original_email']['sender_email'], 'djudge@eaglegroup.com')
+        self.assertEqual(detail.data['original_email']['subject'], 'Delivery Request TRHU4217950')
+        self.assertEqual(detail.data['original_email']['reference'], 'LIQUID COOLING')
+        self.assertEqual(detail.data['forwarded_email']['sender_email'], 'sales@example.com')
+        self.assertIn('Requested Delivery Date', detail.data['email_body'])
+
     def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):
         source = SourceEvidence.objects.create(
             openid='tenant',

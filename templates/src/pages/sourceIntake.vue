@@ -132,20 +132,36 @@
             <div class="source-intake-detail-grid">
               <div><span>Channel</span><strong>{{ sourceTypeLabel(detail.source_type) }}</strong></div>
               <div><span>Mailbox</span><strong>{{ detail.mailbox_account || '-' }}</strong></div>
-              <div><span>From</span><strong>{{ detail.sender_name || '-' }}</strong></div>
-              <div><span>Sender email</span><strong>{{ detail.sender_email || '-' }}</strong></div>
-              <div><span>Sent by customer</span><strong>{{ formatSourceTime(detail.sent_at) }}</strong></div>
+              <div><span>From</span><strong>{{ originalEmail(detail).sender_name || detail.sender_name || '-' }}</strong></div>
+              <div><span>Sender email</span><strong>{{ originalEmail(detail).sender_email || detail.sender_email || '-' }}</strong></div>
+              <div><span>Sent by customer</span><strong>{{ originalEmail(detail).sent_at_raw || formatSourceTime(originalEmail(detail).sent_at || detail.sent_at) }}</strong></div>
               <div><span>Received by mailbox</span><strong>{{ formatDate(detail.received_at) }}</strong></div>
               <div><span>Evidence ID</span><strong>#{{ detail.source_evidence_id || '-' }}</strong></div>
               <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
             </div>
+            <div v-if="originalEmail(detail).from_raw" class="source-intake-field-label q-mt-md">Original From header</div>
+            <div v-if="originalEmail(detail).from_raw" class="source-intake-wrap">{{ originalEmail(detail).from_raw }}</div>
+            <div v-if="originalEmail(detail).to && originalEmail(detail).to.length" class="source-intake-field-label q-mt-md">To</div>
+            <div v-if="originalEmail(detail).to && originalEmail(detail).to.length" class="source-intake-wrap">{{ formatRecipients(originalEmail(detail).to) }}</div>
+            <div v-if="originalEmail(detail).cc && originalEmail(detail).cc.length" class="source-intake-field-label q-mt-md">Cc</div>
+            <div v-if="originalEmail(detail).cc && originalEmail(detail).cc.length" class="source-intake-wrap">{{ formatRecipients(originalEmail(detail).cc) }}</div>
             <div class="source-intake-field-label q-mt-md">Subject</div>
-            <div class="source-intake-wrap">{{ detail.subject || '-' }}</div>
+            <div class="source-intake-wrap">{{ originalEmail(detail).subject || detail.subject || '-' }}</div>
             <div class="source-intake-field-label q-mt-md">Message ID / Thread ID</div>
-            <div class="source-intake-wrap source-intake-mono">{{ detail.message_id || '-' }} / {{ detail.thread_id || '-' }}</div>
-            <div class="source-intake-field-label q-mt-md">Email content</div>
+            <div class="source-intake-wrap source-intake-mono">{{ originalEmail(detail).message_id || '-' }} / {{ originalEmail(detail).thread_id || detail.thread_id || '-' }}</div>
+            <div class="source-intake-field-label q-mt-md">Original email content</div>
             <div v-if="detail.email_body" class="source-intake-wrap">{{ detail.email_body }}</div>
             <div v-else class="text-caption text-grey-7">Original email body was not captured. Review the subject, extracted fields and attachments below.</div>
+            <div v-if="hasForwardedEmail(detail)" class="source-intake-forwarded q-pa-sm q-mt-md">
+              <div class="text-weight-medium q-mb-xs">Forwarding context</div>
+              <div class="source-intake-detail-grid">
+                <div><span>Forwarded by</span><strong>{{ forwardedEmail(detail).sender_name || forwardedEmail(detail).sender_email || '-' }}</strong></div>
+                <div><span>Forwarder email</span><strong>{{ forwardedEmail(detail).sender_email || '-' }}</strong></div>
+                <div><span>Forwarded subject</span><strong>{{ forwardedEmail(detail).subject || '-' }}</strong></div>
+                <div><span>Forwarded received</span><strong>{{ formatDate(forwardedEmail(detail).received_at) }}</strong></div>
+              </div>
+              <div class="text-caption text-grey-7 q-mt-sm">The forwarded message is retained as evidence, but is not the customer source used for business extraction.</div>
+            </div>
           </div>
           <div class="source-intake-section-title">Business Link</div>
           <div class="source-intake-detail-grid">
@@ -321,6 +337,19 @@ export default {
     formatSourceTime (value) {
       return value ? this.formatDate(value) : 'Not provided'
     },
+    originalEmail (detail) {
+      return (detail && detail.original_email) || {}
+    },
+    forwardedEmail (detail) {
+      return (detail && detail.forwarded_email) || {}
+    },
+    hasForwardedEmail (detail) {
+      const email = this.forwardedEmail(detail)
+      return Boolean(email.sender_name || email.sender_email || email.subject || email.received_at)
+    },
+    formatRecipients (value) {
+      return Array.isArray(value) ? value.join('; ') : String(value || '-')
+    },
     statusLabel (value) {
       return {
         CAPTURED: 'Captured',
@@ -474,6 +503,12 @@ export default {
   background: #f8fafb;
   border: 1px solid #dfe7eb;
   border-left: 3px solid #1976d2;
+}
+
+.source-intake-forwarded {
+  background: #fffaf0;
+  border: 1px solid #ead8b3;
+  border-left: 3px solid #d28b16;
 }
 
 .source-intake-section-title {

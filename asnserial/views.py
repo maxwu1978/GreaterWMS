@@ -60,7 +60,15 @@ from .agent import (
     create_web_preview,
     consume_web_preview,
 )
-from .intake import INTAKE_ROLES, ensure_source_intake_record, update_source_intake
+from .intake import (
+    INTAKE_ROLES,
+    _forwarded_value,
+    _original_email,
+    _original_value,
+    ensure_source_intake_record,
+    safe_source_metadata,
+    update_source_intake,
+)
 from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
@@ -362,27 +370,54 @@ class SourceCaptureView(APIView):
 
 
 def _safe_source_metadata(metadata):
-    if not isinstance(metadata, dict):
-        return {}
-    return {
-        key: value
-        for key, value in metadata.items()
-        if str(key).strip().lower() not in {'body', 'raw_body', 'password', 'token', 'authorization'}
-    }
+    return safe_source_metadata(metadata)
 
 
 def _safe_source_body(source):
     """Return only an explicitly captured email body, bounded for the UI."""
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
-    for key in ('body', 'text_body', 'email_body'):
-        value = metadata.get(key)
-        if value not in (None, ''):
-            return str(value)[:20000]
+    original = _original_email(metadata)
+    for package in (original, metadata):
+        for key in ('body', 'text_body', 'email_body'):
+            value = package.get(key) if isinstance(package, dict) else None
+            if value not in (None, ''):
+                return str(value)[:20000]
     return ''
+
+
+def _email_provenance_payload(source, record):
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    original = _original_email(metadata)
+    original_sent_at = record.sent_at or source.sent_at
+    original_payload = {
+        'sender_name': _original_value(metadata, 'sender_name', 'from_name') or record.sender_name,
+        'sender_email': _original_value(metadata, 'sender_email', 'from_email', 'sender') or record.sender_email,
+        'from_raw': str(original.get('from_raw') or '')[:1000],
+        'sent_at': original_sent_at,
+        'to': original.get('to') or original.get('recipients') or [],
+        'cc': original.get('cc') or [],
+        'subject': _original_value(metadata, 'subject') or record.subject,
+        'message_id': str(original.get('message_id') or '')[:512],
+        'thread_id': str(original.get('thread_id') or '')[:512],
+        'sent_at_raw': str(original.get('sent_at_raw') or '')[:255],
+        'source_location': str(original.get('source_location') or '')[:255],
+        'reference': str(original.get('reference') or '')[:255],
+    }
+    forwarded_payload = {
+        'sender_name': str(_forwarded_value(metadata, 'sender_name', 'from_name') or '')[:255],
+        'sender_email': str(_forwarded_value(metadata, 'sender_email', 'from_email', 'sender') or '')[:255],
+        'subject': str(_forwarded_value(metadata, 'subject') or '')[:1000],
+        'sent_at': _forwarded_value(metadata, 'sent_at', 'email_sent_at'),
+        'received_at': _forwarded_value(metadata, 'received_at', 'email_received_at'),
+        'message_id': str(_forwarded_value(metadata, 'message_id') or source.message_id)[:512],
+        'thread_id': str(_forwarded_value(metadata, 'thread_id') or source.thread_id)[:512],
+    }
+    return original_payload, forwarded_payload
 
 
 def _intake_payload(record, detail=False):
     source = record.source
+    original_email, forwarded_email = _email_provenance_payload(source, record)
     payload = {
         'id': record.id,
         'source_evidence_id': source.id,
@@ -416,6 +451,8 @@ def _intake_payload(record, detail=False):
         payload.update({
             'metadata': _safe_source_metadata(record.metadata),
             'email_body': _safe_source_body(source),
+            'original_email': original_email,
+            'forwarded_email': forwarded_email,
             'storage_uri': source.storage_uri,
             'storage_size': source.storage_size,
             'extractions': [
