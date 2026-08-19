@@ -1,6 +1,7 @@
 """Source intake state helpers shared by the Codex and web read models."""
 
 import hashlib
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -19,6 +20,98 @@ from .models import (
 INTAKE_ROLES = frozenset({
     'admin', 'manager', 'supervisor', 'inbound', 'outbound', 'warehouse', 'qc',
 })
+
+
+SOURCE_NEXT_ACTIONS = {
+    'APPROVE_PREVIEW': 'Review / approve',
+    'AI_APPROVAL': 'AI approval',
+    'CLI_CONFIRM': 'Review / confirm CLI',
+    'CREATE_ASN_PREVIEW': 'Create ASN preview',
+    'CONFIRM_APPOINTMENT': 'Confirm appointment',
+    'SET_ETA': 'Set ETA',
+    'MARK_ARRIVED': 'Mark arrived',
+    'START_UNLOADING': 'Start unloading',
+    'REVIEW_PACK_LIST': 'Review pack list',
+    'REVIEW_QC': 'Review QC',
+    'ASSIGN_PUTAWAY': 'Assign & putaway',
+    'REVIEW_EXCEPTION': 'Review exception',
+    'WRITING': 'Writing',
+    'COMPLETE': 'Complete',
+    'REVIEW_SOURCE': 'Review source',
+}
+
+SOURCE_STATUS_NEXT_ACTIONS = {
+    SourceIntakeRecord.CAPTURED: 'REVIEW_SOURCE',
+    SourceIntakeRecord.ANALYZING: 'REVIEW_SOURCE',
+    SourceIntakeRecord.REVIEW_REQUIRED: 'REVIEW_EXCEPTION',
+    SourceIntakeRecord.READY_FOR_PREVIEW: 'CREATE_ASN_PREVIEW',
+    SourceIntakeRecord.APPROVAL_REQUIRED: 'APPROVE_PREVIEW',
+    SourceIntakeRecord.EXECUTING: 'WRITING',
+    SourceIntakeRecord.COMPLETED: 'COMPLETE',
+    SourceIntakeRecord.DUPLICATE: 'COMPLETE',
+    SourceIntakeRecord.BLOCKED: 'REVIEW_EXCEPTION',
+    SourceIntakeRecord.FAILED: 'REVIEW_EXCEPTION',
+}
+
+def source_next_action_display(next_action='', exception_summary='', status=''):
+    """Return one stable code/label pair while retaining the full instruction."""
+    instruction = _text(next_action, 1000)
+    candidate = instruction or ('Review exception' if _text(exception_summary, 4000) else '')
+    status_code = str(status or '').strip().upper()
+    fallback_code = SOURCE_STATUS_NEXT_ACTIONS.get(status_code, '')
+    if not candidate and fallback_code:
+        return {
+            'code': fallback_code,
+            'label': SOURCE_NEXT_ACTIONS[fallback_code],
+            'detail': instruction,
+        }
+    normalized = candidate.casefold()
+    code = ''
+    label = '-'
+
+    if not candidate:
+        return {'code': code, 'label': label, 'detail': instruction}
+    if 'confirm carrier appointment' in normalized or (
+        'confirm' in normalized and 'appointment' in normalized
+    ):
+        code = 'CONFIRM_APPOINTMENT'
+        label = SOURCE_NEXT_ACTIONS[code]
+        dock = re.search(r'\bdock\s*#?\s*([a-z0-9-]+)', candidate, flags=re.IGNORECASE)
+        if dock:
+            label = '%s / Dock #%s' % (label, dock.group(1))
+    elif normalized.startswith('review the web preview'):
+        code = 'APPROVE_PREVIEW'
+    elif normalized.startswith('use the structured ai approval'):
+        code = 'AI_APPROVAL'
+    elif normalized.startswith('review the dry-run'):
+        code = 'CLI_CONFIRM'
+    elif normalized.startswith('create inbound preview'):
+        code = 'CREATE_ASN_PREVIEW'
+    elif normalized.startswith('write is in progress'):
+        code = 'WRITING'
+    elif normalized.startswith('no further source action'):
+        code = 'COMPLETE'
+    elif normalized.startswith('review exception'):
+        code = 'REVIEW_EXCEPTION'
+    elif 'set eta' in normalized:
+        code = 'SET_ETA'
+    elif 'mark arrived' in normalized:
+        code = 'MARK_ARRIVED'
+    elif 'unload' in normalized:
+        code = 'START_UNLOADING'
+    elif 'pack list' in normalized or 'packlist' in normalized:
+        code = 'REVIEW_PACK_LIST'
+    elif re.search(r'\bqc\b|quality control', normalized):
+        code = 'REVIEW_QC'
+    elif 'putaway' in normalized or 'put away' in normalized:
+        code = 'ASSIGN_PUTAWAY'
+    else:
+        code = 'REVIEW_SOURCE'
+
+    if code != 'CONFIRM_APPOINTMENT':
+        label = SOURCE_NEXT_ACTIONS[code]
+    return {'code': code, 'label': label, 'detail': instruction}
+
 
 STATUS_TRANSITIONS = {
     SourceIntakeRecord.CAPTURED: {

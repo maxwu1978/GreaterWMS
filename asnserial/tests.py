@@ -87,7 +87,7 @@ from .agent import (
     request_payload,
     _record_entity_provenance,
 )
-from .intake import ensure_source_intake_record, update_source_intake
+from .intake import ensure_source_intake_record, source_next_action_display, update_source_intake
 from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
@@ -295,6 +295,10 @@ class SourceProvenanceWorkflowTests(TestCase):
             'document_type': 'Delivery Request',
             'business_operation': 'inbound',
             'external_reference': 'TRHU4217950',
+            'next_action': (
+                'Confirm carrier appointment and use Peak Smart Logistics Dock #24 as the receiving site; '
+                'do not mark arrived or create a duplicate ASN.'
+            ),
         }
         first = self.request(
             data={
@@ -361,6 +365,29 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(
             summary['email_body_preview'],
             'Requested Delivery Date: Monday 8/17 Container: TRHU4217950',
+        )
+        self.assertEqual(summary['next_action_code'], 'CONFIRM_APPOINTMENT')
+        self.assertEqual(summary['next_action_label'], 'Confirm appointment / Dock #24')
+
+    def test_source_next_action_uses_stable_code_and_short_label(self):
+        appointment = source_next_action_display(
+            'Confirm carrier appointment and use Peak Smart Logistics Dock #24 as the receiving site; '
+            'do not mark arrived or create a duplicate ASN.',
+        )
+        self.assertEqual(appointment['code'], 'CONFIRM_APPOINTMENT')
+        self.assertEqual(appointment['label'], 'Confirm appointment / Dock #24')
+
+        self.assertEqual(
+            source_next_action_display('Review the web preview and approve or discard it.')['label'],
+            'Review / approve',
+        )
+        self.assertEqual(
+            source_next_action_display('', 'Customer location is ambiguous.')['code'],
+            'REVIEW_EXCEPTION',
+        )
+        self.assertEqual(
+            source_next_action_display('', status=SourceIntakeRecord.READY_FOR_PREVIEW)['label'],
+            'Create ASN preview',
         )
 
     def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):

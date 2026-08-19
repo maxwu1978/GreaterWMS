@@ -67,6 +67,7 @@ from .intake import (
     _original_value,
     ensure_source_intake_record,
     safe_source_metadata,
+    source_next_action_display,
     update_source_intake,
 )
 from .permissions import AgentPreviewPermission, SourceIntakePermission
@@ -344,6 +345,11 @@ class SourceCaptureView(APIView):
             sync_run=sync_run,
             duplicate=bool(getattr(source, '_capture_reused', False)),
         )
+        next_action = source_next_action_display(
+            intake.next_action,
+            intake.exception_summary,
+            intake.status,
+        )
         return Response({
             'detail': 'Source evidence captured',
             'duplicate': bool(getattr(source, '_capture_reused', False)),
@@ -365,6 +371,8 @@ class SourceCaptureView(APIView):
                 'document_type': intake.document_type,
                 'created': created,
                 'next_action': intake.next_action,
+                'next_action_code': next_action['code'],
+                'next_action_label': next_action['label'],
             },
         }, status=201)
 
@@ -427,6 +435,11 @@ def _intake_payload(record, detail=False):
     source = record.source
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
     original_email, forwarded_email = _email_provenance_payload(source, record)
+    next_action = source_next_action_display(
+        record.next_action,
+        record.exception_summary,
+        record.status,
+    )
     payload = {
         'id': record.id,
         'source_evidence_id': source.id,
@@ -443,6 +456,8 @@ def _intake_payload(record, detail=False):
         'matched_entity_ref': record.matched_entity_ref,
         'owner_role': record.owner_role,
         'next_action': record.next_action,
+        'next_action_code': next_action['code'],
+        'next_action_label': next_action['label'],
         'exception_summary': record.exception_summary,
         'last_error': record.last_error,
         'classification_confidence': record.classification_confidence,

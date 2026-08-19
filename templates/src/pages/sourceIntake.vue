@@ -95,7 +95,7 @@
             :props="props"
             class="source-intake-next ellipsis"
             :title="props.row.next_action || props.row.exception_summary || ''"
-          >{{ compactNextAction(props.row.next_action || (props.row.exception_summary ? 'Review exception' : '-')) }}</q-td>
+          >{{ props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -170,6 +170,8 @@
             <div><span>Classification</span><strong>{{ confidenceLabel(detail.classification_confidence) }}</strong></div>
           </div>
           <div class="source-intake-field-label q-mt-md">Next step</div>
+          <div class="text-weight-medium q-mb-sm">{{ detail.next_action_label || '-' }}</div>
+          <div class="source-intake-field-label">Instructions</div>
           <div class="q-mb-md source-intake-wrap">{{ detail.next_action || '-' }}</div>
           <div v-if="detail.exception_summary" class="source-intake-exception q-pa-sm q-mb-md">
             <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
@@ -345,21 +347,6 @@ export default {
       const local = email.slice(0, at)
       const localBudget = Math.max(8, 27 - domain.length)
       return `${local.slice(0, localBudget)}…@${domain}`
-    },
-    compactNextAction (value) {
-      const action = String(value || '-')
-      const labels = [
-        [/^Review the web preview and approve or discard it\.?$/i, 'Review / approve'],
-        [/^Use the structured AI approval action\.?$/i, 'AI approval'],
-        [/^Review the dry-run and confirm the CLI operation\.?$/i, 'Review / confirm CLI'],
-        [/^Create inbound preview$/i, 'Create ASN preview'],
-        [/^Write is in progress\.?$/i, 'Writing'],
-        [/^No further source action\.?$/i, 'Complete'],
-        [/^Review exception$/i, 'Review exception']
-      ]
-      const match = labels.find(([pattern]) => pattern.test(action))
-      if (match) return match[1]
-      return action.length > 34 ? `${action.slice(0, 31).replace(/\s+$/, '')}…` : action
     },
     referenceTooltip (row) {
       const reference = row.external_reference || row.matched_entity_ref || '-'
