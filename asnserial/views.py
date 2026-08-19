@@ -385,6 +385,14 @@ def _safe_source_body(source):
     return ''
 
 
+def _source_body_preview(source, limit=240):
+    """Return a compact, safe email-body snippet for list-row tooltips."""
+    body = ' '.join(_safe_source_body(source).split())
+    if len(body) <= limit:
+        return body
+    return '%s…' % body[:limit - 1].rstrip()
+
+
 def _email_provenance_payload(source, record):
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
     original = _original_email(metadata)
@@ -445,6 +453,7 @@ def _intake_payload(record, detail=False):
         'updated_at': record.updated_at,
         'source_type': source.source_type,
         'source_status': source.status,
+        'email_body_preview': _source_body_preview(source),
         'message_id': source.message_id,
         'thread_id': source.thread_id,
         'content_hash': source.content_hash,

@@ -358,6 +358,10 @@ class SourceProvenanceWorkflowTests(TestCase):
         summary = _intake_payload(intake)
         self.assertEqual(summary['sent_at_raw'], 'Friday, August 14, 2026 9:20 AM')
         self.assertEqual(summary['received_at_raw'], '2026-08-18T13:22:17-05:00')
+        self.assertEqual(
+            summary['email_body_preview'],
+            'Requested Delivery Date: Monday 8/17 Container: TRHU4217950',
+        )
 
     def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):
         source = SourceEvidence.objects.create(

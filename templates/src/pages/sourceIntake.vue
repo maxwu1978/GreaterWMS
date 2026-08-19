@@ -60,11 +60,8 @@
         </template>
         <template v-slot:body-cell-source="props">
           <q-td :props="props">
-            <div class="text-weight-medium ellipsis" :title="props.row.mailbox_account">
-              {{ sourceTypeLabel(props.row.source_type) }} · {{ props.row.mailbox_account || '-' }}
-            </div>
-            <div v-if="props.row.sender_name" class="text-caption text-grey-7 ellipsis" :title="props.row.sender_name">
-              {{ props.row.sender_name }}
+            <div class="text-weight-medium ellipsis" :title="props.row.sender_name || 'Unknown sender'">
+              {{ props.row.sender_name || 'Unknown sender' }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.sender_name">
               From: {{ compactEmail(props.row.sender_email) || props.row.sender_name || '-' }}
@@ -81,7 +78,7 @@
         </template>
         <template v-slot:body-cell-reference="props">
           <q-td :props="props">
-            <div class="text-weight-medium ellipsis" :title="props.row.external_reference || props.row.matched_entity_ref">
+            <div class="text-weight-medium ellipsis" :title="referenceTooltip(props.row)">
               {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
@@ -98,7 +95,7 @@
             :props="props"
             class="source-intake-next ellipsis"
             :title="props.row.next_action || props.row.exception_summary || ''"
-          >{{ props.row.next_action || (props.row.exception_summary ? 'Review exception' : '-') }}</q-td>
+          >{{ compactNextAction(props.row.next_action || (props.row.exception_summary ? 'Review exception' : '-')) }}</q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -349,6 +346,26 @@ export default {
       const local = email.slice(0, at)
       const localBudget = Math.max(8, 27 - domain.length)
       return `${local.slice(0, localBudget)}…@${domain}`
+    },
+    compactNextAction (value) {
+      const action = String(value || '-')
+      const labels = [
+        [/^Review the web preview and approve or discard it\.?$/i, 'Review / approve'],
+        [/^Use the structured AI approval action\.?$/i, 'AI approval'],
+        [/^Review the dry-run and confirm the CLI operation\.?$/i, 'Review / confirm CLI'],
+        [/^Create inbound preview$/i, 'Create ASN preview'],
+        [/^Write is in progress\.?$/i, 'Writing'],
+        [/^No further source action\.?$/i, 'Complete'],
+        [/^Review exception$/i, 'Review exception']
+      ]
+      const match = labels.find(([pattern]) => pattern.test(action))
+      if (match) return match[1]
+      return action.length > 34 ? `${action.slice(0, 31).replace(/\s+$/, '')}…` : action
+    },
+    referenceTooltip (row) {
+      const reference = row.external_reference || row.matched_entity_ref || '-'
+      const preview = String(row.email_body_preview || '').trim()
+      return preview ? `Reference: ${reference}\nEmail: ${preview}` : `Reference: ${reference}`
     },
     originalEmail (detail) {
       return (detail && detail.original_email) || {}
