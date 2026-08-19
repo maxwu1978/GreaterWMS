@@ -1,3 +1,5 @@
+import { LocalStorage } from 'quasar'
+
 const routes = [{
   path: '/',
   component: () => import('layouts/MainLayout.vue'),
@@ -38,9 +40,10 @@ const routes = [{
       name: 'source-intake',
       component: () => import('pages/sourceIntake.vue'),
       beforeEnter: () => {
-        const role = String(localStorage.getItem('staff_type') || '').trim().toLowerCase()
-        const mode = String(localStorage.getItem('login_mode') || '').trim().toLowerCase()
-        return role === 'admin' || mode === 'admin' ? true : { name: 'dashboard' }
+        const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
+        const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
+        const auth = String(LocalStorage.getItem('auth') || '').trim()
+        return auth === '1' && (role === 'admin' || mode === 'admin') ? true : { name: 'dashboard' }
       }
     },
     {
