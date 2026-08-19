@@ -39,11 +39,15 @@ const routes = [{
       path: 'source-intake',
       name: 'source-intake',
       component: () => import('pages/sourceIntake.vue'),
-      beforeEnter: () => {
+      beforeEnter: (to, from, next) => {
         const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
         const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
         const auth = String(LocalStorage.getItem('auth') || '').trim()
-        return auth === '1' && (role === 'admin' || mode === 'admin') ? true : { name: 'dashboard' }
+        if (auth === '1' && (role === 'admin' || mode === 'admin')) {
+          next()
+        } else {
+          next({ name: 'dashboard' })
+        }
       }
     },
     {
