@@ -4,8 +4,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/spa",
   "cleanUrls": true,
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/.*", "dest": "/index.html" }
+  "redirects": [
+    { "source": "/login", "destination": "/#/login", "permanent": false },
+    { "source": "/dashboard", "destination": "/#/dashboard", "permanent": false },
+    { "source": "/source-intake", "destination": "/#/source-intake", "permanent": false },
+    { "source": "/inbound", "destination": "/#/inbound", "permanent": false },
+    { "source": "/outbound", "destination": "/#/outbound", "permanent": false }
   ]
 }
