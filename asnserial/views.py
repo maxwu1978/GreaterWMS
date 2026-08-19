@@ -346,6 +346,7 @@ class SourceCaptureView(APIView):
                 'mailbox_account': source.mailbox_account,
                 'message_id': source.message_id,
                 'thread_id': source.thread_id,
+                'sent_at': source.sent_at.isoformat() if source.sent_at else None,
                 'captured_at': source.captured_at.isoformat(),
                 'content_hash': source.content_hash,
             },
@@ -370,6 +371,16 @@ def _safe_source_metadata(metadata):
     }
 
 
+def _safe_source_body(source):
+    """Return only an explicitly captured email body, bounded for the UI."""
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    for key in ('body', 'text_body', 'email_body'):
+        value = metadata.get(key)
+        if value not in (None, ''):
+            return str(value)[:20000]
+    return ''
+
+
 def _intake_payload(record, detail=False):
     source = record.source
     payload = {
@@ -391,6 +402,7 @@ def _intake_payload(record, detail=False):
         'exception_summary': record.exception_summary,
         'last_error': record.last_error,
         'classification_confidence': record.classification_confidence,
+        'sent_at': record.sent_at or source.sent_at,
         'received_at': record.received_at,
         'updated_at': record.updated_at,
         'source_type': source.source_type,
@@ -403,6 +415,7 @@ def _intake_payload(record, detail=False):
     if detail:
         payload.update({
             'metadata': _safe_source_metadata(record.metadata),
+            'email_body': _safe_source_body(source),
             'storage_uri': source.storage_uri,
             'storage_size': source.storage_size,
             'extractions': [
@@ -733,6 +746,7 @@ class SourceEvidenceListView(APIView):
                 'mailbox_account': source.mailbox_account,
                 'message_id': source.message_id,
                 'thread_id': source.thread_id,
+                'sent_at': source.sent_at,
                 'captured_at': source.captured_at,
                 'content_hash': source.content_hash,
                 'metadata': source.metadata,

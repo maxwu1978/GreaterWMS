@@ -4,6 +4,7 @@ import secrets
 from datetime import timedelta
 
 from django.db import transaction
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
@@ -228,6 +229,20 @@ def _scrub_evidence_value(value):
     return value
 
 
+def _evidence_datetime(value):
+    """Parse source timestamps without silently substituting capture time."""
+    if not value:
+        return None
+    parsed = parse_datetime(str(value).replace('Z', '+00:00'))
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed) and timezone.is_aware(timezone.now()):
+        return timezone.make_aware(parsed, timezone.get_current_timezone())
+    if timezone.is_aware(parsed) and not timezone.is_aware(timezone.now()):
+        return timezone.make_naive(parsed, timezone.get_current_timezone())
+    return parsed
+
+
 def create_source_evidence(request, source_type, operation, metadata=None, extracted_fields=None,
                            content_hash='', storage_uri='', storage_size=0, ai_session_id=''):
     """Capture source metadata before an AI or web preview is created."""
@@ -271,6 +286,7 @@ def create_source_evidence(request, source_type, operation, metadata=None, extra
         metadata=metadata,
         storage_uri=str(storage_uri or '')[:1000],
         storage_size=max(int(storage_size or 0), 0),
+        sent_at=_evidence_datetime(metadata.get('sent_at') or metadata.get('email_sent_at')),
     )
     source._capture_reused = False
     for field in extracted_fields or []:

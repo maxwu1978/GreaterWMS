@@ -73,6 +73,7 @@ from .views import (
     SourceIntakeDetailView,
     SourceIntakeListView,
     SourceIntakeUpdateView,
+    _intake_payload,
 )
 from .agent import (
     agent_roles_for_operation,
@@ -210,6 +211,9 @@ class SourceProvenanceWorkflowTests(TestCase):
                     'sender_name': 'Mark Tang',
                     'sender_email': 'mark@example.com',
                     'subject': 'Inbound Notice TRHU4217950',
+                    'sent_at': '2026-08-18T12:24:00-05:00',
+                    'received_at': '2026-08-18T12:31:00-05:00',
+                    'body': 'Container TRHU4217950 is scheduled for delivery.',
                     'document_type': 'Inbound Notice',
                     'business_operation': 'inbound',
                     'external_reference': 'TRHU4217950',
@@ -243,6 +247,16 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(intake.document_type, SourceIntakeRecord.INBOUND_NOTICE)
         self.assertEqual(intake.external_reference, 'TRHU4217950')
         self.assertEqual(intake.status, SourceIntakeRecord.CAPTURED)
+        self.assertIsNotNone(intake.sent_at)
+        self.assertEqual(intake.sent_at.minute, 24)
+        self.assertIsNotNone(intake.received_at)
+        self.assertEqual(intake.received_at.minute, 31)
+        self.assertNotEqual(intake.sent_at, intake.received_at)
+        source = SourceEvidence.objects.get()
+        self.assertIsNotNone(source.sent_at)
+        payload = _intake_payload(intake, detail=True)
+        self.assertEqual(payload['email_body'], 'Container TRHU4217950 is scheduled for delivery.')
+        self.assertEqual(payload['sent_at'], intake.sent_at)
         self.assertEqual(SourceIntakeEvent.objects.filter(intake=intake).count(), 1)
 
     def test_duplicate_email_capture_is_recorded_without_duplicate_source(self):

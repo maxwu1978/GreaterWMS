@@ -48,21 +48,23 @@
         no-data-label="No source records"
       >
         <template v-slot:body-cell-received_at="props">
-          <q-td :props="props">{{ formatDate(props.row.received_at || props.row.captured_at) }}</q-td>
+          <q-td :props="props">
+            <div class="text-weight-medium">{{ formatSourceTime(props.row.sent_at) }}</div>
+            <div class="text-caption text-grey-7">Received {{ formatDate(props.row.received_at || props.row.captured_at) }}</div>
+          </q-td>
         </template>
         <template v-slot:body-cell-document="props">
           <q-td :props="props">
             <div class="text-weight-medium">{{ documentLabel(props.row.document_type) }}</div>
-            <div class="text-caption text-grey-7">{{ sourceTypeLabel(props.row.source_type) }}</div>
           </q-td>
         </template>
-        <template v-slot:body-cell-sender="props">
+        <template v-slot:body-cell-source="props">
           <q-td :props="props">
-            <div class="text-weight-medium ellipsis" :title="props.row.sender_name || props.row.sender_email">
-              {{ props.row.sender_name || props.row.sender_email || '-' }}
+            <div class="text-weight-medium ellipsis" :title="props.row.mailbox_account">
+              {{ sourceTypeLabel(props.row.source_type) }} · {{ props.row.mailbox_account || '-' }}
             </div>
-            <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.mailbox_account">
-              {{ props.row.sender_email || props.row.mailbox_account || '-' }}
+            <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.sender_name">
+              From: {{ props.row.sender_name || props.row.sender_email || '-' }}
             </div>
           </q-td>
         </template>
@@ -79,6 +81,10 @@
             <div class="text-weight-medium ellipsis" :title="props.row.external_reference || props.row.matched_entity_ref">
               {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
             </div>
+            <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
+              {{ props.row.subject || 'No subject' }}
+            </div>
+            <div class="text-caption text-grey-7">Evidence #{{ props.row.source_evidence_id || '-' }}</div>
             <div v-if="props.row.matched_entity_ref" class="text-caption text-grey-7 ellipsis">
               {{ props.row.matched_entity_type || 'Matched' }}: {{ props.row.matched_entity_ref }}
             </div>
@@ -119,15 +125,28 @@
             <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
             <div><span>Document</span><strong>{{ documentLabel(detail.document_type) }}</strong></div>
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
-            <div><span>Sender</span><strong>{{ detail.sender_name || detail.sender_email || '-' }}</strong></div>
-            <div><span>Sender email</span><strong>{{ detail.sender_email || '-' }}</strong></div>
-            <div><span>Mailbox</span><strong>{{ detail.mailbox_account || '-' }}</strong></div>
-            <div><span>Received</span><strong>{{ formatDate(detail.received_at) }}</strong></div>
-            <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
           </div>
           <q-separator class="q-my-md" />
-          <div class="source-intake-field-label">Subject</div>
-          <div class="q-mb-md source-intake-wrap">{{ detail.subject || '-' }}</div>
+          <div class="source-intake-section-title">Original Email</div>
+          <div class="source-intake-source-card q-pa-sm q-mb-md">
+            <div class="source-intake-detail-grid">
+              <div><span>Channel</span><strong>{{ sourceTypeLabel(detail.source_type) }}</strong></div>
+              <div><span>Mailbox</span><strong>{{ detail.mailbox_account || '-' }}</strong></div>
+              <div><span>From</span><strong>{{ detail.sender_name || '-' }}</strong></div>
+              <div><span>Sender email</span><strong>{{ detail.sender_email || '-' }}</strong></div>
+              <div><span>Sent by customer</span><strong>{{ formatSourceTime(detail.sent_at) }}</strong></div>
+              <div><span>Received by mailbox</span><strong>{{ formatDate(detail.received_at) }}</strong></div>
+              <div><span>Evidence ID</span><strong>#{{ detail.source_evidence_id || '-' }}</strong></div>
+              <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
+            </div>
+            <div class="source-intake-field-label q-mt-md">Subject</div>
+            <div class="source-intake-wrap">{{ detail.subject || '-' }}</div>
+            <div class="source-intake-field-label q-mt-md">Message ID / Thread ID</div>
+            <div class="source-intake-wrap source-intake-mono">{{ detail.message_id || '-' }} / {{ detail.thread_id || '-' }}</div>
+            <div class="source-intake-field-label q-mt-md">Email content</div>
+            <div v-if="detail.email_body" class="source-intake-wrap">{{ detail.email_body }}</div>
+            <div v-else class="text-caption text-grey-7">Original email body was not captured. Review the subject, extracted fields and attachments below.</div>
+          </div>
           <div class="source-intake-section-title">Business Link</div>
           <div class="source-intake-detail-grid">
             <div><span>Matched entity</span><strong>{{ detail.matched_entity_type || '-' }}</strong></div>
@@ -141,7 +160,7 @@
             <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
             <div>{{ detail.exception_summary }}</div>
           </div>
-          <div class="source-intake-section-title">Extracted Fields</div>
+          <div class="source-intake-section-title">Information From Email</div>
           <div v-if="extractionRows.length" class="source-intake-extractions">
             <div v-for="item in extractionRows" :key="item.key" class="source-intake-extraction q-pa-sm q-mb-xs">
               <div class="row items-center q-col-gutter-sm">
@@ -165,8 +184,6 @@
           <div v-else class="text-caption text-grey-7">No attachment metadata</div>
           <div class="source-intake-section-title q-mt-md">Evidence</div>
           <div class="source-intake-detail-grid">
-            <div><span>Message ID</span><strong>{{ detail.message_id || '-' }}</strong></div>
-            <div><span>Thread ID</span><strong>{{ detail.thread_id || '-' }}</strong></div>
             <div><span>Storage</span><strong>{{ detail.storage_uri ? 'Stored · ' + formatBytes(detail.storage_size) : 'Not stored' }}</strong></div>
             <div><span>Content hash</span><strong class="source-intake-hash" :title="detail.content_hash">{{ shortHash(detail.content_hash) }}</strong></div>
           </div>
@@ -221,13 +238,13 @@ export default {
         { label: 'Unknown', value: 'UNKNOWN' }
       ],
       columns: [
-        { name: 'received_at', label: 'Received', field: 'received_at', align: 'left', style: 'width: 11%' },
-        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 14%' },
-        { name: 'sender', label: 'Sender', field: 'sender_email', align: 'left', style: 'width: 17%' },
-        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 13%' },
+        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 11%' },
+        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 13%' },
+        { name: 'source', label: 'Original source', field: 'sender_email', align: 'left', style: 'width: 22%' },
+        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
         { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
         { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
-        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 18%' },
+        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 16%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
       ]
     }
@@ -300,6 +317,9 @@ export default {
     },
     formatDate (value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+    },
+    formatSourceTime (value) {
+      return value ? this.formatDate(value) : 'Not provided'
     },
     statusLabel (value) {
       return {
@@ -450,6 +470,12 @@ export default {
   overflow-wrap: anywhere;
 }
 
+.source-intake-source-card {
+  background: #f8fafb;
+  border: 1px solid #dfe7eb;
+  border-left: 3px solid #1976d2;
+}
+
 .source-intake-section-title {
   color: #263238;
   font-size: 14px;
@@ -485,6 +511,10 @@ export default {
 }
 
 .source-intake-hash {
+  font-family: monospace;
+}
+
+.source-intake-mono {
   font-family: monospace;
 }
 </style>

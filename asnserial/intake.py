@@ -225,7 +225,8 @@ def ensure_source_intake_record(source, sync_run=None, duplicate=False):
             key: value for key, value in metadata.items()
             if key not in {'body', 'raw_body', 'password', 'token', 'authorization'}
         },
-        'received_at': _parse_datetime(_metadata_value(metadata, 'received_at', 'email_received_at', 'sent_at')),
+        'sent_at': source.sent_at or _parse_datetime(_metadata_value(metadata, 'sent_at', 'email_sent_at')),
+        'received_at': _parse_datetime(_metadata_value(metadata, 'received_at', 'email_received_at')),
     }
     record, created = SourceIntakeRecord.objects.get_or_create(source=source, defaults=defaults)
     if not created and (sync_run_id := getattr(sync_run, 'id', None)):

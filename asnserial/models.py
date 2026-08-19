@@ -39,6 +39,7 @@ class SourceEvidence(models.Model):
     metadata = models.JSONField(default=dict)
     storage_uri = models.CharField(max_length=1000, blank=True, default='')
     storage_size = models.PositiveBigIntegerField(default=0)
+    sent_at = models.DateTimeField(blank=True, null=True)
     captured_at = models.DateTimeField(auto_now_add=True)
     used_at = models.DateTimeField(blank=True, null=True)
 
@@ -274,6 +275,7 @@ class SourceIntakeRecord(models.Model):
     last_error = models.TextField(blank=True, default='')
     classification_confidence = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     metadata = models.JSONField(default=dict)
+    sent_at = models.DateTimeField(blank=True, null=True)
     received_at = models.DateTimeField(blank=True, null=True)
     reviewed_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)

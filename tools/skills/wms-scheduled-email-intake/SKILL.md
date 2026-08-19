@@ -113,6 +113,15 @@ read the attachment contents, not the filename alone. Do not pass `--include-bod
 unless the full body is needed in a local test result; the body remains in the
 local `message-body.txt` by default.
 
+When building `source-evidence.json`, preserve the source timeline and content
+explicitly. Put the customer's sent timestamp in `metadata.sent_at`, the
+mailbox arrival timestamp in `metadata.received_at`, and the plain-text body in
+`metadata.body` when the source must be reviewable in GreaterWMS. Keep the
+Message-ID, thread ID, subject, sender, attachment names, hashes, and source
+locations in the same payload. If the body is not captured, omit it rather than
+copying a summary into the body field; Source Intake will show the structured
+fields and attachments and mark the original body as not captured.
+
 Process every exported attachment according to
 [attachment-processing.md](references/attachment-processing.md). A nested
 `.eml` must be parsed as a new source package, including its own body and
