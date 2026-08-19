@@ -93,9 +93,9 @@
         <template v-slot:body-cell-next_action="props">
           <q-td
             :props="props"
-            class="source-intake-next ellipsis"
+            class="source-intake-next"
             :title="props.row.next_action || props.row.exception_summary || ''"
-          >{{ props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</q-td>
+          ><span class="source-intake-next-label">{{ props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</span></q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -481,7 +481,17 @@ export default {
 
 .source-intake-next {
   max-width: 0;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.source-intake-next-label {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
+  max-height: 2.5em;
 }
 
 .source-intake-exception-marker {
