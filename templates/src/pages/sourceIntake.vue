@@ -131,7 +131,6 @@
           <div class="source-intake-source-card q-pa-sm q-mb-md">
             <div class="source-intake-detail-grid">
               <div><span>Channel</span><strong>{{ sourceTypeLabel(detail.source_type) }}</strong></div>
-              <div><span>Mailbox</span><strong>{{ detail.mailbox_account || '-' }}</strong></div>
               <div><span>From</span><strong>{{ originalEmail(detail).sender_name || detail.sender_name || '-' }}</strong></div>
               <div><span>Sender email</span><strong>{{ originalEmail(detail).sender_email || detail.sender_email || '-' }}</strong></div>
               <div><span>Sent by customer</span><strong>{{ originalEmail(detail).sent_at_raw || formatSourceTime(originalEmail(detail).sent_at || detail.sent_at) }}</strong></div>
