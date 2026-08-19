@@ -4,7 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/spa",
   "cleanUrls": true,
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/index.html" }
   ]
 }
