@@ -50,7 +50,7 @@
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
             <div class="text-weight-medium">{{ formatSourceTime(props.row.sent_at) }}</div>
-            <div class="text-caption text-grey-7">Received {{ formatDate(props.row.received_at || props.row.captured_at) }}</div>
+            <div class="text-caption text-grey-7">Received {{ formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-document="props">
@@ -135,7 +135,7 @@
               <div><span>From</span><strong>{{ originalEmail(detail).sender_name || detail.sender_name || '-' }}</strong></div>
               <div><span>Sender email</span><strong>{{ originalEmail(detail).sender_email || detail.sender_email || '-' }}</strong></div>
               <div><span>Sent by customer</span><strong>{{ originalEmail(detail).sent_at_raw || formatSourceTime(originalEmail(detail).sent_at || detail.sent_at) }}</strong></div>
-              <div><span>Received by mailbox</span><strong>{{ formatDate(detail.received_at) }}</strong></div>
+              <div><span>Received by mailbox</span><strong>{{ formatDate(forwardedEmail(detail).received_at || detail.received_at) }}</strong></div>
               <div><span>Evidence ID</span><strong>#{{ detail.source_evidence_id || '-' }}</strong></div>
               <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
             </div>

@@ -314,6 +314,7 @@ class SourceProvenanceWorkflowTests(TestCase):
             'sender_email': 'djudge@eaglegroup.com',
             'from_raw': 'djudge@eaglegroup.com On Behalf Of ESI Dallas',
             'sent_at': '2026-08-14T09:20:00-05:00',
+            'sent_at_raw': 'Friday, August 14, 2026 9:20 AM',
             'to': [
                 'Moises Altamirano/ATELAX <moises.altamirano@us.airtiger.com>',
                 'DEUS Receiving <DEUS.Receiving@deltaww.com>',
@@ -354,6 +355,9 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(detail.data['original_email']['reference'], 'LIQUID COOLING')
         self.assertEqual(detail.data['forwarded_email']['sender_email'], 'sales@example.com')
         self.assertIn('Requested Delivery Date', detail.data['email_body'])
+        summary = _intake_payload(intake)
+        self.assertEqual(summary['sent_at_raw'], 'Friday, August 14, 2026 9:20 AM')
+        self.assertEqual(summary['received_at_raw'], '2026-08-18T13:22:17-05:00')
 
     def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):
         source = SourceEvidence.objects.create(

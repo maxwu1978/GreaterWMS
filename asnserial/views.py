@@ -417,6 +417,7 @@ def _email_provenance_payload(source, record):
 
 def _intake_payload(record, detail=False):
     source = record.source
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
     original_email, forwarded_email = _email_provenance_payload(source, record)
     payload = {
         'id': record.id,
@@ -438,7 +439,9 @@ def _intake_payload(record, detail=False):
         'last_error': record.last_error,
         'classification_confidence': record.classification_confidence,
         'sent_at': record.sent_at or source.sent_at,
+        'sent_at_raw': str(original_email.get('sent_at_raw') or '')[:255],
         'received_at': record.received_at,
+        'received_at_raw': _forwarded_value(metadata, 'received_at', 'email_received_at'),
         'updated_at': record.updated_at,
         'source_type': source.source_type,
         'source_status': source.status,
