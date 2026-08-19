@@ -63,8 +63,11 @@
             <div class="text-weight-medium ellipsis" :title="props.row.mailbox_account">
               {{ sourceTypeLabel(props.row.source_type) }} · {{ props.row.mailbox_account || '-' }}
             </div>
+            <div v-if="props.row.sender_name" class="text-caption text-grey-7 ellipsis" :title="props.row.sender_name">
+              {{ props.row.sender_name }}
+            </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.sender_name">
-              From: {{ props.row.sender_name || props.row.sender_email || '-' }}
+              From: {{ compactEmail(props.row.sender_email) || props.row.sender_name || '-' }}
             </div>
           </q-td>
         </template>
@@ -336,6 +339,16 @@ export default {
     },
     formatSourceTime (value) {
       return value ? this.formatDate(value) : 'Not provided'
+    },
+    compactEmail (value) {
+      const email = String(value || '')
+      if (email.length <= 30) return email
+      const at = email.lastIndexOf('@')
+      if (at <= 0) return `${email.slice(0, 12)}…${email.slice(-10)}`
+      const domain = email.slice(at + 1)
+      const local = email.slice(0, at)
+      const localBudget = Math.max(8, 27 - domain.length)
+      return `${local.slice(0, localBudget)}…@${domain}`
     },
     originalEmail (detail) {
       return (detail && detail.original_email) || {}
