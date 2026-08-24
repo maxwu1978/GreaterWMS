@@ -20,6 +20,7 @@ The current customer-facing service is the legacy Django pair:
 - Verified commit: `7592afe87ec94309276d9181103a504f3d91fc32`
 - Immutable rollback tag: `prod-legacy-2026-08-24`
 - Frontend/API: `app.maxsmartwms.online` and `api.maxsmartwms.online`
+- Auto deploy: disabled; production releases require an explicit commit.
 
 The migrated FastAPI/React service is `wms-quickstart-staging` on `main` and
 is not customer production. Do not use the migrated staging health workflow as

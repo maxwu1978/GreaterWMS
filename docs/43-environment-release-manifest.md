@@ -25,8 +25,9 @@ approved.
 2. Production data is never used as a writable migration test target. Export it
    read-only, rehearse against a separate database, and record the migration
    plan hash and verification counts.
-3. A `main` push can update migrated staging only. It must not switch the
-   legacy production service or its DNS.
+3. A `main` push does not deploy production. Both Render services are now
+   explicitly deployed by commit; a `main` push must not switch the legacy
+   production service or its DNS.
 4. A cutover is one release across backend, frontend, API domain, database,
    secrets, health checks, and rollback evidence. Partial cutovers are not
    allowed.
@@ -55,3 +56,10 @@ The current staging health response must report
 `build_sha=dc4e80fb9e773715708d1858251f5d6e6fe4d78d`. Do not paste database
 URLs, Render API tokens, or customer source files into this document or into
 GitHub issues.
+
+Production release command, only after approval:
+
+```bash
+render deploys create srv-d9v6ahvqj5pc73d4spp0 \
+  --commit <approved-production-commit> --wait --confirm --output text
+```

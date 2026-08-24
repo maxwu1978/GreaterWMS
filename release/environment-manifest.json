@@ -13,6 +13,7 @@
       "verified_commit": "7592afe87ec94309276d9181103a504f3d91fc32",
       "release_tag": "prod-legacy-2026-08-24",
       "database_role": "read_only_migration_source",
+      "auto_deploy": false,
       "deploy_policy": "Do not deploy main here until the coordinated cutover is approved."
     },
     "migrated_staging": {
@@ -23,6 +24,7 @@
       "git_branch": "main",
       "verified_commit": "dc4e80fb9e773715708d1858251f5d6e6fe4d78d",
       "migration_database": "WMS-VM",
+      "auto_deploy": false,
       "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."
     }
   },
