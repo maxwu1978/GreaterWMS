@@ -13,18 +13,18 @@ current source snapshot and ownership transfer procedure are documented in
 
 ## Current Production Path
 
-- Render service: `srv-d7ako4ggjchc73eh8g70`
-- Branch: `main`
-- Root directory: `backend`
-- Runtime: Docker, using `backend/Dockerfile`
-- Auto deploy: enabled, trigger is commit
-- Verification: `.github/workflows/render-backend-deploy.yml` waits for
-  `https://api.maxsmartwms.online/health` to report the pushed Git SHA.
+The current customer-facing service is the legacy Django pair:
 
-This means the repository does not need a `RENDER_DEPLOY_HOOK_URL` secret for
-the normal production path. A missing deploy hook should not be treated as a
-deployment failure while Render auto deploy remains enabled and the build SHA
-verification workflow is passing.
+- Render service: `greaterwms-production` / `srv-d9v6ahvqj5pc73d4spp0`
+- Branch: `codex/cli-install-info`
+- Verified commit: `7592afe87ec94309276d9181103a504f3d91fc32`
+- Immutable rollback tag: `prod-legacy-2026-08-24`
+- Frontend/API: `app.maxsmartwms.online` and `api.maxsmartwms.online`
+
+The migrated FastAPI/React service is `wms-quickstart-staging` on `main` and
+is not customer production. Do not use the migrated staging health workflow as
+proof that the legacy production service has been upgraded. The authoritative
+mapping is [`docs/43-environment-release-manifest.md`](43-environment-release-manifest.md).
 
 The legacy AWS ECS workflow is intentionally guarded and renamed
 `Legacy AWS ECS Deploy`. Do not use it for normal production releases while the

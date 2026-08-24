@@ -22,7 +22,7 @@
       "health_url": "https://wms-quickstart-staging.onrender.com/health",
       "git_branch": "main",
       "verified_commit": "dc4e80fb9e773715708d1858251f5d6e6fe4d78d",
-      "database_target": "WMS-VM",
+      "migration_database": "WMS-VM",
       "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."
     }
   },

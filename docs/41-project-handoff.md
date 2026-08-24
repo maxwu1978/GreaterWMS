@@ -196,11 +196,17 @@ windows, and do not accept a plain text yes as a production authorization.
 
 ## 8. Deployment Topology
 
-render.yaml declares two Render Docker services:
+The migrated `render.yaml` declares two Render Docker services:
 
-1. wms-quickstart, rooted at backend, branch main, production API.
-2. wms-agv-sandbox, rooted at agv-simulator, branch main, public AGV/WCS
+1. `wms-quickstart-staging`, rooted at backend, branch `main`, migration target.
+2. `wms-agv-sandbox`, rooted at agv-simulator, branch `main`, public AGV/WCS
    sandbox.
+
+The current customer-facing service is separate from this blueprint:
+`greaterwms-production` (`srv-d9v6ahvqj5pc73d4spp0`) runs the legacy Django
+pair on `codex/cli-install-info` at the immutable release tag
+`prod-legacy-2026-08-24`. See `docs/43-environment-release-manifest.md`; do
+not infer production from `main`.
 
 The documented production endpoints are:
 
