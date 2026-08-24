@@ -4,8 +4,9 @@
       <q-card-section class="mail-task-board__header row items-center q-px-md q-py-sm">
         <div class="mail-task-board__title">MAIL TO TASK</div>
         <q-space />
-        <div v-if="previewMode" class="mail-task-board__preview">PREVIEW</div>
-        <div class="mail-task-board__live">LIVE</div>
+        <div class="mail-task-board__live" :class="{ 'mail-task-board__live--staged': !apiEnabled || previewMode }">
+          {{ apiEnabled && !previewMode ? 'LIVE' : (previewMode ? 'PREVIEW' : 'STAGED') }}
+        </div>
         <q-btn flat round dense color="white" icon="refresh" :loading="loading" aria-label="Refresh mail tasks" @click="getList" />
       </q-card-section>
 
@@ -391,7 +392,7 @@ export default {
 .mail-task-board__header { min-height: 48px; background: #596782; color: #ffffff; }
 .mail-task-board__title { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; }
 .mail-task-board__live { margin-right: 8px; color: #8ee3a7; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
-.mail-task-board__preview { margin-right: 14px; color: #ffd166; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; }
+.mail-task-board__live--staged { color: #ffd166; }
 .mail-task-board__summary { min-height: 40px; border-bottom: 1px solid #dfe3ea; }
 .mail-task-board__subtitle { color: #667085; font-size: 12px; font-weight: 600; }
 .mail-task-board__counts { display: flex; gap: 12px; color: #667085; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
