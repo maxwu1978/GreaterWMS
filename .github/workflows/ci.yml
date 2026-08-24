@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-lint-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: wms_test
+          POSTGRES_USER: wms
+          POSTGRES_PASSWORD: wms
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -e ".[dev]" aiosqlite
+
+      - name: Lint (ruff)
+        working-directory: backend
+        run: ruff check app/ tests/
+
+      - name: Type check (mypy)
+        working-directory: backend
+        run: mypy app/ --ignore-missing-imports
+
+      - name: Test
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://wms:wms@localhost:5432/wms_test
+          JWT_SECRET_KEY: test-secret-key-for-ci-runs
+        run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+
+  frontend-lint-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Recovery matrix guard
+        working-directory: frontend
+        run: node ./scripts/verify-recovery-matrix.mjs
+
+      - name: UI language guard
+        working-directory: frontend
+        run: npm run check:ui-language
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Admin mobile governance visual guard
+        working-directory: frontend
+        env:
+          WMS_AUDIT_APP_URL: http://127.0.0.1:4173
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          node ./scripts/verify-admin-mobile-governance-visual.mjs

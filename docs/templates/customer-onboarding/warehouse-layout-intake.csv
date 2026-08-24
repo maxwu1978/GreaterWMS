@@ -1,0 +1,2 @@
+source_file,warehouse_code,warehouse_name,area_code,area_type,width_ft,depth_ft,height_ft,cargo_width_in,cargo_depth_in,cargo_height_in,slot_width_ft,slot_depth_ft,slot_height_ft,rows,columns,levels,create_locations,is_agv_accessible,route_role,docking_direction,notes
+customer-drawing.pdf,DAL,Dallas Warehouse,DAL-A,floor_storage,28,22,9,68,58,100,6,5,9,4,4,1,true,true,floor_storage_lane,north,Replace sample values with customer measurements.

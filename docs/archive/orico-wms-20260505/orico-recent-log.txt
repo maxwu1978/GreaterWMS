@@ -1,0 +1,20 @@
+0c74820 (HEAD -> codex/receiving-backend-sync, origin/main, origin/HEAD) Refine receiving flow with recovery actions and recorded details
+530ba2f Add receiving label traceability to inventory ledger
+8759ab3 Polish receiving label print and discrepancy flow
+5ad9bf6 Polish label-driven receiving flow
+0f23eb8 Add system-label receiving flow
+5cc0cea Increase planner editor contrast
+a322119 Unify planner editor property groups
+b1b91c7 Lighten planner location property editing
+9070b89 Refine planner editor field flow
+ce7f197 Reduce planner summary chip clutter
+0fbbe58 Tighten planner guidance copy
+09362c5 Auto-select planner locations sooner
+c9f4b79 Auto-focus planner creation flow
+67c0011 Improve planner editor action placement
+3a86454 Polish planner rack wording
+53d9748 Reorder planner editor fields for faster edits
+151598c Strengthen planner selection focus
+11db39e Trim planner edit action clutter
+729687f Simplify planner editor controls
+bcd3a1b Surface planner location actions sooner

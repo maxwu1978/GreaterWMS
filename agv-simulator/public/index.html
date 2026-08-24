@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AGV Local Simulator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local AGV Simulator</p>
+          <h1>仓库 AGV 调度台</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="fullscreenBtn" type="button" title="全屏查看仓库画布">Full screen</button>
+          <button id="replayBtn" type="button" title="回放最近一次 WMS/WCS 交换">Replay</button>
+          <button id="failBtn" type="button" title="模拟异常回调">Fail</button>
+          <button id="resetBtn" type="button" title="重置任务">Reset</button>
+          <button id="startBtn" type="button" class="primary" title="开始模拟">Start</button>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="AGV simulator workspace">
+        <section class="map-pane" aria-label="warehouse map">
+          <div class="map-toolbar">
+            <div>
+              <span class="status-dot" id="connectionDot"></span>
+              <span id="connectionText">Simulator ready</span>
+            </div>
+            <div class="map-legend" aria-label="map legend">
+              <span class="legend-route">规划路线</span>
+              <span class="legend-live">当前任务</span>
+              <span class="legend-lane">AGV 行驶区</span>
+            </div>
+            <div class="toolbar-right">
+              <span id="taskCode">TASK-PUTAWAY-0427</span>
+              <span id="speedText">0.0 m/s</span>
+            </div>
+          </div>
+          <div class="canvas-scroll" id="canvasScroll">
+            <canvas id="warehouseCanvas" width="1280" height="760" aria-label="仓库地图、路线和 AGV 当前坐标"></canvas>
+          </div>
+        </section>
+
+        <aside class="side-pane" aria-label="task status and callbacks">
+          <section class="status-section">
+            <h2>任务状态</h2>
+            <div class="state-line">
+              <span>当前步骤</span>
+              <strong id="stepLabel">待开始</strong>
+            </div>
+            <div class="state-line">
+              <span>AGV 位置</span>
+              <strong id="positionLabel">-</strong>
+            </div>
+            <div class="state-line">
+              <span>进度</span>
+              <strong id="progressLabel">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="progressBar"></div>
+            </div>
+          </section>
+
+          <section class="status-section">
+            <h2>WCS 回调</h2>
+            <div class="step-grid" id="stepGrid"></div>
+            <pre id="payloadView" aria-label="latest callback payload">{}</pre>
+          </section>
+
+          <section class="status-section log-section">
+            <h2>操作日志</h2>
+            <ol id="eventLog" class="event-log"></ol>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

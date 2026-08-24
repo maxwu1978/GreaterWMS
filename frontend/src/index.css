@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+  }
+
+  body {
+    @apply bg-[#f2efe8] text-[#13212c] antialiased;
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  .landing-grid {
+    background-image:
+      linear-gradient(rgba(19, 33, 44, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(19, 33, 44, 0.06) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: center center;
+  }
+
+  .landing-orbit {
+    animation: orbitPulse 8s ease-in-out infinite;
+  }
+
+  .animate-rise {
+    animation: riseIn 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .animate-rise-delayed {
+    animation: riseIn 1s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+  }
+
+  .animate-rise-soft {
+    animation: riseIn 1s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
+  }
+
+  .image-glow {
+    position: relative;
+  }
+
+  .image-glow::after {
+    content: "";
+    position: absolute;
+    inset: auto 12% -18% 12%;
+    height: 24%;
+    border-radius: 999px;
+    background: rgba(247, 191, 69, 0.22);
+    filter: blur(36px);
+    pointer-events: none;
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes orbitPulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: scale(1.04);
+    opacity: 0.95;
+  }
+}

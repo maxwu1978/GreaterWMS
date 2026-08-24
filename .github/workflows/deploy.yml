@@ -1,0 +1,74 @@
+name: Legacy AWS ECS Deploy
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      confirm_legacy_aws:
+        description: 'Type YES to confirm this legacy AWS/ECS path. Current production is Render.'
+        required: true
+        default: 'NO'
+      environment:
+        description: 'Legacy AWS deploy target'
+        required: true
+        default: 'staging'
+        type: choice
+        options: [staging, prod]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: wms-quickstart
+
+jobs:
+  build-and-deploy:
+    if: ${{ github.event.inputs.confirm_legacy_aws == 'YES' }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        working-directory: backend
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f Dockerfile.prod -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Deploy to ECS
+        env:
+          CLUSTER: wms-${{ github.event.inputs.environment }}-cluster
+          SERVICE: wms-${{ github.event.inputs.environment }}-api
+        run: |
+          aws ecs update-service --cluster $CLUSTER --service $SERVICE --force-new-deployment
+          aws ecs wait services-stable --cluster $CLUSTER --services $SERVICE
+
+      - name: Run DB migrations
+        env:
+          CLUSTER: wms-${{ github.event.inputs.environment }}-cluster
+        run: |
+          aws ecs run-task \
+            --cluster $CLUSTER \
+            --task-definition wms-${{ github.event.inputs.environment }}-api \
+            --launch-type FARGATE \
+            --overrides '{"containerOverrides":[{"name":"api","command":["alembic","upgrade","head"]}]}' \
+            --network-configuration '{"awsvpcConfiguration":{"subnets":["${{ secrets.PRIVATE_SUBNET_1 }}"],"securityGroups":["${{ secrets.ECS_SG }}"]}}'
+
+      - name: Smoke test
+        run: |
+          sleep 30
+          curl -f https://${{ secrets.APP_DOMAIN }}/health || exit 1

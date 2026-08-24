@@ -1,0 +1,2 @@
+client_code,client_name,sku_code,sku_name,barcode,description,weight_kg,length_cm,width_cm,height_cm,requires_lot,requires_expiry,is_hazmat,units_per_case,cases_per_pallet,notes
+CLIENT-CODE,Client Name,SKU-001,Sample SKU,0123456789012,Replace sample row before import,1.0,10,10,10,false,false,false,1,1,

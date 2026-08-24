@@ -1,0 +1,534 @@
+{
+  "warehouse_code": "DAL",
+  "layout_name": "Dallas AGV standard layout v2",
+  "source": "warehouse.blueprint.preview",
+  "planning_standard": {
+    "document": "docs/36-agv-planning-standard.md",
+    "source_document": "AGV现场绘图指导V1.0.docx",
+    "status": "draft_ready_for_field_review",
+    "coordinate_system": "drawing_percent",
+    "distance_unit": "ft",
+    "pallet_standard": "customer oversized floor loads",
+    "unresolved_assumptions": [
+      "Final AGV vehicle envelope and vendor-specific turn radius must be confirmed on site.",
+      "Floor flatness, thresholds, trench drains, ramps, and pedestrian crossings require field verification."
+    ]
+  },
+  "area_dimensions": {
+    "width_ft": 96,
+    "depth_ft": 96,
+    "grid_unit_ft": 1,
+    "drive_aisle_ft": {
+      "width": 40,
+      "length": 165
+    },
+    "coordinate_system": "drawing_percent"
+  },
+  "physical_allocation": {
+    "abc_total_width_ft": 120,
+    "abc_width_segments": [
+      { "label": "A-CONN", "width_ft": 12, "role": "agv_connector" },
+      { "label": "A storage", "width_ft": 28, "role": "floor_storage" },
+      { "label": "B storage", "width_ft": 40, "role": "floor_storage" },
+      { "label": "C storage", "width_ft": 40, "role": "floor_storage" }
+    ],
+    "abc_to_rack_depth_ft": 34,
+    "abc_depth_segments": [
+      { "label": "Upper AGV aisle", "depth_ft": 12, "role": "drive_aisle" },
+      { "label": "Floor-storage depth", "depth_ft": 22, "role": "floor_storage" }
+    ],
+    "abc_lower_lane_outside_storage_ft": 12,
+    "notes": "ABC horizontal allocation keeps the original 120 ft total. The 34 ft vertical gap between the rack face and lower ABC edge is allocated to a 12 ft upper AGV aisle and 22 ft floor-storage depth. The 12 ft lower AGV lane sits below A/B/C and does not consume the original ABC storage depth."
+  },
+  "route_policy": {
+    "traffic_pattern": "controlled_one_way_loop",
+    "main_aisle_width_ft": 40,
+    "branch_aisle_width_ft": 12,
+    "dock_lane_width_ft": 40,
+    "abc_lower_lane_width_ft": 12,
+    "minimum_turning_radius_mm": 800,
+    "fork_to_pallet_clearance_mm": 500,
+    "wall_clearance_mm": 150,
+    "rack_equipment_clearance_mm": 200,
+    "pedestrian_crossing_policy": "separate_or_slow_zone",
+    "storage_handoff_strategy": "edge_handoff_with_a_area_connector",
+    "agv_enters_floor_storage": false,
+    "dock_doors_are_storage_locations": false,
+    "left_side_enclosed": true,
+    "a_area_connector_width_ft": 12,
+    "notes": "Left side of A is enclosed. The top aisle connects to the lower A/B/C AGV lane through a 12 ft AGV connector carved from the left side of the original A area; AGV routes still do not enter or cross floor-storage slots. Dock doors are transport interfaces, not storage locations."
+  },
+  "zones": [
+    {
+      "code": "DAL-RACK",
+      "label": "Top 4-level rack row near office",
+      "zone_type": "rack_storage",
+      "x": 4,
+      "y": 15,
+      "width": 76,
+      "height": 7,
+      "rows": 4,
+      "columns": 15,
+      "aisles": 1,
+      "levels": 4,
+      "positions": 1,
+      "create_locations": true,
+      "dimensions": {
+        "unit": "ft",
+        "zone_width_ft": 120,
+        "zone_depth_ft": 3.33,
+        "bay_count": 15,
+        "bay_width_ft": 8,
+        "level_count": 4,
+        "level_clear_height_in": 65,
+        "level_clear_height_ft": 5.42,
+        "pallet_standard": "GMA",
+        "pallet_width_in": 48,
+        "pallet_depth_in": 40,
+        "pallet_depth_ft": 3.33,
+        "storage_point_count": 60
+      },
+      "layout_metadata": {
+        "layout_mode": "rack",
+        "route_role": "top_rack_face",
+        "docking_direction": "south",
+        "route_anchor_id": "N-RACK-FACE",
+        "route_exit_id": "N-RACK-FACE"
+      }
+    },
+    {
+      "code": "DAL-A",
+      "label": "Floor storage A",
+      "zone_type": "floor_storage",
+      "x": 11.6,
+      "y": 30.5,
+      "width": 17.73,
+      "height": 15.53,
+      "rows": 4,
+      "columns": 4,
+      "levels": 1,
+      "positions": 1,
+      "create_locations": true,
+      "dimensions": {
+        "unit": "ft",
+        "zone_width_ft": 28,
+        "zone_depth_ft": 22,
+        "area_sqft": 616,
+        "storage_unit": "oversize_floor_load",
+        "cargo_size_in": {
+          "length": 68,
+          "width": 58,
+          "height": 100
+        },
+        "planned_orientation": "68in side runs across zone width, 58in side runs depth",
+        "width_ft": 6,
+        "depth_ft": 5,
+        "height_ft": 9,
+        "location_internal_clearance_mm": {
+          "width": 1829,
+          "depth": 1524
+        },
+        "left_right_gap_mm": 100,
+        "front_back_gap_mm": 50,
+        "slot_count": 16,
+        "slot_area_sqft": 30,
+        "slot_layout": {
+          "rows": 4,
+          "columns": 4,
+          "slot_width_ft": 6,
+          "slot_depth_ft": 5,
+          "offset_x_ft": 0,
+          "offset_y_ft": 0,
+          "occupied_width_ft": 24,
+          "occupied_depth_ft": 20,
+          "residual_width_ft": 4,
+          "residual_depth_ft": 2,
+          "total_slot_footprint_sqft": 480
+        },
+        "capacity_adjustment": {
+          "original_width_ft": 40,
+          "original_storage_depth_ft": 22,
+          "original_area_sqft": 880,
+          "original_slot_count": 24,
+          "lost_to_agv_connector_width_ft": 12,
+          "lost_to_agv_connector_area_sqft": 264,
+          "lost_storage_area_sqft": 264,
+          "slot_delta": -8,
+          "reason": "A cargo footprint is 68x58x100 in and cannot fit in GMA 48x40 in slots."
+        }
+      },
+      "layout_metadata": {
+        "layout_mode": "area",
+        "route_role": "floor_storage_lane",
+        "abc_class": "A",
+        "lane_policy": "one_agv_one_way",
+        "agv_internal_travel": false,
+        "handoff_strategy": "edge_handoff_with_a_area_connector",
+        "handoff_edges": ["north", "south"],
+        "inbound_end": "north",
+        "outbound_end": "south",
+        "docking_direction": "north",
+        "connector_zone_code": "A-CONN",
+        "route_anchor_id": "N-A-FACE",
+        "route_exit_id": "N-A-EXIT"
+      }
+    },
+    {
+      "code": "A-CONN",
+      "label": "A-area AGV connector",
+      "zone_type": "drive_aisle",
+      "x": 4,
+      "y": 22,
+      "width": 7.6,
+      "height": 32.5,
+      "create_locations": false,
+      "dimensions": {
+        "unit": "ft",
+        "width_ft": 12,
+        "length_ft": 46,
+        "area_sqft": 552,
+        "storage_depth_consumed_ft": 22,
+        "storage_area_consumed_sqft": 264
+      },
+      "layout_metadata": {
+        "route_role": "internal_agv_connector",
+        "lane_policy": "controlled_one_way",
+        "direction": "southbound_to_lower_lane",
+        "left_side_enclosed": true,
+        "replaces_original_a_storage_width_ft": 12,
+        "route_anchor_id": "N-A-CONN-TOP",
+        "route_exit_id": "N-A-CONN-LOWER",
+        "notes": "Because the west side is closed, this connector occupies the left part of the original A area and is not a storage zone."
+      }
+    },
+    {
+      "code": "TOP-AISLE",
+      "label": "Upper AGV aisle above A/B/C",
+      "zone_type": "drive_aisle",
+      "x": 4,
+      "y": 22,
+      "width": 84,
+      "height": 8.5,
+      "create_locations": false,
+      "dimensions": {
+        "unit": "ft",
+        "width_ft": 12,
+        "length_ft": 132
+      },
+      "layout_metadata": {
+        "route_role": "upper_storage_aisle",
+        "lane_policy": "controlled_one_way",
+        "direction": "westbound",
+        "route_anchor_id": "N-TOP-AISLE",
+        "notes": "Upper aisle uses 12 ft of the 34 ft rack-to-ABC depth allocation."
+      }
+    },
+    {
+      "code": "DAL-B",
+      "label": "Floor storage B",
+      "zone_type": "floor_storage",
+      "x": 29.33,
+      "y": 30.5,
+      "width": 25.33,
+      "height": 15.53,
+      "rows": 4,
+      "columns": 4,
+      "levels": 1,
+      "positions": 1,
+      "create_locations": true,
+      "dimensions": {
+        "unit": "ft",
+        "zone_width_ft": 40,
+        "zone_depth_ft": 22,
+        "area_sqft": 880,
+        "storage_unit": "oversize_floor_load",
+        "cargo_size_in": {
+          "length": 104,
+          "width": 55,
+          "height": 98
+        },
+        "planned_orientation": "104in side runs across zone width, 55in side runs depth",
+        "width_ft": 9,
+        "depth_ft": 5,
+        "height_ft": 9,
+        "location_internal_clearance_mm": {
+          "width": 2743,
+          "depth": 1524
+        },
+        "left_right_gap_mm": 100,
+        "front_back_gap_mm": 50,
+        "slot_count": 16,
+        "slot_area_sqft": 45,
+        "slot_layout": {
+          "rows": 4,
+          "columns": 4,
+          "slot_width_ft": 9,
+          "slot_depth_ft": 5,
+          "offset_x_ft": 0,
+          "offset_y_ft": 0,
+          "occupied_width_ft": 36,
+          "occupied_depth_ft": 20,
+          "residual_width_ft": 4,
+          "residual_depth_ft": 2,
+          "total_slot_footprint_sqft": 720
+        }
+      },
+      "layout_metadata": {
+        "layout_mode": "area",
+        "route_role": "floor_storage_lane",
+        "abc_class": "B",
+        "lane_policy": "one_agv_one_way",
+        "agv_internal_travel": false,
+        "handoff_strategy": "external_edge_handoff",
+        "handoff_edges": ["north", "south"],
+        "inbound_end": "north",
+        "outbound_end": "south",
+        "docking_direction": "north",
+        "route_anchor_id": "N-B-FACE",
+        "route_exit_id": "N-B-EXIT"
+      }
+    },
+    {
+      "code": "DAL-C",
+      "label": "Floor storage C",
+      "zone_type": "floor_storage",
+      "x": 54.67,
+      "y": 30.5,
+      "width": 25.33,
+      "height": 15.53,
+      "rows": 4,
+      "columns": 4,
+      "levels": 1,
+      "positions": 1,
+      "create_locations": true,
+      "dimensions": {
+        "unit": "ft",
+        "zone_width_ft": 40,
+        "zone_depth_ft": 22,
+        "area_sqft": 880,
+        "storage_unit": "oversize_floor_load",
+        "cargo_size_in": {
+          "length": 104,
+          "width": 55,
+          "height": 98
+        },
+        "planned_orientation": "104in side runs across zone width, 55in side runs depth",
+        "width_ft": 9,
+        "depth_ft": 5,
+        "height_ft": 9,
+        "location_internal_clearance_mm": {
+          "width": 2743,
+          "depth": 1524
+        },
+        "left_right_gap_mm": 100,
+        "front_back_gap_mm": 50,
+        "slot_count": 16,
+        "slot_area_sqft": 45,
+        "slot_layout": {
+          "rows": 4,
+          "columns": 4,
+          "slot_width_ft": 9,
+          "slot_depth_ft": 5,
+          "offset_x_ft": 0,
+          "offset_y_ft": 0,
+          "occupied_width_ft": 36,
+          "occupied_depth_ft": 20,
+          "residual_width_ft": 4,
+          "residual_depth_ft": 2,
+          "total_slot_footprint_sqft": 720
+        }
+      },
+      "layout_metadata": {
+        "layout_mode": "area",
+        "route_role": "floor_storage_lane",
+        "abc_class": "C",
+        "lane_policy": "one_agv_one_way",
+        "agv_internal_travel": false,
+        "handoff_strategy": "external_edge_handoff",
+        "handoff_edges": ["north", "south"],
+        "inbound_end": "north",
+        "outbound_end": "south",
+        "docking_direction": "north",
+        "route_anchor_id": "N-C-FACE",
+        "route_exit_id": "N-C-EXIT"
+      }
+    },
+    {
+      "code": "ABC-LOWER",
+      "label": "Lower AGV lane below A/B/C",
+      "zone_type": "drive_aisle",
+      "x": 4,
+      "y": 46.03,
+      "width": 84,
+      "height": 8.47,
+      "create_locations": false,
+      "dimensions": {
+        "unit": "ft",
+        "width_ft": 12
+      },
+      "layout_metadata": {
+        "route_role": "lower_return_lane",
+        "lane_policy": "controlled_one_way",
+        "direction": "eastbound_to_dock",
+        "route_anchor_id": "N-ABC-LOWER-LANE",
+        "notes": "ABC lower area is AGV drivable, sits outside the original ABC storage depth, and connects A/B/C exits back to the dock corridor."
+      }
+    },
+    {
+      "code": "DRV",
+      "label": "Main AGV dock corridor",
+      "zone_type": "drive_aisle",
+      "x": 82,
+      "y": 22,
+      "width": 6,
+      "height": 70,
+      "create_locations": false,
+      "dimensions": {
+        "unit": "ft",
+        "width_ft": 40,
+        "length_ft": 165
+      },
+      "layout_metadata": {
+        "route_role": "main_aisle",
+        "lane_policy": "controlled_one_way",
+        "direction": "northbound_to_top_aisle"
+      }
+    },
+    {
+      "code": "DOCK",
+      "label": "Dock doors 23-30",
+      "zone_type": "dock",
+      "x": 90,
+      "y": 35,
+      "width": 6,
+      "height": 55,
+      "doors": ["23", "24", "25", "26", "27", "28", "29", "30"],
+      "create_locations": false,
+      "dimensions": {
+        "unit": "ft",
+        "door_count": 8
+      },
+      "layout_metadata": {
+        "route_role": "external_transport_interface",
+        "station_role": "inbound_outbound",
+        "docking_direction": "west",
+        "dock_doors_are_storage_locations": false
+      }
+    }
+  ],
+  "route_nodes": [
+    { "id": "N-DOCK-SOUTH", "x": 86, "y": 92, "label": "Dock corridor south", "role": "main_aisle" },
+    { "id": "N-DOCK-30", "x": 86, "y": 39, "label": "Dock 30 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-29", "x": 86, "y": 46, "label": "Dock 29 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-28", "x": 86, "y": 53, "label": "Dock 28 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-27", "x": 86, "y": 60, "label": "Dock 27 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-26", "x": 86, "y": 67, "label": "Dock 26 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-25", "x": 86, "y": 74, "label": "Dock 25 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-24", "x": 86, "y": 81, "label": "Dock 24 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-23", "x": 86, "y": 88, "label": "Dock 23 approach", "role": "dock_approach" },
+    { "id": "N-DOCK-NORTH", "x": 86, "y": 26.25, "label": "Dock corridor north", "role": "main_aisle" },
+    { "id": "N-TOP-C", "x": 67.33, "y": 26.25, "label": "Top aisle C edge", "role": "main_aisle" },
+    { "id": "N-TOP-B", "x": 42, "y": 26.25, "label": "Top aisle B edge", "role": "main_aisle" },
+    { "id": "N-TOP-A", "x": 29.33, "y": 26.25, "label": "Top aisle A east edge", "role": "main_aisle" },
+    { "id": "N-A-CONN-TOP", "x": 7.8, "y": 26.25, "label": "A connector top", "role": "main_aisle" },
+    { "id": "N-RACK-FACE", "x": 12, "y": 26.25, "label": "Rack edge handoff", "role": "rack_face" },
+    { "id": "N-A-FACE", "x": 20.47, "y": 26.25, "label": "A north edge handoff", "role": "storage_handoff" },
+    { "id": "N-B-FACE", "x": 42, "y": 26.25, "label": "B north edge handoff", "role": "storage_handoff" },
+    { "id": "N-C-FACE", "x": 67.33, "y": 26.25, "label": "C north edge handoff", "role": "storage_handoff" },
+    { "id": "N-A-CONN-LOWER", "x": 7.8, "y": 50.26, "label": "A connector lower", "role": "return_lane" },
+    { "id": "N-A-EXIT", "x": 20.47, "y": 50.26, "label": "A return lane", "role": "return_lane" },
+    { "id": "N-B-EXIT", "x": 42, "y": 50.26, "label": "B return lane", "role": "return_lane" },
+    { "id": "N-C-EXIT", "x": 67.33, "y": 50.26, "label": "C return lane", "role": "return_lane" },
+    { "id": "N-ABC-LOWER-LANE", "x": 42, "y": 50.26, "label": "ABC lower AGV lane", "role": "return_lane" },
+    { "id": "N-RETURN-CORRIDOR", "x": 86, "y": 50.26, "label": "Return corridor entry", "role": "return_lane" },
+    { "id": "N-RETURN-DOCK", "x": 86, "y": 92, "label": "Return to dock corridor", "role": "return_lane" },
+    { "id": "N-WAIT-TOP", "x": 80, "y": 26.25, "label": "Top wait point", "role": "wait_zone" },
+    { "id": "N-WAIT-DOCK", "x": 86, "y": 33, "label": "Dock wait point", "role": "wait_zone" },
+    { "id": "N-CHARGE-01", "x": 83, "y": 94, "label": "Charging station 01", "role": "charger" }
+  ],
+  "agv_paths": [
+    {
+      "id": "PATH-DOCK-CORRIDOR-UP",
+      "label": "Dock corridor northbound",
+      "role": "main_aisle",
+      "direction": "northbound",
+      "lane_policy": "one_way",
+      "width_ft": 40,
+      "points": ["N-DOCK-SOUTH", "N-DOCK-23", "N-DOCK-24", "N-DOCK-25", "N-DOCK-26", "N-DOCK-27", "N-DOCK-28", "N-DOCK-29", "N-DOCK-30", "N-WAIT-DOCK", "N-DOCK-NORTH"]
+    },
+    {
+      "id": "PATH-TOP-AISLE-WEST",
+      "label": "Upper main aisle to storage",
+      "role": "main_aisle",
+      "direction": "westbound",
+      "lane_policy": "one_way",
+      "width_ft": 12,
+      "points": ["N-DOCK-NORTH", "N-WAIT-TOP", "N-TOP-C", "N-C-FACE", "N-TOP-B", "N-B-FACE", "N-TOP-A", "N-A-FACE", "N-RACK-FACE", "N-A-CONN-TOP"]
+    },
+    {
+      "id": "PATH-A-CONNECTOR-DOWN",
+      "label": "A-area internal connector",
+      "role": "connector_aisle",
+      "direction": "southbound",
+      "lane_policy": "one_way",
+      "width_ft": 12,
+      "points": ["N-A-CONN-TOP", "N-A-CONN-LOWER"]
+    },
+    {
+      "id": "PATH-RETURN-EAST",
+      "label": "Lower AGV lane below A/B/C",
+      "role": "return_lane",
+      "direction": "eastbound",
+      "lane_policy": "one_way",
+      "width_ft": 12,
+      "points": ["N-A-CONN-LOWER", "N-A-EXIT", "N-B-EXIT", "N-ABC-LOWER-LANE", "N-C-EXIT", "N-RETURN-CORRIDOR", "N-RETURN-DOCK"]
+    },
+    {
+      "id": "PATH-CHARGE-SPUR",
+      "label": "Charging spur",
+      "role": "charger",
+      "direction": "southbound",
+      "lane_policy": "single_vehicle",
+      "width_ft": 10,
+      "points": ["N-RETURN-DOCK", "N-CHARGE-01"]
+    }
+  ],
+  "stations": [
+    { "code": "WAIT-TOP", "name": "Top aisle wait point", "station_role": "wait", "x": 80, "y": 20, "route_anchor_id": "N-WAIT-TOP", "docking_direction": "west" },
+    { "code": "WAIT-DOCK", "name": "Dock corridor wait point", "station_role": "wait", "x": 86, "y": 33, "route_anchor_id": "N-WAIT-DOCK", "docking_direction": "north" },
+    { "code": "CHG-01", "name": "Charging station 01", "station_role": "charging", "x": 83, "y": 94, "route_anchor_id": "N-CHARGE-01", "docking_direction": "south" }
+  ],
+  "safety_zones": [
+    {
+      "code": "SLOW-DOCK-CORRIDOR",
+      "label": "Dock approach slow zone",
+      "zone_type": "slow_zone",
+      "x": 82,
+      "y": 33,
+      "width": 8,
+      "height": 60,
+      "reason": "Dock traffic and AGV crossing near unload/ship interface"
+    },
+    {
+      "code": "SLOW-TOP-CROSS",
+      "label": "Top aisle turn slow zone",
+      "zone_type": "slow_zone",
+      "x": 78,
+      "y": 16,
+      "width": 12,
+      "height": 10,
+      "reason": "Main turn from dock corridor into storage aisle"
+    },
+    {
+      "code": "SAFE-ABC-FACES",
+      "label": "Floor-storage and lower AGV lane safety boundary",
+      "zone_type": "safe_boundary",
+      "x": 4,
+      "y": 22,
+      "width": 76,
+      "height": 32.5,
+      "reason": "AGV may use the A-area connector and the lower lane outside A/B/C, must dock square to floor-storage faces, and must keep pedestrians separated"
+    }
+  ],
+  "wcs_point_mapping_draft": []
+}

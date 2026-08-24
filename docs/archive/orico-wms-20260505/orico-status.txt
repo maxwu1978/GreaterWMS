@@ -1,0 +1,38 @@
+## codex/receiving-backend-sync...origin/main
+ M backend/app/api/v1/endpoints/picking.py
+ M backend/app/models/__init__.py
+ M backend/app/models/base.py
+ M backend/app/models/task.py
+ M backend/app/services/putaway_service.py
+ M backend/tests/test_regressions.py
+ M frontend/src/modules/putaway/PutawayPage.tsx
+?? ._CARQUEST_Layout.dxf
+?? ._CARQUEST_Layout.dxf~
+?? CARQUEST_Layout.dxf
+?? CARQUEST_Layout.dxf~
+?? CLAUDE.md
+?? README.md
+?? backend/.env.example
+?? backend/CLAUDE.md
+?? backend/app/.___pycache__
+?? backend/app/api/.___pycache__
+?? backend/app/api/v1/.___pycache__
+?? backend/app/api/v1/endpoints/.___pycache__
+?? backend/app/core/.___pycache__
+?? backend/app/models/.___pycache__
+?? backend/app/models/._base.py
+?? backend/app/services/.___pycache__
+?? backend/tests/.___pycache__
+?? backend/tests/._test_regressions.py
+?? backend/uv.lock
+?? docs/08-agv-ready-receiving-roadmap.md
+?? docs/09-warehouse-operations-flow.md
+?? docs/10-operations-runbook.md
+?? docs/11-websocket-protocol.md
+?? docs/12-database-schema.md
+?? docs/13-api-conventions.md
+?? docs/14-system-architecture.md
+?? frontend/CLAUDE.md
+?? frontend/src/modules/putaway/._PutawayPage.tsx
+?? img/
+?? "\345\233\276\347\272\270/"

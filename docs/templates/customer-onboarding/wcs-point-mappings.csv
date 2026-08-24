@@ -1,0 +1,2 @@
+location_id,location_barcode,point_code,point_type,point_role,point_name,buffer_code,aisle_group,station_role,agv_reachable,wcs_metadata
+,DAL-A-01-01-01-01,DAL-STO-DAL-A-01-01-01-01,storage,storage,DAL-A floor area DAL-A-01-01-01-01,,DAL-AISLE-01,,true,"{""source"":""customer-review""}"

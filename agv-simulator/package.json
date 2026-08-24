@@ -1,0 +1,14 @@
+{
+  "name": "wms-agv-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check public/app.js && node --check scripts/dallas-wcs-smoke.mjs && node --check scripts/export-dallas-cad.mjs && node --check scripts/export-dallas-rack-detail-cad.mjs && node --check scripts/export-dallas-review-assets.mjs",
+    "cad:dallas": "node scripts/export-dallas-cad.mjs",
+    "cad:dallas:rack": "node scripts/export-dallas-rack-detail-cad.mjs",
+    "review:dallas": "node scripts/export-dallas-review-assets.mjs",
+    "smoke:dallas": "node scripts/dallas-wcs-smoke.mjs"
+  }
+}

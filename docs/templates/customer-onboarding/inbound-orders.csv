@@ -1,0 +1,2 @@
+order_number,client_code,warehouse_code,sku_code,quantity,reference_number,supplier_name,line_number,lot_number,expiry_date,external_tracking_number,package_number,package_type,package_tracking_number,package_carton_mark,package_customer_barcode
+PO-001,CLIENT-CODE,DAL,SKU-001,10,REF-001,Supplier,1,LOT-001,2027-12-31,TRK-001,PKG-001,carton,TRK-PKG-001,CARTON-001,CUST-001

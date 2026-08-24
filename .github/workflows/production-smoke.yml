@@ -1,0 +1,60 @@
+name: Production Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_seed:
+        description: 'Type "yes" to seed a temporary production tenant for the smoke run'
+        required: true
+        default: "no"
+
+jobs:
+  receiving-putaway:
+    if: ${{ github.event.inputs.confirm_production_seed == 'yes' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run recovery matrix guard
+        working-directory: frontend
+        run: npm run smoke:recovery-matrix
+
+      - name: Run receiving-to-putaway production smoke
+        working-directory: frontend
+        env:
+          WMS_AUDIT_API_URL: https://api.maxsmartwms.online/api/v1
+          WMS_AUDIT_APP_URL: https://app.maxsmartwms.online
+          WMS_AUDIT_LANGUAGE: en
+          WMS_AUDIT_PASSWORD: ${{ secrets.WMS_AUDIT_PASSWORD }}
+        run: npm run smoke:receiving-putaway
+
+      - name: Run mobile UAT orchestrator
+        working-directory: frontend
+        env:
+          WMS_AUDIT_API_URL: https://api.maxsmartwms.online/api/v1
+          WMS_AUDIT_APP_URL: https://app.maxsmartwms.online
+          WMS_AUDIT_LANGUAGE: en
+          WMS_AUDIT_PASSWORD: ${{ secrets.WMS_AUDIT_PASSWORD }}
+        run: npm run uat:mobile-orchestrator
+
+      - name: Cleanup production smoke test data
+        if: always()
+        working-directory: frontend
+        env:
+          WMS_AUDIT_API_URL: https://api.maxsmartwms.online/api/v1
+          WMS_AUDIT_APP_URL: https://app.maxsmartwms.online
+          WMS_AUDIT_LANGUAGE: en
+          WMS_AUDIT_PASSWORD: ${{ secrets.WMS_AUDIT_PASSWORD }}
+        run: npm run uat:production:cleanup

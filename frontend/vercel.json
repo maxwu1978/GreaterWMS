@@ -1,0 +1,32 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "maxsmartwms.online"
+        }
+      ],
+      "destination": "https://app.maxsmartwms.online/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.maxsmartwms.online"
+        }
+      ],
+      "destination": "https://app.maxsmartwms.online/:path*",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

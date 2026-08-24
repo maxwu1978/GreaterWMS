@@ -1,0 +1,102 @@
+services:
+  - type: web
+    name: wms-quickstart
+    runtime: docker
+    repo: https://github.com/maxwu1978/GreaterWMS
+    branch: main
+    rootDir: backend
+    plan: free
+    region: oregon
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile.prod
+    dockerContext: .
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: REGISTRATION_APPROVAL_REQUIRED
+        value: "true"
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: EMAIL_VERIFICATION_REQUIRED
+        sync: false
+      - key: EMAIL_FROM_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: SMTP2GO_API_KEY
+        sync: false
+      - key: SMTP2GO_FROM_EMAIL
+        sync: false
+      - key: MAILERSEND_API_KEY
+        sync: false
+      - key: MAILERSEND_FROM_EMAIL
+        sync: false
+      - key: POSTMARK_SERVER_TOKEN
+        sync: false
+      - key: POSTMARK_FROM_EMAIL
+        sync: false
+      - key: POSTMARK_MESSAGE_STREAM
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: MAILGUN_API_KEY
+        sync: false
+      - key: MAILGUN_DOMAIN
+        sync: false
+      - key: MAILGUN_FROM_EMAIL
+        sync: false
+      - key: MAILGUN_API_BASE_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_BASE_URL
+        value: "https://api.deepseek.com"
+      - key: DEEPSEEK_MODEL
+        value: "deepseek-v4-flash"
+      - key: DEEPSEEK_WEB_SEARCH_ENABLED
+        value: "false"
+      - key: WEB_SEARCH_PROVIDER
+        value: "tavily"
+      - key: WEB_SEARCH_MAX_RESULTS
+        value: "5"
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: TAVILY_BASE_URL
+        value: "https://api.tavily.com"
+  - type: web
+    name: wms-agv-sandbox
+    runtime: docker
+    repo: https://github.com/maxwu1978/GreaterWMS
+    branch: main
+    rootDir: agv-simulator
+    plan: free
+    region: oregon
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: "production"

@@ -1,0 +1,2 @@
+order_number,client_code,warehouse_code,sku_code,quantity,reference_number,carrier
+SO-001,CLIENT-CODE,DAL,SKU-001,5,REF-OUT-001,UPS

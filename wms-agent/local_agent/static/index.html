@@ -1,0 +1,3792 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WMS Local Agent</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #18212b;
+        --muted: #667382;
+        --line: #d8dee6;
+        --surface: #f5f7fa;
+        --panel: #ffffff;
+        --accent: #0b6bcb;
+        --accent-strong: #064f99;
+        --danger: #a33a2d;
+        --ok: #1c7c48;
+        --soft-blue: #eaf3ff;
+        --soft-green: #edf8f1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--surface);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.86);
+        backdrop-filter: blur(12px);
+      }
+      .topbar {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .brand {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 10px;
+        align-items: center;
+      }
+      .brand-mark {
+        align-items: center;
+        background: var(--accent);
+        border-radius: 8px;
+        color: #fff;
+        display: inline-flex;
+        font-weight: 800;
+        height: 34px;
+        justify-content: center;
+        width: 34px;
+      }
+      .brand-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .brand strong {
+        font-size: 15px;
+      }
+      .brand span,
+      .session-meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      main {
+        max-width: 1120px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 28px 24px 48px;
+      }
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(320px, 390px) 1fr;
+        gap: 24px;
+        align-items: start;
+      }
+      .workspace.signed-out {
+        grid-template-columns: minmax(360px, 460px) 1fr;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .panel-body {
+        padding: 18px;
+      }
+      h1,
+      h2 {
+        margin: 0;
+        letter-spacing: 0;
+      }
+      h1 {
+        font-size: 22px;
+        line-height: 1.2;
+      }
+      h2 {
+        font-size: 14px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .task-lede {
+        margin: 8px 0 16px;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: #334150;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fff;
+        color: var(--ink);
+        padding: 10px 11px;
+        outline: none;
+      }
+      textarea {
+        min-height: 94px;
+        resize: vertical;
+      }
+      input:focus,
+      textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(11, 107, 203, 0.12);
+      }
+      button {
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: var(--accent);
+        color: #fff;
+        padding: 9px 12px;
+        cursor: pointer;
+        font-weight: 650;
+      }
+      button:hover {
+        background: var(--accent-strong);
+      }
+      button.secondary {
+        background: #fff;
+        color: var(--ink);
+        border-color: var(--line);
+      }
+      button.secondary:hover {
+        background: #f1f4f8;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+      .primary-action {
+        min-width: 112px;
+      }
+      .spinner {
+        animation: spin 0.9s linear infinite;
+        border: 2px solid rgba(255, 255, 255, 0.45);
+        border-top-color: #fff;
+        border-radius: 999px;
+        display: inline-block;
+        height: 14px;
+        margin-right: 7px;
+        vertical-align: -2px;
+        width: 14px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .quick-groups {
+        display: grid;
+        gap: 14px;
+        margin: 16px 0;
+      }
+      .quick-group {
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+      }
+      .quick-group:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .quick-group h3 {
+        color: #334150;
+        font-size: 12px;
+        letter-spacing: 0;
+        margin: 0 0 8px;
+      }
+      .quick {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .quick button {
+        min-height: 38px;
+        padding: 8px;
+      }
+      .status {
+        margin-top: 14px;
+        padding: 10px 11px;
+        border-radius: 7px;
+        background: #eef5fc;
+        color: #214f7b;
+        font-size: 13px;
+      }
+      .status.error {
+        background: #fff1ef;
+        color: var(--danger);
+      }
+      .status.ok {
+        background: #eef8f1;
+        color: #1c6b3b;
+      }
+      .status.loading {
+        background: var(--soft-blue);
+        color: #174d85;
+      }
+      .login-progress {
+        display: grid;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .progress-step {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        font-size: 13px;
+        gap: 8px;
+      }
+      .progress-dot {
+        background: #c9d4e1;
+        border-radius: 999px;
+        height: 8px;
+        width: 8px;
+      }
+      .progress-step.active {
+        color: #174d85;
+        font-weight: 650;
+      }
+      .progress-step.active .progress-dot {
+        background: var(--accent);
+      }
+      .progress-step.done {
+        color: var(--ok);
+      }
+      .progress-step.done .progress-dot {
+        background: var(--ok);
+      }
+      .hidden {
+        display: none !important;
+      }
+      .operator-panel {
+        position: sticky;
+        top: 18px;
+      }
+      .result {
+        min-height: 420px;
+      }
+      .result-head {
+        padding: 18px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .result-body {
+        padding: 18px;
+      }
+      .summary-panel {
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+        padding: 14px;
+      }
+      .summary-panel strong {
+        font-size: 15px;
+      }
+      .summary-panel p {
+        margin: 0;
+      }
+      .map-panel {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding: 14px;
+      }
+      .map-panel header {
+        background: transparent;
+        border: 0;
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+      }
+      .map-panel h3 {
+        font-size: 15px;
+        margin: 0;
+      }
+      .map-panel p {
+        margin: 4px 0 0;
+      }
+      .map-tools {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .map-tools select {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        font: inherit;
+        padding: 8px 10px;
+      }
+      .map-canvas-shell {
+        background:
+          linear-gradient(rgba(102, 115, 130, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(102, 115, 130, 0.08) 1px, transparent 1px),
+          #f8fafc;
+        background-size: 28px 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        cursor: grab;
+        min-height: 260px;
+        overflow: hidden;
+        position: relative;
+      }
+      .map-canvas-shell.dragging {
+        cursor: grabbing;
+      }
+      #warehouseMapCanvas {
+        display: block;
+        height: 420px;
+        touch-action: none;
+        width: 100%;
+      }
+      #warehouseMapPanel:fullscreen {
+        background: #f5f7fa;
+        display: grid;
+        gap: 12px;
+        grid-template-rows: auto auto 1fr auto auto;
+        padding: 18px;
+      }
+      #warehouseMapPanel:fullscreen .map-canvas-shell {
+        min-height: 0;
+      }
+      #warehouseMapPanel:fullscreen #warehouseMapCanvas {
+        height: 100%;
+      }
+      #warehouseMapPanel.canvas-fullscreen {
+        background: #f5f7fa;
+        border: 0;
+        border-radius: 0;
+        display: grid;
+        gap: 12px;
+        grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+        inset: 0;
+        overflow: auto;
+        padding: 18px;
+        position: fixed;
+        z-index: 1000;
+      }
+      #warehouseMapPanel.canvas-fullscreen .map-canvas-shell {
+        min-height: 0;
+      }
+      #warehouseMapPanel.canvas-fullscreen #warehouseMapCanvas {
+        height: 100%;
+      }
+      .map-empty {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        line-height: 1.5;
+        padding: 24px;
+        position: absolute;
+        text-align: center;
+      }
+      .map-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        font-size: 12px;
+      }
+      .map-legend span {
+        align-items: center;
+        color: var(--muted);
+        display: inline-flex;
+        gap: 6px;
+      }
+      .map-swatch {
+        border: 1px solid rgba(24, 33, 43, 0.18);
+        border-radius: 4px;
+        display: inline-block;
+        height: 12px;
+        width: 12px;
+      }
+      .map-inspector {
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        color: #334150;
+        font-size: 12px;
+        padding: 10px;
+      }
+      .canvas-view-tools {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .canvas-view-tools .row {
+        gap: 6px;
+      }
+      .canvas-view-tools button {
+        min-height: 34px;
+        padding: 7px 10px;
+      }
+      .canvas-zoom-label {
+        color: var(--muted);
+        font-size: 12px;
+        min-width: 44px;
+        text-align: center;
+      }
+      .blueprint-form {
+        display: grid;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .blueprint-form textarea {
+        min-height: 118px;
+      }
+      .blueprint-stage {
+        background:
+          linear-gradient(rgba(102, 115, 130, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(102, 115, 130, 0.08) 1px, transparent 1px),
+          #f8fafc;
+        background-size: 28px 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        cursor: grab;
+        min-height: 320px;
+        overflow: hidden;
+        position: relative;
+      }
+      .blueprint-stage.dragging {
+        cursor: grabbing;
+      }
+      #blueprintCanvas {
+        display: block;
+        height: 420px;
+        touch-action: none;
+        width: 100%;
+      }
+      #blueprintPageReview:fullscreen {
+        background: #f5f7fa;
+        display: grid;
+        gap: 12px;
+        grid-template-rows: auto 1fr auto;
+        padding: 18px;
+      }
+      #blueprintPageReview:fullscreen .blueprint-stage {
+        min-height: 0;
+      }
+      #blueprintPageReview:fullscreen #blueprintCanvas {
+        height: 100%;
+      }
+      #blueprintPageReview.canvas-fullscreen {
+        background: #f5f7fa;
+        display: grid;
+        gap: 12px;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        inset: 0;
+        overflow: auto;
+        padding: 18px;
+        position: fixed;
+        z-index: 1000;
+      }
+      #blueprintPageReview.canvas-fullscreen .blueprint-stage {
+        min-height: 0;
+      }
+      #blueprintPageReview.canvas-fullscreen #blueprintCanvas {
+        height: 100%;
+      }
+      body.canvas-fullscreen-open {
+        overflow: hidden;
+      }
+      .blueprint-detail {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+      }
+      .blueprint-detail h4 {
+        font-size: 14px;
+        margin: 0;
+      }
+      .blueprint-table {
+        border-collapse: collapse;
+        font-size: 12px;
+        min-width: 560px;
+        width: 100%;
+      }
+      .blueprint-table-wrap {
+        overflow-x: auto;
+      }
+      .blueprint-table th,
+      .blueprint-table td {
+        border-bottom: 1px solid var(--line);
+        padding: 6px;
+        text-align: left;
+      }
+      .blueprint-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .blueprint-tabs {
+        background: #eef3f8;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 4px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        padding: 4px;
+      }
+      .blueprint-tab {
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        color: #526173;
+        min-height: 38px;
+        padding: 8px 10px;
+      }
+      .blueprint-tab.active {
+        background: #fff;
+        color: #18212b;
+        box-shadow: 0 1px 2px rgba(24, 33, 43, 0.08);
+      }
+      .blueprint-page {
+        display: grid;
+        gap: 12px;
+      }
+      .blueprint-page-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .blueprint-view-tools {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .blueprint-view-tools .row {
+        gap: 6px;
+      }
+      .blueprint-view-tools button {
+        min-height: 34px;
+        padding: 7px 10px;
+      }
+      .blueprint-zoom-label {
+        color: var(--muted);
+        font-size: 12px;
+        min-width: 44px;
+        text-align: center;
+      }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .summary-metric {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 10px;
+      }
+      .summary-metric span {
+        color: var(--muted);
+        display: block;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      details.utility-section {
+        border-top: 1px solid var(--line);
+        margin-top: 16px;
+        padding-top: 14px;
+      }
+      details.utility-section summary {
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .raw-output {
+        margin-top: 12px;
+      }
+      .raw-output summary {
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 8px;
+      }
+      pre {
+        margin: 0;
+        overflow: auto;
+        max-height: 420px;
+        padding: 14px;
+        border-radius: 7px;
+        background: #101820;
+        color: #d9e6f2;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .chips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 9px;
+        color: #38495a;
+        background: #fff;
+        font-size: 12px;
+      }
+      .confirm-card {
+        margin-bottom: 14px;
+        border: 1px solid #f1c27a;
+        border-radius: 8px;
+        background: #fff8ed;
+        padding: 14px;
+      }
+      .confirm-card h2 {
+        color: #5c3b04;
+      }
+      .settings-actions {
+        margin-top: 16px;
+      }
+      .settings-actions .quick {
+        margin-bottom: 0;
+      }
+      .settings-form {
+        display: grid;
+        gap: 10px;
+      }
+      .settings-simple {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .settings-simple legend,
+      .settings-advanced-label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0 4px;
+      }
+      .settings-simple-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .settings-simple-grid label,
+      .settings-form .settings-advanced-label {
+        margin-top: 0;
+      }
+      .settings-form select,
+      .settings-form input,
+      .settings-form textarea {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-sizing: border-box;
+        font: inherit;
+        padding: 10px;
+        width: 100%;
+      }
+      .settings-form textarea {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        min-height: 92px;
+        resize: vertical;
+      }
+      .settings-diff,
+      .settings-result,
+      .evidence-panel,
+      .evidence-lookup {
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 12px;
+        padding: 10px;
+      }
+      .evidence-lookup,
+      .evidence-panel {
+        margin-bottom: 12px;
+      }
+      .evidence-lookup label {
+        margin-top: 0;
+      }
+      .evidence-panel dl {
+        display: grid;
+        grid-template-columns: minmax(92px, 140px) 1fr;
+        gap: 7px 10px;
+        margin: 10px 0 0;
+      }
+      .evidence-panel dt {
+        color: var(--muted);
+      }
+      .evidence-panel dd {
+        margin: 0;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .evidence-action {
+        margin-top: 7px;
+        padding: 6px 9px;
+      }
+      .inline-actions {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-left: 8px;
+      }
+      .copy-action {
+        padding: 4px 8px;
+      }
+      .evidence-filter {
+        margin: 10px 0;
+      }
+      .summary-list {
+        display: grid;
+        gap: 6px;
+        margin: 10px 0;
+      }
+      .summary-list div {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 6px;
+      }
+      .summary-list span {
+        color: var(--muted);
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      .settings-diff table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      .settings-diff th,
+      .settings-diff td {
+        border-bottom: 1px solid var(--line);
+        padding: 6px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .settings-diff code {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .confirm-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+        font-size: 13px;
+      }
+      .confirm-grid div {
+        border: 1px solid #f2d29e;
+        border-radius: 7px;
+        background: #fffdfa;
+        padding: 9px;
+      }
+      .confirm-grid span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .confirm-note {
+        color: #5c3b04;
+        font-size: 13px;
+        line-height: 1.45;
+        margin: 8px 0 0;
+      }
+      @media (max-width: 820px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+        .operator-panel {
+          position: static;
+        }
+        .quick,
+        .summary-grid,
+        .blueprint-tabs {
+          grid-template-columns: 1fr;
+        }
+        .blueprint-page-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .blueprint-page-actions button {
+          width: 100%;
+        }
+        .map-panel header,
+        .map-tools {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .map-tools select,
+        .map-tools button {
+          width: 100%;
+        }
+        #warehouseMapCanvas {
+          height: 300px;
+        }
+        #blueprintCanvas {
+          height: 320px;
+        }
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .confirm-grid,
+        .settings-simple-grid {
+          grid-template-columns: 1fr;
+        }
+        .confirm-card .row,
+        .evidence-lookup .row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .confirm-card button,
+        .evidence-lookup button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div class="topbar">
+          <div class="brand">
+            <div class="brand-mark">M</div>
+            <div class="brand-copy">
+              <strong>MaxSmart WMS Agent</strong>
+              <span>Local client for governed warehouse operations</span>
+            </div>
+          </div>
+          <div id="sessionMeta" class="session-meta">Signed out</div>
+        </div>
+      </header>
+      <main>
+        <div class="workspace signed-out" id="workspace">
+          <section class="panel" id="loginPanel">
+            <div class="panel-body">
+              <h1>Sign in</h1>
+              <p class="task-lede">Connect your WMS account. The agent will load your allowed tools before showing live data.</p>
+              <label for="apiUrl">WMS API URL</label>
+              <input id="apiUrl" value="https://api.maxsmartwms.online" />
+              <label for="email">Email</label>
+              <input id="email" type="email" autocomplete="username" />
+              <label for="password">Password</label>
+              <input id="password" type="password" autocomplete="current-password" />
+              <div class="row" style="margin-top: 16px">
+                <button id="loginBtn" class="primary-action">Sign in</button>
+              </div>
+              <div id="loginStatus" class="status hidden"></div>
+              <div id="loginProgress" class="login-progress hidden">
+                <div class="progress-step" data-login-step="connect"><span class="progress-dot"></span>Connect to WMS</div>
+                <div class="progress-step" data-login-step="tools"><span class="progress-dot"></span>Load allowed tools</div>
+                <div class="progress-step" data-login-step="ready"><span class="progress-dot"></span>Open workspace</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel hidden operator-panel" id="agentPanel">
+            <div class="panel-body">
+              <h1>Next task</h1>
+              <p class="task-lede">Ask for one warehouse action. Writes stop at preview and confirmation.</p>
+              <textarea id="prompt" placeholder="Show inventory for SKU ABC"></textarea>
+              <div class="row" style="margin-top: 10px">
+                <button id="sendBtn" class="primary-action">Run</button>
+                <button class="secondary" id="compareBtn">Compare planners</button>
+              </div>
+              <div class="quick-groups" aria-label="Quick actions">
+                <section class="quick-group" aria-labelledby="quickWorkTitle">
+                  <h3 id="quickWorkTitle">Daily work</h3>
+                  <div class="quick">
+                    <button class="secondary" data-prompt="Show inventory on hand">Inventory</button>
+                    <button class="secondary" data-prompt="Show expected inbound orders">Inbound</button>
+                    <button class="secondary" data-prompt="Show outbound orders">Outbound</button>
+                    <button class="secondary" id="mapBtn">Map</button>
+                  </div>
+                </section>
+                <section class="quick-group" aria-labelledby="quickDataTitle">
+                  <h3 id="quickDataTitle">Master data</h3>
+                  <div class="quick">
+                    <button class="secondary" data-prompt="List clients">Clients</button>
+                    <button class="secondary" data-prompt="List SKU master data">SKUs</button>
+                    <button class="secondary" data-prompt="List warehouses">Warehouses</button>
+                    <button class="secondary" data-prompt="Show warehouse locations">Locations</button>
+                    <button class="secondary" id="blueprintBtn">Blueprint</button>
+                  </div>
+                </section>
+                <section class="quick-group" aria-labelledby="quickAdminTitle">
+                  <h3 id="quickAdminTitle">Admin and setup</h3>
+                  <div class="quick">
+                    <button class="secondary" data-prompt="Show billing rate cards">Billing</button>
+                    <button class="secondary" data-prompt="Show billing setup">Billing setup</button>
+                    <button class="secondary" data-prompt="Show receiving code settings">Receiving</button>
+                    <button class="secondary" data-prompt="Show users and permissions">Users</button>
+                    <button class="secondary" data-prompt="Show agent settings">Agent</button>
+                    <button class="secondary" data-prompt="Show setup progress">Setup</button>
+                  </div>
+                </section>
+              </div>
+              <div id="agentStatus" class="status hidden"></div>
+              <details class="utility-section">
+                <summary>Local status and skills</summary>
+                <div id="localStatus" class="status">Loading local configuration...</div>
+                <div class="chips" id="skillChips"></div>
+                <div class="row" style="margin-top: 12px">
+                  <button class="secondary" id="logoutBtn">Sign out</button>
+                </div>
+              </details>
+              <details class="utility-section">
+                <summary>Settings preview</summary>
+                <div class="settings-actions">
+                <h2>Settings</h2>
+                <div class="settings-form">
+                  <select id="settingsCategory">
+                    <option value="receiving-codes">Receiving code rules</option>
+                    <option value="receiving-labels">Receiving label fields</option>
+                    <option value="client-profile">Client profile</option>
+                    <option value="sku">SKU master data</option>
+                    <option value="warehouse-location">Warehouse location</option>
+                    <option value="billing-rate-card">Billing rate card preview</option>
+                  </select>
+                  <input id="settingsEntityId" class="hidden" placeholder="Entity ID" />
+                  <fieldset id="settingsSimpleControls" class="settings-simple hidden">
+                    <legend id="settingsSimpleLegend">Simple fields</legend>
+                    <div
+                      id="receivingCodeControls"
+                      class="settings-simple-grid hidden"
+                      data-settings-simple="receiving-codes"
+                    >
+                      <label for="receivingCodePrefix">Code prefix</label>
+                      <input id="receivingCodePrefix" placeholder="BOX" />
+                      <label for="receivingCodePadding">Sequence padding</label>
+                      <input id="receivingCodePadding" type="number" min="1" step="1" placeholder="3" />
+                    </div>
+                    <div
+                      id="receivingLabelControls"
+                      class="settings-simple-grid hidden"
+                      data-settings-simple="receiving-labels"
+                    >
+                      <label for="receivingLabelFields">Label fields</label>
+                      <textarea
+                        id="receivingLabelFields"
+                        placeholder="order_number&#10;sku_code&#10;tracking_number"
+                      ></textarea>
+                    </div>
+                    <div
+                      id="clientProfileControls"
+                      class="settings-simple-grid hidden"
+                      data-settings-simple="client-profile"
+                    >
+                      <label for="clientProfileEmail">Contact email</label>
+                      <input id="clientProfileEmail" placeholder="ops@example.com" />
+                      <label for="clientProfilePhone">Contact phone</label>
+                      <input id="clientProfilePhone" placeholder="+1 555 0100" />
+                    </div>
+                    <div id="skuControls" class="settings-simple-grid hidden" data-settings-simple="sku">
+                      <label for="skuName">Name</label>
+                      <input id="skuName" placeholder="Updated SKU" />
+                      <label for="skuBarcode">Barcode</label>
+                      <input id="skuBarcode" placeholder="0123456789" />
+                    </div>
+                    <div
+                      id="warehouseLocationControls"
+                      class="settings-simple-grid hidden"
+                      data-settings-simple="warehouse-location"
+                    >
+                      <label for="warehouseLocationStatus">Status</label>
+                      <select id="warehouseLocationStatus">
+                        <option value="available">available</option>
+                        <option value="blocked">blocked</option>
+                        <option value="inactive">inactive</option>
+                      </select>
+                      <label for="warehouseLocationType">Type</label>
+                      <input id="warehouseLocationType" placeholder="storage" />
+                    </div>
+                  </fieldset>
+                  <label class="settings-advanced-label" for="settingsChangesJson">Advanced JSON</label>
+                  <textarea id="settingsChangesJson"></textarea>
+                  <div class="row">
+                    <button class="secondary" id="settingsPresetBtn">Preset</button>
+                    <button id="settingsPreviewBtn">Preview</button>
+                  </div>
+                  <div id="settingsDiff" class="settings-diff hidden"></div>
+                  <div id="settingsResult" class="settings-result hidden"></div>
+                </div>
+              </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="panel result">
+            <div class="result-head">
+              <div>
+                <h2>Result</h2>
+                <p id="resultSubtitle" style="margin: 4px 0 0">Sign in to start a governed WMS session.</p>
+              </div>
+              <button class="secondary" id="auditBtn">Activity log</button>
+            </div>
+            <div class="result-body">
+              <div id="confirmCard" class="confirm-card hidden"></div>
+              <div id="evidenceLookup" class="evidence-lookup hidden">
+                <label for="evidenceIdInput">Evidence</label>
+                <div class="row">
+                  <input id="evidenceIdInput" placeholder="Evidence ID" />
+                  <button class="secondary" id="viewEvidenceBtn">View evidence</button>
+                  <button class="secondary" id="replayPreviewBtn">Replay preview</button>
+                  <button class="secondary" id="failedEvidenceBtn">Failed evidence</button>
+                </div>
+              </div>
+              <div id="evidencePanel" class="evidence-panel hidden"></div>
+              <section id="warehouseMapPanel" class="map-panel hidden">
+                <header>
+                  <div>
+                    <h3>Warehouse map</h3>
+                    <p id="warehouseMapSubtitle">Zones and locations from the signed-in tenant.</p>
+                  </div>
+                  <div class="map-tools">
+                    <select id="warehouseMapSelect" aria-label="Warehouse"></select>
+                    <button class="secondary" id="refreshMapBtn">Refresh map</button>
+                  </div>
+                </header>
+                <div class="canvas-view-tools">
+                  <div class="row" aria-label="Warehouse map zoom controls">
+                    <button class="secondary" id="warehouseMapZoomOutBtn">-</button>
+                    <span class="canvas-zoom-label" id="warehouseMapZoomLabel">100%</span>
+                    <button class="secondary" id="warehouseMapZoomInBtn">+</button>
+                    <button class="secondary" id="warehouseMapResetViewBtn">Reset</button>
+                  </div>
+                  <button class="secondary" id="warehouseMapFullscreenBtn">Full screen</button>
+                </div>
+                <div class="map-canvas-shell">
+                  <canvas id="warehouseMapCanvas"></canvas>
+                  <div id="warehouseMapEmpty" class="map-empty hidden"></div>
+                </div>
+                <div class="map-legend" id="warehouseMapLegend"></div>
+                <div class="map-inspector" id="warehouseMapInspector">Select or hover a location.</div>
+              </section>
+              <section id="blueprintPanel" class="map-panel hidden">
+                <header>
+                  <div>
+                    <h3>Blueprint draft</h3>
+                    <p id="blueprintSubtitle">Upload a drawing, describe zones, then review generated locations.</p>
+                  </div>
+                  <div class="map-tools">
+                    <button class="secondary" id="validateBlueprintDraftBtn">Validate draft</button>
+                    <button class="secondary" id="previewBlueprintWmsBtn">Preview in WMS</button>
+                    <button class="secondary" id="copyBlueprintBtn">Copy draft JSON</button>
+                  </div>
+                </header>
+                <div class="blueprint-tabs" role="tablist" aria-label="Blueprint steps">
+                  <button class="blueprint-tab active" id="blueprintTabDraw" data-blueprint-page="draw" role="tab" aria-selected="true">Draw</button>
+                  <button class="blueprint-tab" id="blueprintTabReview" data-blueprint-page="review" role="tab" aria-selected="false">Review</button>
+                  <button class="blueprint-tab" id="blueprintTabDetail" data-blueprint-page="detail" role="tab" aria-selected="false">Detail</button>
+                </div>
+                <div class="blueprint-page" id="blueprintPageDraw">
+                  <div class="blueprint-form">
+                    <label for="blueprintFile">Drawing</label>
+                    <input id="blueprintFile" type="file" accept="image/*" />
+                    <label for="blueprintDescription">Zone description</label>
+                    <textarea
+                      id="blueprintDescription"
+                      placeholder="Dallas warehouse from drawing:&#10;Left west side is enclosed. Carve a 12ft A-area AGV connector from the original left side of A; this connector is not storage. Keep ABC width at 120ft total: A-CONN 12ft + A 28ft + B 40ft + C 40ft. Rack-to-ABC depth is 34ft: upper AGV aisle 12ft + floor storage 22ft. The lower AGV lane is outside ABC storage and does not consume storage depth.&#10;Upper AGV aisle code=TOP-AISLE x=4 y=22 w=84 h=8.5 type=drive_aisle width_ft=12 length_ft=132 route_role=upper_storage_aisle direction=westbound route_anchor_id=N-TOP-AISLE&#10;DAL-A floor area code=DAL-A x=11.6 y=30.5 w=17.73 h=15.53 rows=4 columns=4 type=floor_storage storage_profile=oversize_floor_load width_ft=6 depth_ft=5 height_ft=9 zone_width_ft=28 zone_depth_ft=22 area_sqft=616 slot_count=16 expected_pcs=16 cargo=68x58x100in route_anchor_id=N-A-FACE route_exit_id=N-A-EXIT agv_internal_travel=false handoff_strategy=edge_handoff_with_a_area_connector connector_zone_code=A-CONN&#10;A-area AGV connector code=A-CONN x=4 y=22 w=7.6 h=32.5 type=drive_aisle width_ft=12 length_ft=46 route_role=internal_agv_connector direction=southbound_to_lower_lane route_anchor_id=N-A-CONN-TOP route_exit_id=N-A-CONN-LOWER&#10;DAL-B floor area code=DAL-B x=29.33 y=30.5 w=25.33 h=15.53 rows=4 columns=4 type=floor_storage storage_profile=oversize_floor_load width_ft=9 depth_ft=5 height_ft=9 zone_width_ft=40 zone_depth_ft=22 area_sqft=880 slot_count=16 expected_pcs=16 cargo=104x55x98in route_anchor_id=N-B-FACE route_exit_id=N-B-EXIT agv_internal_travel=false handoff_strategy=external_edge_handoff&#10;DAL-C floor area code=DAL-C x=54.67 y=30.5 w=25.33 h=15.53 rows=4 columns=4 type=floor_storage storage_profile=oversize_floor_load width_ft=9 depth_ft=5 height_ft=9 zone_width_ft=40 zone_depth_ft=22 area_sqft=880 slot_count=16 expected_pcs=16 cargo=104x55x98in route_anchor_id=N-C-FACE route_exit_id=N-C-EXIT agv_internal_travel=false handoff_strategy=external_edge_handoff&#10;Top rack row near office code=DAL-RACK x=4 y=15 w=76 h=7 rows=4 columns=15 type=rack_storage pallet=GMA pallet_width_in=48 pallet_depth_in=40 pallet_depth_ft=3.33 levels=4 level_clear_height_in=65 level_clear_height_ft=5.42 bay_count=15 bay_width_ft=8 expected_pcs=60 route_anchor_id=N-RACK-FACE route_exit_id=N-RACK-FACE&#10;ABC lower AGV lane code=ABC-LOWER x=4 y=46.03 w=84 h=8.47 type=drive_aisle width_ft=12 route_role=lower_return_lane direction=eastbound_to_dock route_anchor_id=N-ABC-LOWER-LANE&#10;Drive aisle code=DRV x=82 y=22 w=6 h=70 type=drive_aisle width_ft=40 length_ft=165 route_role=main_aisle&#10;Dock doors code=DOCK x=90 y=35 w=6 h=55 type=dock doors=23-30 exit=27 dock_doors_are_storage_locations=false"
+                    ></textarea>
+                    <div class="row">
+                      <button id="generateBlueprintBtn">Generate draft</button>
+                      <button class="secondary" id="clearBlueprintBtn">Clear draft</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="blueprint-page hidden" id="blueprintPageReview">
+                  <div class="blueprint-view-tools">
+                    <div class="row" aria-label="Blueprint zoom controls">
+                      <button class="secondary" id="blueprintZoomOutBtn">-</button>
+                      <span class="blueprint-zoom-label" id="blueprintZoomLabel">100%</span>
+                      <button class="secondary" id="blueprintZoomInBtn">+</button>
+                      <button class="secondary" id="blueprintResetViewBtn">Reset</button>
+                    </div>
+                    <button class="secondary" id="blueprintFullscreenBtn">Full screen</button>
+                  </div>
+                  <div class="blueprint-stage">
+                    <canvas id="blueprintCanvas"></canvas>
+                    <div id="blueprintEmpty" class="map-empty">Upload a drawing and describe the zones to create a draft map.</div>
+                  </div>
+                  <div class="blueprint-page-actions">
+                    <button class="secondary" id="blueprintBackToDrawBtn">Edit description</button>
+                    <button id="blueprintGoDetailBtn">Review selected zone</button>
+                  </div>
+                </div>
+                <div class="blueprint-page hidden" id="blueprintPageDetail">
+                  <div id="blueprintDetail" class="blueprint-detail">
+                    <h4>No zone selected</h4>
+                    <div class="blueprint-note">Click a zone on the overview to inspect generated aisles, racks, levels, positions, and location codes.</div>
+                  </div>
+                  <div class="blueprint-page-actions">
+                    <button class="secondary" id="blueprintBackToReviewBtn">Back to overview</button>
+                  </div>
+                </div>
+              </section>
+              <div id="outputSummary" class="summary-panel">
+                <strong>Ready when you sign in</strong>
+                <p>The client will show your next action, result summary, evidence, and recovery path here.</p>
+              </div>
+              <details class="raw-output">
+                <summary>Raw response</summary>
+                <pre id="output">Sign in to begin.</pre>
+              </details>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        sessionId: localStorage.getItem("wmsLocalAgentSessionId"),
+        latestPayload: null,
+        latestEvidenceId: null,
+        map: {
+          warehouses: [],
+          locations: [],
+          selectedWarehouseId: "",
+          hitboxes: [],
+          view: {
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            isDragging: false,
+            dragMoved: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            dragOffsetX: 0,
+            dragOffsetY: 0,
+          },
+        },
+        blueprint: {
+          image: null,
+          imageName: "",
+          zones: [],
+          selectedZoneId: null,
+          hitboxes: [],
+          page: "draw",
+          view: {
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            isDragging: false,
+            dragMoved: false,
+            dragStartX: 0,
+            dragStartY: 0,
+            dragOffsetX: 0,
+            dragOffsetY: 0,
+          },
+        },
+        settings: {
+          category: "receiving-codes",
+          latestPreview: null,
+          latestIdempotencyKey: null,
+        },
+      };
+      const $ = (id) => document.getElementById(id);
+
+      function showStatus(target, message, error = false) {
+        target.textContent = message;
+        target.classList.remove("hidden");
+        target.classList.toggle("error", error);
+        target.classList.toggle("loading", !error);
+      }
+
+      function clearStatus(target) {
+        target.textContent = "";
+        target.classList.add("hidden");
+        target.classList.remove("error", "loading", "ok");
+      }
+
+      function setLoginStep(step) {
+        $("loginProgress").classList.remove("hidden");
+        const order = ["connect", "tools", "ready"];
+        document.querySelectorAll("[data-login-step]").forEach((item) => {
+          const itemStep = item.dataset.loginStep;
+          const itemIndex = order.indexOf(itemStep);
+          const activeIndex = order.indexOf(step);
+          item.classList.toggle("active", itemStep === step);
+          item.classList.toggle("done", itemIndex >= 0 && activeIndex >= 0 && itemIndex < activeIndex);
+        });
+      }
+
+      function setButtonLoading(button, label) {
+        button.dataset.originalText = button.dataset.originalText || button.textContent;
+        button.innerHTML = `<span class="spinner"></span>${escapeHtml(label)}`;
+        button.disabled = true;
+      }
+
+      function clearButtonLoading(button) {
+        button.textContent = button.dataset.originalText || button.textContent;
+        button.disabled = false;
+      }
+
+      function firstArray(value) {
+        if (!value || typeof value !== "object") return null;
+        const result = value.tool_result?.result || value.result || value;
+        for (const key of ["items", "orders", "clients", "warehouses", "skus", "allowed_tools"]) {
+          if (Array.isArray(result[key])) return { key, items: result[key] };
+        }
+        return null;
+      }
+
+      function renderSummary(value) {
+        const target = $("outputSummary");
+        if (typeof value === "string") {
+          target.innerHTML = `<strong>Message</strong><p>${escapeHtml(value)}</p>`;
+          return;
+        }
+        if (!value || typeof value !== "object") return;
+        if (value.signed_in) {
+          target.innerHTML = `
+            <strong>Signed in. Next: choose one task.</strong>
+            <p>Your tenant session is ready. Reads can run now; writes will stop at preview and confirmation.</p>
+            <div class="summary-grid">
+              <div class="summary-metric"><span>Role</span>${escapeHtml(value.role || "unknown")}</div>
+              <div class="summary-metric"><span>Agent</span>${value.agent_enabled ? "Enabled" : "Disabled"}</div>
+              <div class="summary-metric"><span>Tools</span>${escapeHtml((value.allowed_tools || []).length)}</div>
+            </div>
+          `;
+          $("resultSubtitle").textContent = "Choose a task or ask a concrete WMS question.";
+          return;
+        }
+        if (value.confirmation_card) {
+          target.innerHTML = `
+            <strong>Preview ready. Confirmation required.</strong>
+            <p>Review the evidence and impact before confirming. You can cancel and rerun preview safely.</p>
+          `;
+          $("resultSubtitle").textContent = "A write is waiting for explicit confirmation.";
+          return;
+        }
+        const toolResult = value.tool_result || {};
+        const result = toolResult.result || value.result || value;
+        const arrayInfo = firstArray(value);
+        const toolName = toolResult.tool_name || value.tool_name || value.selected_tool || "WMS result";
+        const scope = toolResult.scope || {};
+        const count = result.count ?? arrayInfo?.items?.length ?? result.total ?? "";
+        target.innerHTML = `
+          <strong>${escapeHtml(toolName)}</strong>
+          <p>${escapeHtml(value.message || result.next_action || "Request completed through the governed WMS agent gate.")}</p>
+          <div class="summary-grid">
+            <div class="summary-metric"><span>Status</span>${escapeHtml(value.ok === false ? "Needs attention" : "Completed")}</div>
+            <div class="summary-metric"><span>Records</span>${escapeHtml(count === "" ? "n/a" : count)}</div>
+            <div class="summary-metric"><span>Scope</span>${escapeHtml(scope.role || value.role || "tenant")}</div>
+          </div>
+        `;
+        $("resultSubtitle").textContent = "Latest authenticated result.";
+      }
+
+      function renderOutput(value) {
+        state.latestPayload = typeof value === "string" ? null : value;
+        renderConfirmation(value && typeof value === "object" ? value.confirmation_card : null);
+        renderSettingsPreview(value && typeof value === "object" ? value : null);
+        renderSettingsResult(value && typeof value === "object" ? value : null);
+        renderEvidenceLookup(evidenceIdFromValue(value));
+        renderSummary(value);
+        $("output").textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function toolResultPayload(payload) {
+        return payload?.tool_result?.result || payload?.result || payload || {};
+      }
+
+      function normalizeList(payload, keys) {
+        const result = toolResultPayload(payload);
+        for (const key of keys) {
+          if (Array.isArray(result[key])) return result[key];
+        }
+        if (Array.isArray(result.items)) return result.items;
+        return [];
+      }
+
+      function groupBy(items, keyFn) {
+        const groups = new Map();
+        items.forEach((item) => {
+          const key = keyFn(item);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(item);
+        });
+        return groups;
+      }
+
+      function locationStatusColor(status) {
+        const normalized = String(status || "").toLowerCase();
+        if (normalized === "occupied") return "#1f7a4c";
+        if (normalized === "reserved") return "#bd7a16";
+        if (normalized === "blocked") return "#b8463c";
+        if (normalized === "inactive") return "#93a0ae";
+        return "#d8f0df";
+      }
+
+      function locationTypeLabel(type) {
+        const normalized = String(type || "storage").toLowerCase();
+        if (normalized === "dock") return "Dock";
+        if (normalized === "floor_storage") return "Floor storage";
+        if (normalized === "rack_storage") return "Rack storage";
+        if (normalized === "drive_aisle") return "Drive aisle";
+        if (normalized === "reference") return "Reference";
+        if (normalized === "staging") return "Staging";
+        if (normalized === "quality") return "Quality";
+        if (normalized === "returns") return "Returns";
+        return "Storage";
+      }
+
+      function locationLabel(location) {
+        return (
+          location.barcode ||
+          [location.zone_code, location.aisle, location.rack, location.level, location.position]
+            .filter(Boolean)
+            .join("-") ||
+          "Location"
+        );
+      }
+
+      async function runToolForPayload(toolName, args = {}) {
+        if (!state.sessionId) throw new Error("Sign in before loading the warehouse map");
+        const response = await fetch("/api/tools/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: state.sessionId, tool_name: toolName, args }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Tool failed");
+        return payload;
+      }
+
+      function resizeMapCanvas() {
+        const canvas = $("warehouseMapCanvas");
+        const rect = canvas.getBoundingClientRect();
+        const scale = window.devicePixelRatio || 1;
+        const width = Math.max(320, Math.floor(rect.width || canvas.parentElement.clientWidth || 640));
+        const height = Math.max(320, Math.floor(rect.height || 420));
+        canvas.width = Math.floor(width * scale);
+        canvas.height = Math.floor(height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        return { canvas, ctx, width, height };
+      }
+
+      function updateWarehouseMapZoomLabel() {
+        const label = $("warehouseMapZoomLabel");
+        if (label) label.textContent = `${Math.round((state.map.view?.scale || 1) * 100)}%`;
+      }
+
+      function resetWarehouseMapView(redraw = true) {
+        state.map.view = {
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+          isDragging: false,
+          dragMoved: false,
+          dragStartX: 0,
+          dragStartY: 0,
+          dragOffsetX: 0,
+          dragOffsetY: 0,
+        };
+        updateWarehouseMapZoomLabel();
+        if (redraw) drawWarehouseMap();
+      }
+
+      function clampWarehouseMapView(width, height) {
+        const view = state.map.view;
+        const scale = view.scale || 1;
+        const maxOffsetX = Math.max(0, (width * scale - width) / 2 + 80);
+        const maxOffsetY = Math.max(0, (height * scale - height) / 2 + 80);
+        view.offsetX = Math.max(-maxOffsetX, Math.min(maxOffsetX, view.offsetX || 0));
+        view.offsetY = Math.max(-maxOffsetY, Math.min(maxOffsetY, view.offsetY || 0));
+      }
+
+      function setWarehouseMapZoom(nextScale, anchorX = null, anchorY = null) {
+        const canvas = $("warehouseMapCanvas");
+        const rect = canvas.getBoundingClientRect();
+        const view = state.map.view;
+        const previousScale = view.scale || 1;
+        const scale = Math.max(0.75, Math.min(3, nextScale));
+        const x = anchorX ?? rect.width / 2;
+        const y = anchorY ?? rect.height / 2;
+        const worldX = (x - (view.offsetX || 0)) / previousScale;
+        const worldY = (y - (view.offsetY || 0)) / previousScale;
+        view.scale = scale;
+        view.offsetX = x - worldX * scale;
+        view.offsetY = y - worldY * scale;
+        updateWarehouseMapZoomLabel();
+        drawWarehouseMap();
+      }
+
+      function mapLocationsForSelectedWarehouse() {
+        const warehouseId = state.map.selectedWarehouseId;
+        if (!warehouseId || warehouseId === "all") return state.map.locations;
+        const warehouse = state.map.warehouses.find((item) => item.id === warehouseId);
+        return state.map.locations.filter(
+          (location) =>
+            location.warehouse_id === warehouseId ||
+            (warehouse && location.warehouse_code === warehouse.code)
+        );
+      }
+
+      function drawRoundedRect(ctx, x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + width, y, x + width, y + height, r);
+        ctx.arcTo(x + width, y + height, x, y + height, r);
+        ctx.arcTo(x, y + height, x, y, r);
+        ctx.arcTo(x, y, x + width, y, r);
+        ctx.closePath();
+      }
+
+      function numericMapLayout(value) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+      }
+
+      function mapLocationLayout(location) {
+        const metadata = location.blueprint_metadata || {};
+        const layout =
+          location.layout_percent ||
+          location.layout ||
+          metadata.slot_layout_percent ||
+          metadata.layout_percent ||
+          null;
+        if (!layout || typeof layout !== "object") return null;
+        const x = numericMapLayout(layout.x);
+        const y = numericMapLayout(layout.y);
+        const width = numericMapLayout(layout.width ?? layout.w);
+        const height = numericMapLayout(layout.height ?? layout.h);
+        if ([x, y, width, height].some((value) => value === null)) return null;
+        return { x, y, width, height };
+      }
+
+      function mapZoneLayout(zoneLocations, fallbackIndex, totalZones) {
+        const layouts = zoneLocations.map(mapLocationLayout).filter(Boolean);
+        if (layouts.length) {
+          const left = Math.min(...layouts.map((layout) => layout.x));
+          const top = Math.min(...layouts.map((layout) => layout.y));
+          const right = Math.max(...layouts.map((layout) => layout.x + layout.width));
+          const bottom = Math.max(...layouts.map((layout) => layout.y + layout.height));
+          return { x: left, y: top, width: right - left, height: bottom - top, source: "stored" };
+        }
+        const auto = autoZoneRect(fallbackIndex, totalZones);
+        return { x: auto.x, y: auto.y, width: auto.width, height: auto.height, source: "auto" };
+      }
+
+      function drawWarehouseMap() {
+        const { ctx, width, height } = resizeMapCanvas();
+        const empty = $("warehouseMapEmpty");
+        const inspector = $("warehouseMapInspector");
+        const locations = mapLocationsForSelectedWarehouse();
+        const view = state.map.view;
+        clampWarehouseMapView(width, height);
+        updateWarehouseMapZoomLabel();
+        state.map.hitboxes = [];
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(0, 0, width, height);
+        ctx.save();
+        ctx.translate(view.offsetX || 0, view.offsetY || 0);
+        ctx.scale(view.scale || 1, view.scale || 1);
+
+        if (!locations.length) {
+          empty.textContent = state.map.warehouses.length
+            ? "No locations are mapped for this warehouse yet."
+            : "No warehouse map data yet. Create warehouses, zones, and locations first.";
+          empty.classList.remove("hidden");
+          inspector.textContent = "Map is empty.";
+          ctx.restore();
+          return;
+        }
+        empty.classList.add("hidden");
+
+        const zones = Array.from(
+          groupBy(locations, (location) => location.zone_code || location.zone_name || "Unzoned")
+        ).sort(([left], [right]) => String(left).localeCompare(String(right)));
+        const padding = 22;
+        const plotWidth = Math.max(260, width - padding * 2);
+        const plotHeight = Math.max(260, height - padding * 2);
+        zones.forEach(([zoneName, zoneLocations], zoneIndex) => {
+          const zoneLayout = mapZoneLayout(zoneLocations, zoneIndex, zones.length);
+          const zoneX = padding + (zoneLayout.x / 100) * plotWidth;
+          const zoneY = padding + (zoneLayout.y / 100) * plotHeight;
+          const zoneWidth = Math.max(48, (zoneLayout.width / 100) * plotWidth);
+          const zoneHeight = Math.max(34, (zoneLayout.height / 100) * plotHeight);
+          drawRoundedRect(ctx, zoneX, zoneY, zoneWidth, zoneHeight, 8);
+          ctx.fillStyle = "#ffffff";
+          ctx.fill();
+          ctx.strokeStyle = "#d8dee6";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = "#334150";
+          ctx.font = "600 12px Inter, system-ui, sans-serif";
+          ctx.fillText(`${zoneName} · ${zoneLocations.length} locations`, zoneX + 12, zoneY + 20);
+
+          const sortedLocations = zoneLocations
+            .slice()
+            .sort((a, b) =>
+              String(`${a.aisle || ""}-${a.rack || ""}-${a.level || ""}-${a.position || ""}`).localeCompare(
+                `${b.aisle || ""}-${b.rack || ""}-${b.level || ""}-${b.position || ""}`
+              )
+            );
+          const hasStoredLocationLayout = sortedLocations.some(mapLocationLayout);
+          if (hasStoredLocationLayout) {
+            sortedLocations.forEach((location) => {
+              const layout = mapLocationLayout(location);
+              if (!layout) return;
+              const x = padding + (layout.x / 100) * plotWidth;
+              const y = padding + (layout.y / 100) * plotHeight;
+              const cellWidth = Math.max(3, (layout.width / 100) * plotWidth);
+              const cellHeight = Math.max(3, (layout.height / 100) * plotHeight);
+              drawRoundedRect(ctx, x, y, cellWidth, cellHeight, 4);
+              ctx.fillStyle = locationStatusColor(location.current_status);
+              ctx.fill();
+              ctx.strokeStyle = location.is_agv_accessible ? "#0b6bcb" : "rgba(24, 33, 43, 0.22)";
+              ctx.lineWidth = location.is_agv_accessible ? 2 : 1;
+              ctx.stroke();
+              state.map.hitboxes.push({ x, y, width: cellWidth, height: cellHeight, location });
+            });
+            return;
+          }
+
+          const aisleGroups = Array.from(groupBy(sortedLocations, (location) => location.aisle || "Aisle"));
+          const gridTop = zoneY + 32;
+          const gridHeight = Math.max(20, zoneHeight - 44);
+          const aisleWidth = Math.max(32, (zoneWidth - 24) / Math.max(aisleGroups.length, 1));
+          aisleGroups.forEach(([aisle, aisleLocations], aisleIndex) => {
+            const aisleX = zoneX + 12 + aisleIndex * aisleWidth;
+            ctx.fillStyle = "#667382";
+            ctx.font = "10px Inter, system-ui, sans-serif";
+            ctx.fillText(String(aisle), aisleX, gridTop - 6);
+            const columns = Math.max(1, Math.ceil(Math.sqrt(aisleLocations.length)));
+            const rows = Math.max(1, Math.ceil(aisleLocations.length / columns));
+            const cellGap = gridHeight < 28 ? 1.5 : 4;
+            const cellWidth = Math.max(5, Math.min(28, (aisleWidth - 10 - cellGap * (columns - 1)) / columns));
+            const cellHeight = Math.max(1.5, Math.min(22, (gridHeight - cellGap * (rows - 1)) / rows));
+            aisleLocations.forEach((location, index) => {
+              const column = index % columns;
+              const row = Math.floor(index / columns);
+              const x = aisleX + column * (cellWidth + cellGap);
+              const y = gridTop + row * (cellHeight + cellGap);
+                drawRoundedRect(ctx, x, y, cellWidth, cellHeight, 4);
+                ctx.fillStyle = locationStatusColor(location.current_status);
+                ctx.fill();
+                ctx.strokeStyle = location.is_agv_accessible ? "#0b6bcb" : "rgba(24, 33, 43, 0.22)";
+                ctx.lineWidth = location.is_agv_accessible ? 2 : 1;
+                ctx.stroke();
+                state.map.hitboxes.push({ x, y, width: cellWidth, height: cellHeight, location });
+            });
+          });
+        });
+        ctx.restore();
+      }
+
+      function renderMapLegend() {
+        const legend = [
+          ["available", "#d8f0df"],
+          ["occupied", "#1f7a4c"],
+          ["reserved", "#bd7a16"],
+          ["blocked", "#b8463c"],
+          ["inactive", "#93a0ae"],
+        ]
+          .map(
+            ([label, color]) =>
+              `<span><i class="map-swatch" style="background:${color}"></i>${escapeHtml(label)}</span>`
+          )
+          .join("");
+        $("warehouseMapLegend").innerHTML =
+          legend + `<span><i class="map-swatch" style="border:2px solid #0b6bcb"></i>AGV accessible</span>`;
+      }
+
+      function renderMapWarehouseSelect() {
+        const select = $("warehouseMapSelect");
+        const previous = state.map.selectedWarehouseId || "all";
+        const options = [
+          `<option value="all">All warehouses</option>`,
+          ...state.map.warehouses.map(
+            (warehouse) =>
+              `<option value="${escapeHtml(warehouse.id)}">${escapeHtml(warehouse.code || warehouse.name || warehouse.id)}</option>`
+          ),
+        ];
+        select.innerHTML = options.join("");
+        select.value = state.map.warehouses.some((warehouse) => warehouse.id === previous)
+          ? previous
+          : "all";
+        state.map.selectedWarehouseId = select.value;
+      }
+
+      function summarizeWarehouseMap() {
+        const locations = mapLocationsForSelectedWarehouse();
+        const zones = new Set(locations.map((location) => location.zone_code || location.zone_name || "Unzoned"));
+        const occupied = locations.filter((location) => location.current_status === "occupied").length;
+        $("warehouseMapSubtitle").textContent = `${locations.length} locations · ${zones.size} zones · ${occupied} occupied`;
+      }
+
+      function showMapInspector(location) {
+        if (!location) {
+          $("warehouseMapInspector").textContent = "Select or hover a location.";
+          return;
+        }
+        $("warehouseMapInspector").innerHTML = `
+          <strong>${escapeHtml(locationLabel(location))}</strong>
+          <div>${escapeHtml(location.warehouse_code || "warehouse")} / ${escapeHtml(location.zone_code || "zone")}</div>
+          <div>Aisle ${escapeHtml(location.aisle || "-")} · Rack ${escapeHtml(location.rack || "-")} · Level ${escapeHtml(location.level || "-")} · Position ${escapeHtml(location.position || "-")}</div>
+          <div>${escapeHtml(locationTypeLabel(location.location_type))} · ${escapeHtml(location.current_status || "available")}${location.is_agv_accessible ? " · AGV accessible" : ""}</div>
+        `;
+      }
+
+      function mapLocationAtEvent(event) {
+        const canvas = $("warehouseMapCanvas");
+        const rect = canvas.getBoundingClientRect();
+        const view = state.map.view;
+        const x = (event.clientX - rect.left - (view.offsetX || 0)) / (view.scale || 1);
+        const y = (event.clientY - rect.top - (view.offsetY || 0)) / (view.scale || 1);
+        return state.map.hitboxes.find(
+          (box) => x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height
+        )?.location;
+      }
+
+      function warehouseMapCanvasPoint(event) {
+        const rect = $("warehouseMapCanvas").getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+      }
+
+      function startWarehouseMapPan(event) {
+        if (event.button !== undefined && event.button !== 0) return;
+        const point = warehouseMapCanvasPoint(event);
+        const view = state.map.view;
+        view.isDragging = true;
+        view.dragMoved = false;
+        view.dragStartX = point.x;
+        view.dragStartY = point.y;
+        view.dragOffsetX = view.offsetX || 0;
+        view.dragOffsetY = view.offsetY || 0;
+        $("warehouseMapCanvas").setPointerCapture?.(event.pointerId);
+        $("warehouseMapCanvas").parentElement.classList.add("dragging");
+      }
+
+      function moveWarehouseMapPan(event) {
+        const view = state.map.view;
+        if (!view.isDragging) return;
+        const point = warehouseMapCanvasPoint(event);
+        if (Math.abs(point.x - view.dragStartX) > 3 || Math.abs(point.y - view.dragStartY) > 3) {
+          view.dragMoved = true;
+        }
+        view.offsetX = view.dragOffsetX + point.x - view.dragStartX;
+        view.offsetY = view.dragOffsetY + point.y - view.dragStartY;
+        drawWarehouseMap();
+      }
+
+      function endWarehouseMapPan(event) {
+        const view = state.map.view;
+        if (!view.isDragging) return;
+        view.isDragging = false;
+        $("warehouseMapCanvas").releasePointerCapture?.(event.pointerId);
+        $("warehouseMapCanvas").parentElement.classList.remove("dragging");
+      }
+
+      function updateCanvasFullscreenLabels() {
+        const mapExpanded =
+          document.fullscreenElement === $("warehouseMapPanel") ||
+          $("warehouseMapPanel").classList.contains("canvas-fullscreen");
+        const blueprintExpanded =
+          document.fullscreenElement === $("blueprintPageReview") ||
+          $("blueprintPageReview").classList.contains("canvas-fullscreen");
+        $("warehouseMapFullscreenBtn").textContent = mapExpanded ? "Exit full screen" : "Full screen";
+        $("blueprintFullscreenBtn").textContent = blueprintExpanded ? "Exit full screen" : "Full screen";
+      }
+
+      async function exitCanvasFullscreen() {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+        $("warehouseMapPanel").classList.remove("canvas-fullscreen");
+        $("blueprintPageReview").classList.remove("canvas-fullscreen");
+        document.body.classList.remove("canvas-fullscreen-open");
+        updateCanvasFullscreenLabels();
+      }
+
+      async function toggleCanvasFullscreen(target, redraw) {
+        const isFallbackExpanded = target.classList.contains("canvas-fullscreen");
+        if (document.fullscreenElement === target || isFallbackExpanded) {
+          await exitCanvasFullscreen();
+          window.setTimeout(redraw, 80);
+          return;
+        }
+        await exitCanvasFullscreen();
+        try {
+          if (!document.fullscreenEnabled || !target.requestFullscreen) {
+            throw new Error("Fullscreen is not available in this window.");
+          }
+          await target.requestFullscreen();
+        } catch (_) {
+          target.classList.add("canvas-fullscreen");
+          document.body.classList.add("canvas-fullscreen-open");
+        }
+        updateCanvasFullscreenLabels();
+        window.setTimeout(redraw, 80);
+      }
+
+      function renderWarehouseMapPanel() {
+        $("blueprintPanel").classList.add("hidden");
+        $("warehouseMapPanel").classList.remove("hidden");
+        renderMapWarehouseSelect();
+        renderMapLegend();
+        summarizeWarehouseMap();
+        drawWarehouseMap();
+      }
+
+      async function loadWarehouseMap() {
+        setButtonLoading($("mapBtn"), "Loading");
+        showStatus($("agentStatus"), "Loading warehouse zones and locations...");
+        try {
+          const [warehousePayload, locationPayload] = await Promise.all([
+            runToolForPayload("warehouses.list", { limit: 30 }),
+            runToolForPayload("settings.warehouse_locations.list", { limit: 500 }),
+          ]);
+          state.map.warehouses = normalizeList(warehousePayload, ["warehouses", "items"]);
+          state.map.locations = normalizeList(locationPayload, ["locations", "items"]);
+          renderWarehouseMapPanel();
+          clearStatus($("agentStatus"));
+          renderOutput({
+            tool_name: "warehouse.map",
+            message: "Warehouse map loaded.",
+            result: {
+              count: state.map.locations.length,
+              warehouses: state.map.warehouses.length,
+              zones: new Set(state.map.locations.map((location) => location.zone_code || location.zone_name || "Unzoned")).size,
+            },
+          });
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          clearButtonLoading($("mapBtn"));
+        }
+      }
+
+      function showBlueprintPanel() {
+        $("warehouseMapPanel").classList.add("hidden");
+        $("blueprintPanel").classList.remove("hidden");
+        setBlueprintPage(state.blueprint.page || "draw");
+        drawBlueprint();
+      }
+
+      function setBlueprintPage(page) {
+        const nextPage = ["draw", "review", "detail"].includes(page) ? page : "draw";
+        state.blueprint.page = nextPage;
+        [
+          ["draw", "blueprintPageDraw"],
+          ["review", "blueprintPageReview"],
+          ["detail", "blueprintPageDetail"],
+        ].forEach(([key, id]) => {
+          $(id).classList.toggle("hidden", key !== nextPage);
+        });
+        document.querySelectorAll("[data-blueprint-page]").forEach((tab) => {
+          const active = tab.dataset.blueprintPage === nextPage;
+          tab.classList.toggle("active", active);
+          tab.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        if (nextPage === "review") drawBlueprint();
+        if (nextPage === "detail") {
+          const zone = state.blueprint.zones.find((item) => item.id === state.blueprint.selectedZoneId);
+          renderBlueprintDetail(zone || null);
+        }
+      }
+
+      function parseBlueprintDescription(text) {
+        const lines = String(text || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (!lines.length) return [];
+        const parsedLines = lines.map((line) => {
+          const fields = {};
+          line.replace(/([a-z_]+)\s*=\s*([\w.-]+)/gi, (_, key, value) => {
+            fields[key.toLowerCase()] = value;
+            return "";
+          });
+          return { line, fields };
+        });
+        const structuredLines = parsedLines.filter(({ fields }) => {
+          const hasIdentity = fields.code || fields.type || fields.kind;
+          const hasGeometry = fields.x || fields.y || fields.w || fields.h || fields.width || fields.height;
+          const hasLayout = fields.rows || fields.columns || fields.aisles || fields.levels || fields.positions || fields.doors;
+          return hasIdentity || hasGeometry || hasLayout;
+        });
+        const zoneLines = structuredLines.length ? structuredLines : parsedLines;
+        return zoneLines.map(({ line, fields }, index) => {
+          const name = line
+            .replace(/([a-z_]+)\s*=\s*[\w.-]+/gi, "")
+            .replace(/[,;|]+/g, " ")
+            .trim()
+            .replace(/\s{2,}/g, " ") || `Zone ${index + 1}`;
+          const auto = autoZoneRect(index, zoneLines.length);
+          const type = String(fields.type || fields.kind || "storage").toLowerCase();
+          const zone = {
+            id: `draft-zone-${index + 1}`,
+            name,
+            code: String(fields.code || name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toUpperCase() || `Z${index + 1}`),
+            x: clampPercent(Number(fields.x ?? fields.left ?? auto.x), auto.x),
+            y: clampPercent(Number(fields.y ?? fields.top ?? auto.y), auto.y),
+            width: clampPercent(Number(fields.w ?? fields.width ?? auto.width), auto.width, 6),
+            height: clampPercent(Number(fields.h ?? fields.height ?? auto.height), auto.height, 6),
+            aisles: clampInt(type === "rack_storage" ? fields.aisles ?? fields.aisle : fields.rows ?? fields.aisles ?? fields.aisle, 1, 16, 1),
+            racks: clampInt(fields.columns ?? fields.racks ?? fields.rack, 1, 40, 4),
+            levels: clampInt(type === "rack_storage" ? fields.rows ?? fields.levels ?? fields.level : fields.levels ?? fields.level, 1, 12, type === "rack_storage" ? 4 : 1),
+            positions: clampInt(fields.positions ?? fields.slots ?? fields.position, 1, 20, 1),
+            type,
+            metadata: blueprintMetadata(fields),
+            dimensions: blueprintDimensions(fields),
+          };
+          if (fields.expected_pcs) zone.expected_pcs = clampInt(fields.expected_pcs, 0, 100000, 0);
+          zone.locations = generateDraftLocations(zone);
+          zone.validation = validateBlueprintZone(zone);
+          return zone;
+        });
+      }
+
+      function blueprintMetadata(fields) {
+        const metadata = {};
+        [
+          "pallet",
+          "width_ft",
+          "depth_ft",
+          "height_ft",
+          "length_ft",
+          "pallet_width_in",
+          "pallet_depth_in",
+          "pallet_depth_ft",
+          "bay_count",
+          "bay_width_ft",
+          "level_clear_height_in",
+          "level_clear_height_ft",
+          "area_sqft",
+          "zone_width_ft",
+          "zone_depth_ft",
+          "doors",
+          "exit",
+          "expected_pcs",
+          "rows",
+          "columns",
+          "route_role",
+          "lane_policy",
+          "agv_internal_travel",
+          "handoff_strategy",
+          "handoff_edges",
+          "direction",
+          "inbound_end",
+          "outbound_end",
+          "docking_direction",
+          "route_anchor_id",
+          "route_exit_id",
+          "station_role",
+          "dock_doors_are_storage_locations",
+        ].forEach((key) => {
+          if (fields[key] !== undefined) metadata[key] = fields[key];
+        });
+        return metadata;
+      }
+
+      function blueprintDimensions(fields) {
+        const dimensions = {};
+        [
+          "width_ft",
+          "depth_ft",
+          "height_ft",
+          "length_ft",
+          "area_sqft",
+          "zone_width_ft",
+          "zone_depth_ft",
+          "pallet_width_in",
+          "pallet_depth_in",
+          "pallet_depth_ft",
+          "bay_count",
+          "bay_width_ft",
+          "level_clear_height_in",
+          "level_clear_height_ft",
+        ].forEach((key) => {
+          const value = Number(fields[key]);
+          if (Number.isFinite(value)) dimensions[key] = value;
+        });
+        if (String(fields.pallet || "").toUpperCase() === "GMA") {
+          dimensions.pallet_width_ft = dimensions.pallet_width_ft || 4;
+          dimensions.pallet_depth_ft = dimensions.pallet_depth_ft || 3.33;
+        }
+        return dimensions;
+      }
+
+      function autoZoneRect(index, total) {
+        const columns = total <= 2 ? total : 2;
+        const rows = Math.ceil(total / columns);
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        const gap = 4;
+        const width = (92 - gap * (columns - 1)) / columns;
+        const height = (84 - gap * (rows - 1)) / rows;
+        return {
+          x: 4 + column * (width + gap),
+          y: 8 + row * (height + gap),
+          width,
+          height,
+        };
+      }
+
+      function clampPercent(value, fallback, minimum = 0) {
+        const number = Number.isFinite(value) ? value : fallback;
+        return Math.max(minimum, Math.min(100, number));
+      }
+
+      function clampInt(value, min, max, fallback) {
+        const number = Number.parseInt(value, 10);
+        if (!Number.isFinite(number)) return fallback;
+        return Math.max(min, Math.min(max, number));
+      }
+
+      function blueprintZoneType(zone) {
+        return String(zone?.type || "storage").toLowerCase();
+      }
+
+      function isBlueprintAccessPoint(zone) {
+        return ["dock", "reference", "drive_aisle"].includes(blueprintZoneType(zone));
+      }
+
+      function blueprintZonePalette(zone, selected = false) {
+        const type = blueprintZoneType(zone);
+        if (type === "dock") {
+          return {
+            fill: selected ? "rgba(184, 70, 60, 0.2)" : "rgba(184, 70, 60, 0.12)",
+            stroke: "#b8463c",
+            text: "#4b2320",
+          };
+        }
+        if (type === "drive_aisle" || type === "reference") {
+          return {
+            fill: selected ? "rgba(102, 115, 130, 0.18)" : "rgba(102, 115, 130, 0.1)",
+            stroke: "#667382",
+            text: "#334150",
+          };
+        }
+        if (type === "rack_storage") {
+          return {
+            fill: selected ? "rgba(189, 122, 22, 0.2)" : "rgba(189, 122, 22, 0.12)",
+            stroke: "#bd7a16",
+            text: "#4d330d",
+          };
+        }
+        return {
+          fill: selected ? "rgba(11, 107, 203, 0.2)" : "rgba(11, 107, 203, 0.1)",
+          stroke: "#0b6bcb",
+          text: "#18212b",
+        };
+      }
+
+      function blueprintZoneSummary(zone) {
+        if (isBlueprintAccessPoint(zone)) {
+          if (blueprintZoneType(zone) === "dock") return "Access point · no storage locations";
+          return `${locationTypeLabel(zone.type)} · reference only`;
+        }
+        const locationWord = zone.locations.length === 1 ? "location" : "locations";
+        if (blueprintZoneType(zone) === "rack_storage") {
+          return `${zone.locations.length} ${locationWord} · ${zone.racks} racks · ${zone.levels} levels`;
+        }
+        return `${zone.locations.length} ${locationWord} · floor positions`;
+      }
+
+      function generateDraftLocations(zone) {
+        if (isBlueprintAccessPoint(zone)) return [];
+        const locations = [];
+        for (let aisle = 1; aisle <= zone.aisles; aisle += 1) {
+          for (let rack = 1; rack <= zone.racks; rack += 1) {
+            for (let level = 1; level <= zone.levels; level += 1) {
+              for (let position = 1; position <= zone.positions; position += 1) {
+                const aisleCode = String(aisle).padStart(2, "0");
+                const rackCode = String(rack).padStart(2, "0");
+                const levelCode = String(level).padStart(2, "0");
+                const positionCode = String(position).padStart(2, "0");
+                const code = `${zone.code}-${aisleCode}-${rackCode}-${levelCode}-${positionCode}`;
+                const layout = blueprintLocationLayout(zone, aisle, rack, level, position);
+                locations.push({
+                  zone_code: zone.code,
+                  barcode: code,
+                  aisle: aisleCode,
+                  rack: rackCode,
+                  level: levelCode,
+                  position: positionCode,
+                  location_type: ["buffer", "agv_station", "charging", "staging", "quality", "packing"].includes(blueprintZoneType(zone))
+                    ? blueprintZoneType(zone)
+                    : "storage",
+                  current_status: "available",
+                  pallet: zone.metadata?.pallet || null,
+                  dimensions: zone.dimensions || {},
+                  layout_percent: layout.absolute,
+                  slot_layout_percent: layout.relative,
+                });
+              }
+            }
+          }
+        }
+        return locations;
+      }
+
+      function blueprintLocationLayout(zone, aisle, rack, level, position) {
+        const gapX = Math.min(0.8, Math.max(0.18, zone.width / Math.max(zone.racks, 1) * 0.12));
+        const gapY = Math.min(0.8, Math.max(0.18, zone.height / Math.max(zone.aisles, 1) * 0.12));
+        const type = blueprintZoneType(zone);
+        const columns = Math.max(1, zone.racks * zone.positions);
+        const rows = Math.max(1, type === "rack_storage" ? zone.levels * zone.aisles : zone.aisles);
+        const column = (rack - 1) * zone.positions + (position - 1);
+        const row = type === "rack_storage" ? (aisle - 1) * zone.levels + (level - 1) : aisle - 1;
+        const cellWidth = Math.max(0.1, (zone.width - gapX * (columns + 1)) / columns);
+        const cellHeight = Math.max(0.1, (zone.height - gapY * (rows + 1)) / rows);
+        const x = zone.x + gapX + column * (cellWidth + gapX);
+        const y = zone.y + gapY + row * (cellHeight + gapY);
+        const absolute = {
+          x: Number(x.toFixed(3)),
+          y: Number(y.toFixed(3)),
+          width: Number(cellWidth.toFixed(3)),
+          height: Number(cellHeight.toFixed(3)),
+        };
+        return {
+          absolute,
+          relative: {
+            x: Number((absolute.x - zone.x).toFixed(3)),
+            y: Number((absolute.y - zone.y).toFixed(3)),
+            width: absolute.width,
+            height: absolute.height,
+          },
+        };
+      }
+
+      function blueprintCanvasContext() {
+        const canvas = $("blueprintCanvas");
+        const rect = canvas.getBoundingClientRect();
+        const scale = window.devicePixelRatio || 1;
+        const width = Math.max(320, Math.floor(rect.width || canvas.parentElement.clientWidth || 640));
+        const height = Math.max(300, Math.floor(rect.height || 420));
+        canvas.width = Math.floor(width * scale);
+        canvas.height = Math.floor(height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        return { canvas, ctx, width, height };
+      }
+
+      function updateBlueprintZoomLabel() {
+        const label = $("blueprintZoomLabel");
+        if (label) label.textContent = `${Math.round((state.blueprint.view?.scale || 1) * 100)}%`;
+      }
+
+      function resetBlueprintView(redraw = true) {
+        state.blueprint.view = {
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+          isDragging: false,
+          dragMoved: false,
+          dragStartX: 0,
+          dragStartY: 0,
+          dragOffsetX: 0,
+          dragOffsetY: 0,
+        };
+        updateBlueprintZoomLabel();
+        if (redraw) drawBlueprint();
+      }
+
+      function clampBlueprintView(width, height) {
+        const view = state.blueprint.view;
+        const scale = view.scale || 1;
+        const maxOffsetX = Math.max(0, (width * scale - width) / 2 + 80);
+        const maxOffsetY = Math.max(0, (height * scale - height) / 2 + 80);
+        view.offsetX = Math.max(-maxOffsetX, Math.min(maxOffsetX, view.offsetX || 0));
+        view.offsetY = Math.max(-maxOffsetY, Math.min(maxOffsetY, view.offsetY || 0));
+      }
+
+      function setBlueprintZoom(nextScale, anchorX = null, anchorY = null) {
+        const canvas = $("blueprintCanvas");
+        const rect = canvas.getBoundingClientRect();
+        const view = state.blueprint.view;
+        const previousScale = view.scale || 1;
+        const scale = Math.max(0.75, Math.min(3, nextScale));
+        const x = anchorX ?? rect.width / 2;
+        const y = anchorY ?? rect.height / 2;
+        const worldX = (x - (view.offsetX || 0)) / previousScale;
+        const worldY = (y - (view.offsetY || 0)) / previousScale;
+        view.scale = scale;
+        view.offsetX = x - worldX * scale;
+        view.offsetY = y - worldY * scale;
+        updateBlueprintZoomLabel();
+        drawBlueprint();
+      }
+
+      function drawBlueprint() {
+        const { ctx, width, height } = blueprintCanvasContext();
+        const view = state.blueprint.view;
+        clampBlueprintView(width, height);
+        updateBlueprintZoomLabel();
+        state.blueprint.hitboxes = [];
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(0, 0, width, height);
+        ctx.save();
+        ctx.translate(view.offsetX || 0, view.offsetY || 0);
+        ctx.scale(view.scale || 1, view.scale || 1);
+        if (state.blueprint.image) {
+          drawContainedImage(ctx, state.blueprint.image, width, height);
+        }
+        if (!state.blueprint.zones.length) {
+          $("blueprintEmpty").classList.remove("hidden");
+          ctx.restore();
+          return;
+        }
+        $("blueprintEmpty").classList.add("hidden");
+        const drawOrder = state.blueprint.zones
+          .map((zone, index) => ({ zone, index }))
+          .sort((left, right) => {
+            const leftAccess = isBlueprintAccessPoint(left.zone) ? 0 : 1;
+            const rightAccess = isBlueprintAccessPoint(right.zone) ? 0 : 1;
+            if (leftAccess !== rightAccess) return leftAccess - rightAccess;
+            if (blueprintZoneType(left.zone) === "rack_storage") return 1;
+            if (blueprintZoneType(right.zone) === "rack_storage") return -1;
+            return left.index - right.index;
+          });
+        drawOrder.forEach(({ zone, index }) => {
+          const x = (zone.x / 100) * width;
+          const y = (zone.y / 100) * height;
+          const zoneWidth = (zone.width / 100) * width;
+          const zoneHeight = (zone.height / 100) * height;
+          const selected = state.blueprint.selectedZoneId === zone.id;
+          const palette = blueprintZonePalette(zone, selected);
+          ctx.fillStyle = palette.fill;
+          ctx.strokeStyle = palette.stroke;
+          ctx.lineWidth = selected ? 3 : 2;
+          drawRoundedRect(ctx, x, y, zoneWidth, zoneHeight, isBlueprintAccessPoint(zone) ? 3 : 8);
+          ctx.fill();
+          ctx.stroke();
+          if (isBlueprintAccessPoint(zone)) {
+            ctx.setLineDash([8, 6]);
+            ctx.strokeStyle = palette.stroke;
+            ctx.lineWidth = selected ? 2 : 1.5;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          ctx.save();
+          drawRoundedRect(ctx, x + 2, y + 2, Math.max(1, zoneWidth - 4), Math.max(1, zoneHeight - 4), isBlueprintAccessPoint(zone) ? 2 : 6);
+          ctx.clip();
+          ctx.fillStyle = palette.text;
+          ctx.font = `${zoneWidth < 90 || zoneHeight < 34 ? "600 10px" : "700 13px"} Inter, system-ui, sans-serif`;
+          const type = blueprintZoneType(zone);
+          const shouldDrawTitle = type !== "reference" && type !== "drive_aisle";
+          const title = type === "dock" ? zone.code : zoneWidth < 100 ? `${index + 1}. ${zone.code}` : `${index + 1}. ${zone.name}`;
+          if (shouldDrawTitle) {
+            ctx.fillText(title, x + 10, y + Math.min(20, Math.max(14, zoneHeight - 7)));
+          }
+          ctx.fillStyle = palette.text;
+          if (shouldDrawTitle && zoneHeight >= 48 && zoneWidth >= 96) {
+            ctx.font = "11px Inter, system-ui, sans-serif";
+            ctx.fillText(blueprintZoneSummary(zone), x + 10, y + 38);
+          }
+          drawZoneMiniGrid(ctx, zone, x + 10, y + (zoneHeight < 56 ? 24 : 50), Math.max(12, zoneWidth - 20), Math.max(10, zoneHeight - (zoneHeight < 56 ? 32 : 62)));
+          ctx.restore();
+          state.blueprint.hitboxes.push({ x, y, width: zoneWidth, height: zoneHeight, zone });
+        });
+        ctx.restore();
+      }
+
+      function drawContainedImage(ctx, image, width, height) {
+        const imageRatio = image.width / image.height;
+        const targetRatio = width / height;
+        let drawWidth = width;
+        let drawHeight = height;
+        if (imageRatio > targetRatio) {
+          drawHeight = width / imageRatio;
+        } else {
+          drawWidth = height * imageRatio;
+        }
+        const x = (width - drawWidth) / 2;
+        const y = (height - drawHeight) / 2;
+        ctx.globalAlpha = 0.55;
+        ctx.drawImage(image, x, y, drawWidth, drawHeight);
+        ctx.globalAlpha = 1;
+      }
+
+      function drawZoneMiniGrid(ctx, zone, x, y, width, height) {
+        const type = blueprintZoneType(zone);
+        if (type === "dock") {
+          const doors = Math.max(1, Math.min(12, blueprintDockDoorCodes(zone).length || 1));
+          const doorHeight = Math.max(12, Math.min(28, (height - 3 * (doors - 1)) / doors));
+          for (let index = 0; index < doors; index += 1) {
+            const doorY = y + index * (doorHeight + 3);
+            ctx.fillStyle = "rgba(184, 70, 60, 0.12)";
+            ctx.strokeStyle = "#b8463c";
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(x, doorY, Math.max(12, width), doorHeight);
+            ctx.strokeRect(x, doorY, Math.max(12, width), doorHeight);
+          }
+          return;
+        }
+        if (type === "drive_aisle" || type === "reference") {
+          ctx.strokeStyle = "#667382";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([10, 8]);
+          ctx.beginPath();
+          ctx.moveTo(x + width / 2, y + 4);
+          ctx.lineTo(x + width / 2, y + Math.max(8, height - 4));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          return;
+        }
+        const columns = Math.max(1, zone.aisles);
+        const rows = Math.max(1, zone.racks);
+        const gap = 3;
+        const cellWidth = Math.max(5, Math.min(18, (width - gap * (columns - 1)) / columns));
+        const cellHeight = Math.max(5, Math.min(14, (height - gap * (rows - 1)) / rows));
+        ctx.fillStyle = type === "rack_storage" ? "#f5dfb5" : locationStatusColor("available");
+        for (let row = 0; row < rows; row += 1) {
+          for (let column = 0; column < columns; column += 1) {
+            drawRoundedRect(ctx, x + column * (cellWidth + gap), y + row * (cellHeight + gap), cellWidth, cellHeight, 3);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(24, 33, 43, 0.18)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+      }
+
+      function blueprintZoneAtEvent(event) {
+        const rect = $("blueprintCanvas").getBoundingClientRect();
+        const view = state.blueprint.view;
+        const x = (event.clientX - rect.left - (view.offsetX || 0)) / (view.scale || 1);
+        const y = (event.clientY - rect.top - (view.offsetY || 0)) / (view.scale || 1);
+        return state.blueprint.hitboxes.find(
+          (box) => x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height
+        )?.zone;
+      }
+
+      function blueprintCanvasPoint(event) {
+        const rect = $("blueprintCanvas").getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+      }
+
+      function startBlueprintPan(event) {
+        if (event.button !== undefined && event.button !== 0) return;
+        const point = blueprintCanvasPoint(event);
+        const view = state.blueprint.view;
+        view.isDragging = true;
+        view.dragMoved = false;
+        view.dragStartX = point.x;
+        view.dragStartY = point.y;
+        view.dragOffsetX = view.offsetX || 0;
+        view.dragOffsetY = view.offsetY || 0;
+        $("blueprintCanvas").setPointerCapture?.(event.pointerId);
+        $("blueprintCanvas").parentElement.classList.add("dragging");
+      }
+
+      function moveBlueprintPan(event) {
+        const view = state.blueprint.view;
+        if (!view.isDragging) return;
+        const point = blueprintCanvasPoint(event);
+        if (Math.abs(point.x - view.dragStartX) > 3 || Math.abs(point.y - view.dragStartY) > 3) {
+          view.dragMoved = true;
+        }
+        view.offsetX = view.dragOffsetX + point.x - view.dragStartX;
+        view.offsetY = view.dragOffsetY + point.y - view.dragStartY;
+        drawBlueprint();
+      }
+
+      function endBlueprintPan(event) {
+        const view = state.blueprint.view;
+        if (!view.isDragging) return;
+        view.isDragging = false;
+        $("blueprintCanvas").releasePointerCapture?.(event.pointerId);
+        $("blueprintCanvas").parentElement.classList.remove("dragging");
+      }
+
+      function renderBlueprintDetail(zone) {
+        const target = $("blueprintDetail");
+        if (!zone) {
+          target.innerHTML = `
+            <h4>No zone selected</h4>
+            <div class="blueprint-note">Click a zone on the overview to inspect generated aisles, racks, levels, positions, and location codes.</div>
+          `;
+          return;
+        }
+        const examples = zone.locations.slice(0, 8);
+        const validation = zone.validation || [];
+        if (isBlueprintAccessPoint(zone)) {
+          target.innerHTML = `
+            <h4>${escapeHtml(zone.name)}</h4>
+            <div class="blueprint-note">${escapeHtml(zone.code)} · ${escapeHtml(locationTypeLabel(zone.type))} · access point, no storage locations</div>
+            <div class="summary-grid">
+              <div class="summary-metric"><span>Type</span>${escapeHtml(locationTypeLabel(zone.type))}</div>
+              <div class="summary-metric"><span>Doors</span>${escapeHtml(zone.metadata?.doors || "-")}</div>
+              <div class="summary-metric"><span>AGV use</span>${blueprintZoneType(zone) === "dock" ? "Unload / ship" : "Reference"}</div>
+            </div>
+            <div class="blueprint-note">Use this as a movement boundary or handoff point. It will be stored in blueprint access points, not in warehouse locations.</div>
+          `;
+          return;
+        }
+        target.innerHTML = `
+          <h4>${escapeHtml(zone.name)}</h4>
+          <div class="blueprint-note">${escapeHtml(zone.code)} · ${escapeHtml(locationTypeLabel(zone.type))} · ${zone.locations.length} generated locations</div>
+          <div class="summary-grid">
+            <div class="summary-metric"><span>${blueprintZoneType(zone) === "floor_storage" ? "Rows" : "Aisles"}</span>${zone.aisles}</div>
+            <div class="summary-metric"><span>${blueprintZoneType(zone) === "floor_storage" ? "Positions" : "Racks"}</span>${zone.racks}</div>
+            <div class="summary-metric"><span>Levels x positions</span>${zone.levels} x ${zone.positions}</div>
+          </div>
+          ${
+            validation.length
+              ? `<div class="blueprint-note">${validation
+                  .map((check) => `${check.ok ? "OK" : "Check"}: ${escapeHtml(check.label)} (${escapeHtml(String(check.actual))}/${escapeHtml(String(check.expected))})`)
+                  .join(" · ")}</div>`
+              : ""
+          }
+          <div class="blueprint-table-wrap">
+            <table class="blueprint-table">
+              <thead><tr><th>Location code</th><th>Aisle</th><th>Rack</th><th>Level</th><th>Position</th></tr></thead>
+              <tbody>
+                ${examples
+                  .map(
+                    (location) => `<tr><td>${escapeHtml(location.barcode)}</td><td>${escapeHtml(location.aisle)}</td><td>${escapeHtml(location.rack)}</td><td>${escapeHtml(location.level)}</td><td>${escapeHtml(location.position)}</td></tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+          <div class="blueprint-note">Review this draft against the drawing. Copy JSON when the layout looks correct.</div>
+        `;
+      }
+
+      function blueprintDraftPayload() {
+        const warehouseCode = blueprintWarehouseCode(state.blueprint.zones);
+        const agvPlan = blueprintAgvStandardPlan(state.blueprint.zones);
+        return {
+          backend_preview_tool: "warehouse.blueprint.preview",
+          warehouse: {
+            name: `${warehouseCode} Warehouse`,
+            code: warehouseCode,
+            timezone: "America/Chicago",
+          },
+          planning_standard: agvPlan.planning_standard,
+          route_policy: agvPlan.route_policy,
+          route_nodes: agvPlan.route_nodes,
+          agv_paths: agvPlan.agv_paths,
+          stations: agvPlan.stations,
+          safety_zones: agvPlan.safety_zones,
+          source_image_name: state.blueprint.imageName || null,
+          generated_at: new Date().toISOString(),
+          zones: state.blueprint.zones.map((zone) => blueprintZonePayload(zone)),
+          wcs_point_mapping_draft: blueprintWcsMappingDraft(state.blueprint.zones, warehouseCode),
+        };
+      }
+
+      function blueprintWarehouseCode(zones) {
+        const preferredZone = zones.find((zone) => !isBlueprintAccessPoint(zone)) || zones[0];
+        const firstCode = String(preferredZone?.code || "DAL").toUpperCase();
+        return firstCode.includes("-") ? firstCode.split("-")[0] : firstCode;
+      }
+
+      function blueprintZonePayload(zone) {
+        const metadata = zone.metadata || {};
+        const dimensions = zone.dimensions || {};
+        const layoutMetadata = blueprintZoneRouteMetadata(zone);
+        return {
+          id: zone.id,
+          name: zone.name,
+          code: zone.code,
+          type: zone.type,
+          x: zone.x,
+          y: zone.y,
+          w: zone.width,
+          h: zone.height,
+          layout_percent: { x: zone.x, y: zone.y, width: zone.width, height: zone.height },
+          rows: blueprintZoneType(zone) === "rack_storage" ? zone.levels : zone.aisles,
+          columns: zone.racks,
+          aisles: zone.aisles,
+          racks: zone.racks,
+          levels: zone.levels,
+          positions: zone.positions,
+          location_type: zone.type,
+          expected_pcs: zone.expected_pcs || null,
+          layout_metadata: layoutMetadata,
+          ...metadata,
+          ...dimensions,
+          metadata,
+          dimensions,
+          validation: zone.validation || [],
+          locations: zone.locations,
+        };
+      }
+
+      function blueprintZoneCenter(zone) {
+        return {
+          x: Number((zone.x + zone.width / 2).toFixed(3)),
+          y: Number((zone.y + zone.height / 2).toFixed(3)),
+        };
+      }
+
+      function blueprintZoneRouteMetadata(zone) {
+        const type = blueprintZoneType(zone);
+        if (type === "dock") {
+          return {
+            route_role: "external_transport_interface",
+            station_role: "inbound_outbound",
+            docking_direction: zone.metadata?.docking_direction || "west",
+            route_anchor_id: zone.metadata?.route_anchor_id || `N-${zone.code}-ACCESS`,
+            dock_doors_are_storage_locations: false,
+          };
+        }
+        if (type === "drive_aisle" || type === "reference") {
+          return {
+            route_role: zone.metadata?.route_role || "main_aisle",
+            lane_policy: zone.metadata?.lane_policy || "controlled_one_way",
+            direction: zone.metadata?.direction || "one_way",
+            route_anchor_id: zone.metadata?.route_anchor_id || `N-${zone.code}-ACCESS`,
+          };
+        }
+        if (type === "rack_storage") {
+          return {
+            route_role: "top_rack_face",
+            lane_policy: zone.metadata?.lane_policy || "one_agv_at_a_time",
+            docking_direction: zone.metadata?.docking_direction || "south",
+            route_anchor_id: zone.metadata?.route_anchor_id || `N-${zone.code}-FACE`,
+            route_exit_id: zone.metadata?.route_exit_id || `N-${zone.code}-FACE`,
+          };
+        }
+        return {
+          route_role: "floor_storage_lane",
+          lane_policy: zone.metadata?.lane_policy || "one_agv_one_way",
+          agv_internal_travel: zone.metadata?.agv_internal_travel ?? false,
+          handoff_strategy: zone.metadata?.handoff_strategy || "external_edge_handoff",
+          inbound_end: zone.metadata?.inbound_end || "main_aisle",
+          outbound_end: zone.metadata?.outbound_end || "return_lane",
+          docking_direction: zone.metadata?.docking_direction || "north",
+          route_anchor_id: zone.metadata?.route_anchor_id || `N-${zone.code}-FACE`,
+          route_exit_id: zone.metadata?.route_exit_id || `N-${zone.code}-EXIT`,
+        };
+      }
+
+      function blueprintAgvStandardPlan(zones) {
+        const storageZones = zones.filter((zone) => !isBlueprintAccessPoint(zone));
+        const accessZones = zones.filter(isBlueprintAccessPoint);
+        const routeNodes = [];
+        const addNode = (id, x, y, label, role) => {
+          if (routeNodes.some((node) => node.id === id)) return;
+          routeNodes.push({ id, x: Number(x.toFixed(3)), y: Number(y.toFixed(3)), label, role });
+        };
+
+        accessZones.forEach((zone) => {
+          const center = blueprintZoneCenter(zone);
+          const metadata = blueprintZoneRouteMetadata(zone);
+          addNode(metadata.route_anchor_id || `N-${zone.code}-ACCESS`, center.x, center.y, `${zone.code} access`, blueprintZoneType(zone));
+        });
+        storageZones.forEach((zone) => {
+          const center = blueprintZoneCenter(zone);
+          const metadata = blueprintZoneRouteMetadata(zone);
+          addNode(metadata.route_anchor_id, center.x, Math.max(4, zone.y - 3), `${zone.code} storage face`, "storage_face");
+          addNode(metadata.route_exit_id, center.x, Math.min(96, zone.y + zone.height + 3), `${zone.code} return lane`, "return_lane");
+        });
+
+        const sortedFaces = storageZones
+          .map((zone) => blueprintZoneRouteMetadata(zone).route_anchor_id)
+          .filter(Boolean);
+        const sortedExits = storageZones
+          .map((zone) => blueprintZoneRouteMetadata(zone).route_exit_id)
+          .filter(Boolean);
+        const lowerLaneNodes = accessZones
+          .filter((zone) => {
+            const metadata = blueprintZoneRouteMetadata(zone);
+            return metadata.route_role === "lower_return_lane" || String(zone.code || "").includes("LOWER");
+          })
+          .map((zone) => blueprintZoneRouteMetadata(zone).route_anchor_id)
+          .filter(Boolean);
+        const dockNode = routeNodes.find((node) => node.role === "dock");
+        const driveNode = routeNodes.find((node) => node.role === "drive_aisle");
+        const referenceNode = routeNodes.find((node) => node.role === "reference");
+        const accessNode = dockNode || driveNode || referenceNode || routeNodes[0];
+        const rackFaceNode = routeNodes.find((node) => node.id === "N-RACK-FACE") || routeNodes.find((node) => node.role === "storage_face");
+        if (accessNode) {
+          addNode(
+            "N-WAIT-TOP",
+            rackFaceNode ? Math.min(96, rackFaceNode.x + 8) : Math.max(4, accessNode.x - 8),
+            rackFaceNode ? Math.max(4, rackFaceNode.y) : Math.max(4, accessNode.y - 10),
+            "Top wait point",
+            "wait_zone",
+          );
+          addNode("N-WAIT-DOCK", Math.max(4, accessNode.x - 4), accessNode.y, "Dock wait point", "wait_zone");
+          addNode("N-CHARGE-01", Math.min(96, accessNode.x + 2), 94, "Charging station 01", "charger");
+        }
+        const storageTop = storageZones.length ? Math.min(...storageZones.map((zone) => zone.y)) : 12;
+        const storageBottom = storageZones.length
+          ? Math.max(...storageZones.map((zone) => zone.y + zone.height))
+          : 60;
+        const safetyY = Math.max(4, storageTop - 4);
+        const safetyHeight = Math.min(88 - safetyY, Math.max(8, storageBottom - storageTop + 10));
+
+        return {
+          planning_standard: {
+            document: "docs/36-agv-planning-standard.md",
+            status: "draft_ready_for_field_review",
+            coordinate_system: "drawing_percent",
+          },
+          route_policy: {
+            traffic_pattern: "controlled_one_way_loop",
+            main_aisle_width_ft: 40,
+            branch_aisle_width_ft: 12,
+            minimum_turning_radius_mm: 800,
+            fork_to_pallet_clearance_mm: 500,
+            wall_clearance_mm: 150,
+            rack_equipment_clearance_mm: 200,
+            dock_doors_are_storage_locations: false,
+          },
+          route_nodes: routeNodes,
+          agv_paths: [
+            {
+              id: "PATH-MAIN-TO-STORAGE",
+              role: "main_aisle",
+              direction: "one_way_to_storage",
+              lane_policy: "one_way",
+              width_ft: 40,
+              points: [accessNode?.id, "N-WAIT-DOCK", "N-WAIT-TOP", ...sortedFaces].filter(Boolean),
+            },
+            {
+              id: "PATH-CONTROLLED-RETURN",
+              role: "return_lane",
+              direction: "one_way_to_dock",
+              lane_policy: "one_way",
+              width_ft: 12,
+              points: [...sortedExits, ...lowerLaneNodes, accessNode?.id].filter(Boolean),
+            },
+            {
+              id: "PATH-CHARGE-SPUR",
+              role: "charger",
+              direction: "single_vehicle",
+              lane_policy: "single_vehicle",
+              width_ft: 10,
+              points: [accessNode?.id, "N-CHARGE-01"].filter(Boolean),
+            },
+          ].filter((path) => path.points.length >= 2),
+          stations: [
+            {
+              code: "WAIT-TOP",
+              name: "Top wait point",
+              station_role: "wait",
+              x: routeNodes.find((node) => node.id === "N-WAIT-TOP")?.x || 80,
+              y: routeNodes.find((node) => node.id === "N-WAIT-TOP")?.y || 20,
+              route_anchor_id: "N-WAIT-TOP",
+              docking_direction: "one_way",
+            },
+            {
+              code: "WAIT-DOCK",
+              name: "Dock wait point",
+              station_role: "wait",
+              x: routeNodes.find((node) => node.id === "N-WAIT-DOCK")?.x || 80,
+              y: routeNodes.find((node) => node.id === "N-WAIT-DOCK")?.y || 20,
+              route_anchor_id: "N-WAIT-DOCK",
+              docking_direction: "one_way",
+            },
+            {
+              code: "CHG-01",
+              name: "Charging station 01",
+              station_role: "charging",
+              x: routeNodes.find((node) => node.id === "N-CHARGE-01")?.x || 83,
+              y: routeNodes.find((node) => node.id === "N-CHARGE-01")?.y || 94,
+              route_anchor_id: "N-CHARGE-01",
+              docking_direction: "south",
+            },
+          ],
+          safety_zones: [
+            {
+              code: "SAFE-STORAGE-FACES",
+              zone_type: "safe_boundary",
+              x: 4,
+              y: safetyY,
+              width: 92,
+              height: safetyHeight,
+            },
+            {
+              code: "SLOW-ACCESS",
+              zone_type: "slow_zone",
+              x: accessNode ? Math.max(0, accessNode.x - 6) : 76,
+              y: accessNode ? Math.max(0, accessNode.y - 6) : 16,
+              width: 12,
+              height: 12,
+            },
+          ],
+        };
+      }
+
+      function blueprintPointToken(value, fallback) {
+        return String(value || fallback)
+          .trim()
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || fallback;
+      }
+
+      function blueprintWcsRole(zone, location = null) {
+        const type = blueprintZoneType(zone);
+        const locationType = String(location?.location_type || "").toLowerCase();
+        if (type === "dock") return "dock";
+        if (["buffer", "staging", "quality", "packing"].includes(type) || ["buffer", "staging", "quality", "packing"].includes(locationType)) return "buffer";
+        if (["agv_station", "charging"].includes(type) || ["agv_station", "charging"].includes(locationType)) return "agv_station";
+        if (["drive_aisle", "reference"].includes(type)) return "aisle_group";
+        return "storage";
+      }
+
+      function blueprintWcsPrefix(role) {
+        return ({ dock: "DOCK", buffer: "BUF", agv_station: "AGV", aisle_group: "AISLE" }[role] || "STO");
+      }
+
+      function blueprintWcsMapping(zone, warehouseCode, location = null, code = null, virtual = false) {
+        const role = blueprintWcsRole(zone, location);
+        const barcode = blueprintPointToken(code || location?.barcode || zone.code, `${warehouseCode}-${blueprintWcsPrefix(role)}`);
+        const aisle = blueprintPointToken(location?.aisle || zone.code, "00");
+        const routeMetadata = blueprintZoneRouteMetadata(zone);
+        const layoutPercent = location?.layout_percent || zone.layout_percent || { x: zone.x, y: zone.y, width: zone.width, height: zone.height };
+        const dimensions = location?.dimensions || zone.dimensions || {};
+        const wcsMetadata = {
+          source: "blueprint_draft",
+          layout_percent: layoutPercent,
+          dimensions,
+          zone_code: zone.code,
+          zone_type: blueprintZoneType(zone),
+          planning_standard: "docs/36-agv-planning-standard.md",
+          ...routeMetadata,
+        };
+        if (virtual) {
+          wcsMetadata.virtual = true;
+          wcsMetadata.external_point = true;
+        }
+        return {
+          location_barcode: barcode,
+          point_code: `${warehouseCode}-${blueprintWcsPrefix(role)}-${barcode}`,
+          point_type: role,
+          point_role: role,
+          is_external_point: virtual || !location,
+          buffer_code: role === "buffer" ? `${warehouseCode}-BUF-${aisle}` : null,
+          aisle_group: `${warehouseCode}-AISLE-${aisle}`,
+          agv_reachable: role !== "aisle_group",
+          virtual,
+          layout_percent: layoutPercent,
+          dimensions,
+          wcs_metadata: wcsMetadata,
+          source: "blueprint_draft",
+        };
+      }
+
+      function blueprintDockDoorCodes(zone) {
+        const raw = String(zone.metadata?.doors || "").trim();
+        if (raw.includes("-")) {
+          const [startText, endText] = raw.split("-");
+          const start = clampInt(startText, 1, 999, 1);
+          const end = clampInt(endText, start, 999, start);
+          return Array.from({ length: end - start + 1 }, (_, index) => `DOCK-${start + index}`);
+        }
+        if (raw) return raw.split(",").map((part) => `DOCK-${part.trim()}`).filter(Boolean);
+        return [`DOCK-${zone.code}`];
+      }
+
+      function blueprintWcsMappingDraft(zones, warehouseCode) {
+        const mappings = [];
+        const agvPlan = blueprintAgvStandardPlan(zones);
+        zones.forEach((zone) => {
+          zone.locations.forEach((location) => mappings.push(blueprintWcsMapping(zone, warehouseCode, location)));
+          if (blueprintZoneType(zone) === "dock") {
+            blueprintDockDoorCodes(zone).forEach((doorCode) => mappings.push(blueprintWcsMapping(zone, warehouseCode, null, doorCode, true)));
+          }
+        });
+        agvPlan.stations.forEach((station) => mappings.push(blueprintStationWcsMapping(station, warehouseCode)));
+        return mappings;
+      }
+
+      function blueprintStationWcsMapping(station, warehouseCode) {
+        const stationCode = blueprintPointToken(station.code, "STATION");
+        const stationRole = String(station.station_role || "wait").toLowerCase();
+        const pointRole = stationRole === "charging" ? "agv_station" : "buffer";
+        const prefix = blueprintWcsPrefix(pointRole);
+        const layoutPercent = {
+          x: Number(station.x || 0),
+          y: Number(station.y || 0),
+          width: Number(station.width || 1),
+          height: Number(station.height || 1),
+        };
+        return {
+          location_barcode: stationCode,
+          point_code: `${warehouseCode}-${prefix}-${stationCode}`,
+          point_type: pointRole,
+          point_role: pointRole,
+          point_name: station.name || stationCode,
+          is_external_point: true,
+          buffer_code: pointRole === "buffer" ? `${warehouseCode}-BUF-${stationCode}` : null,
+          aisle_group: station.aisle_group || `${warehouseCode}-AISLE-${stationCode}`,
+          station_role: stationRole,
+          agv_reachable: true,
+          virtual: true,
+          layout_percent: layoutPercent,
+          dimensions: station.dimensions || {},
+          wcs_metadata: {
+            source: "blueprint_draft",
+            virtual: true,
+            external_point: true,
+            station_role: stationRole,
+            route_anchor_id: station.route_anchor_id,
+            docking_direction: station.docking_direction,
+            route_role: stationRole,
+            layout_percent: layoutPercent,
+            planning_standard: "docs/36-agv-planning-standard.md",
+          },
+          source: "blueprint_draft",
+        };
+      }
+
+      function validateBlueprintWcsDraftPayload(payload) {
+        const mappings = payload.wcs_point_mapping_draft || [];
+        const seen = new Map();
+        const issues = [];
+        const warnings = [];
+        mappings.forEach((mapping, index) => {
+          if (!mapping.point_code) {
+            issues.push({ row: index + 1, code: "missing_point_code", message: "Every WCS draft point needs a point code." });
+          } else if (seen.has(mapping.point_code)) {
+            issues.push({ row: index + 1, code: "duplicate_point_code", message: `Point code duplicates row ${seen.get(mapping.point_code)}.` });
+          } else {
+            seen.set(mapping.point_code, index + 1);
+          }
+          if (mapping.point_role === "dock" && !mapping.is_external_point) {
+            warnings.push({ row: index + 1, code: "dock_not_external", message: "Dock doors should stay external WCS points unless a WMS dock location is intentionally created." });
+          }
+          if (mapping.virtual && !mapping.wcs_metadata?.virtual) {
+            warnings.push({ row: index + 1, code: "virtual_metadata_missing", message: "Virtual WCS points should carry wcs_metadata.virtual=true." });
+          }
+        });
+        return {
+          ok: issues.length === 0,
+          dry_run: true,
+          action: "warehouse.blueprint_draft.validate",
+          summary: {
+            zones: payload.zones?.length || 0,
+            locations: (payload.zones || []).reduce((sum, zone) => sum + (zone.locations?.length || 0), 0),
+            wcs_points: mappings.length,
+            dock_points: mappings.filter((mapping) => mapping.point_role === "dock").length,
+          },
+          issues,
+          warnings,
+          next_action: issues.length ? "fix_blueprint_draft_before_preview" : "preview_in_wms_before_import",
+        };
+      }
+
+      async function validateBlueprintDraft() {
+        const validation = validateBlueprintWcsDraftPayload(blueprintDraftPayload());
+        renderOutput({
+          tool_name: "warehouse.blueprint_draft.validate",
+          message: validation.ok ? "Blueprint draft looks ready for WMS preview." : "Blueprint draft needs fixes before WMS preview.",
+          result: validation,
+        });
+      }
+
+      async function previewBlueprintInWms() {
+        try {
+          const payload = blueprintDraftPayload();
+          const validation = validateBlueprintWcsDraftPayload(payload);
+          if (!validation.ok) {
+            renderOutput({
+              tool_name: "warehouse.blueprint_draft.validate",
+              message: "Fix blueprint draft issues before WMS preview.",
+              result: validation,
+            });
+            return;
+          }
+          const preview = await runToolForPayload("warehouse.blueprint.preview", payload);
+          renderOutput(preview);
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+          renderOutput({
+            tool_name: "warehouse.blueprint.preview",
+            message: "Sign in, then run WMS preview again.",
+            result: {
+              ok: false,
+              what_happened: error.message,
+              what_to_do_next: "Sign in and rerun Preview in WMS, or copy the draft JSON for manual review.",
+            },
+          });
+        }
+      }
+
+      function validateBlueprintZone(zone) {
+        const checks = [];
+        if (isBlueprintAccessPoint(zone)) {
+          checks.push({
+            label: "access point creates no locations",
+            ok: zone.locations.length === 0,
+            expected: 0,
+            actual: zone.locations.length,
+          });
+        }
+        if (zone.expected_pcs !== undefined) {
+          checks.push({
+            label: "expected location count",
+            ok: zone.locations.length === zone.expected_pcs,
+            expected: zone.expected_pcs,
+            actual: zone.locations.length,
+          });
+        }
+        if (String(zone.metadata?.pallet || "").toUpperCase() === "GMA") {
+          const width = Number(zone.metadata?.width_ft);
+          const depth = Number(zone.metadata?.depth_ft);
+          checks.push({
+            label: "GMA pallet 48x40 in",
+            ok: width === 4 && Math.abs(depth - 3.33) <= 0.02,
+            expected: "4 x 3.33 ft",
+            actual: `${zone.metadata?.width_ft || "?"} x ${zone.metadata?.depth_ft || "?"} ft`,
+          });
+        }
+        return checks;
+      }
+
+      function updateBlueprintSummary() {
+        const zoneCount = state.blueprint.zones.length;
+        const locationCount = state.blueprint.zones.reduce((sum, zone) => sum + zone.locations.length, 0);
+        const accessCount = state.blueprint.zones.filter(isBlueprintAccessPoint).length;
+        const storageCount = zoneCount - accessCount;
+        $("blueprintSubtitle").textContent = zoneCount
+          ? `${storageCount} storage zones · ${accessCount} access points · ${locationCount} draft locations · review before import`
+          : "Upload a drawing, describe zones, then review generated locations.";
+      }
+
+      function generateBlueprintDraft() {
+        const zones = parseBlueprintDescription($("blueprintDescription").value);
+        state.blueprint.zones = zones;
+        state.blueprint.selectedZoneId = zones[0]?.id || null;
+        updateBlueprintSummary();
+        drawBlueprint();
+        renderBlueprintDetail(zones[0] || null);
+        if (zones.length) setBlueprintPage("review");
+        renderOutput({
+          tool_name: "warehouse.blueprint_draft",
+          message: zones.length
+            ? "Blueprint draft generated. Review the overview and zone detail before import."
+            : "Blueprint draft needs at least one zone description.",
+          result: {
+            count: zones.reduce((sum, zone) => sum + zone.locations.length, 0),
+            zones: zones.length,
+          },
+        });
+      }
+
+      function evidenceIdFromValue(value) {
+        if (!value || typeof value !== "object") return null;
+        return (
+          value.confirmation_card?.evidence_id ||
+          value.tool_result?.result?.evidence_id ||
+          value.tool_result?.evidence_id ||
+          value.result?.evidence_id ||
+          value.evidence_id ||
+          null
+        );
+      }
+
+      function evidenceButton(evidenceId) {
+        if (!evidenceId) return "";
+        return `<span class="inline-actions"><button class="secondary evidence-action" data-evidence-id="${escapeHtml(evidenceId)}">View evidence</button><button class="secondary copy-action" data-copy-value="${escapeHtml(evidenceId)}">Copy ID</button></span>`;
+      }
+
+      function bindEvidenceButtons(container) {
+        container.querySelectorAll("[data-evidence-id]").forEach((button) => {
+          button.addEventListener("click", () => loadEvidenceDetail(button.dataset.evidenceId));
+        });
+        container.querySelectorAll("[data-copy-value]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await navigator.clipboard?.writeText(button.dataset.copyValue || "");
+            button.textContent = "Copied";
+          });
+        });
+      }
+
+      function renderEvidenceLookup(evidenceId) {
+        const previousEvidenceId = state.latestEvidenceId;
+        state.latestEvidenceId = evidenceId || null;
+        const target = $("evidenceLookup");
+        if (previousEvidenceId !== state.latestEvidenceId) {
+          $("evidencePanel").classList.add("hidden");
+          $("evidencePanel").innerHTML = "";
+        }
+        if (!evidenceId) {
+          target.classList.add("hidden");
+          $("evidenceIdInput").value = "";
+          return;
+        }
+        $("evidenceIdInput").value = evidenceId;
+        target.classList.remove("hidden");
+      }
+
+      function isSensitiveKey(key) {
+        return /token|password|secret|api[_-]?key|authorization|credential/i.test(key);
+      }
+
+      function safeEvidenceValue(value, key = "") {
+        if (isSensitiveKey(key)) return "[redacted]";
+        if (Array.isArray(value)) return value.map((item) => safeEvidenceValue(item));
+        if (value && typeof value === "object") {
+          return Object.fromEntries(
+            Object.entries(value)
+              .filter(([entryKey]) => !isSensitiveKey(entryKey))
+              .map(([entryKey, entryValue]) => [entryKey, safeEvidenceValue(entryValue, entryKey)])
+          );
+        }
+        return value;
+      }
+
+      function compactEvidenceRows(payload) {
+        const evidence = payload.evidence || payload;
+        return [
+          ["Evidence", evidence.evidence_id || evidence.id],
+          ["Tool", evidence.tool_name || evidence.tool],
+          ["Action", evidence.action || evidence.agent_endpoint || evidence.endpoint],
+          ["Status", evidence.status || evidence.state],
+          ["Created", evidence.created_at || evidence.timestamp],
+          ["Replay", evidence.replay_eligible ?? evidence.can_replay],
+          ["Summary", evidence.summary || evidence.reason || evidence.next_action],
+        ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      }
+
+      function renderEvidencePanel(payload) {
+        const target = $("evidencePanel");
+        const safePayload = safeEvidenceValue(payload);
+        const rows = compactEvidenceRows(safePayload)
+          .map(
+            ([label, value]) =>
+              `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(
+                typeof value === "object" ? JSON.stringify(value) : value
+              )}</dd>`
+          )
+          .join("");
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <strong>Evidence detail</strong>
+          <dl>${rows || "<dt>Status</dt><dd>No detail fields returned</dd>"}</dl>
+        `;
+      }
+
+      function renderReplayPreviewPanel(payload) {
+        const target = $("evidencePanel");
+        const safePayload = safeEvidenceValue(payload);
+        const preview = safePayload.replay_preview || safePayload.preview || safePayload;
+        const planned = preview.planned_request || preview.request || {};
+        const summaryRows = [
+          ["Evidence", preview.evidence_id || preview.id],
+          ["Replay", preview.eligible_for_replay ?? preview.replay_eligible],
+          ["Endpoint", planned.endpoint || preview.endpoint],
+          ["Next", preview.next_action || preview.recovery || preview.reason],
+        ]
+          .filter(([, value]) => value !== undefined && value !== null && value !== "")
+          .map(
+            ([label, value]) =>
+              `<div><span>${escapeHtml(label)}</span>${escapeHtml(
+                typeof value === "object" ? JSON.stringify(value) : value
+              )}</div>`
+          )
+          .join("");
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <strong>Replay preview</strong>
+          <div class="summary-list">${summaryRows || "<div>No replay summary returned</div>"}</div>
+          <pre>${escapeHtml(JSON.stringify(preview, null, 2))}</pre>
+        `;
+      }
+
+      function failedEvidenceItems(payload) {
+        if (Array.isArray(payload)) return payload;
+        return payload.failed_evidence || payload.evidence || payload.items || payload.results || [];
+      }
+
+      function renderFailedEvidencePanel(payload) {
+        const target = $("evidencePanel");
+        const items = failedEvidenceItems(safeEvidenceValue(payload));
+        const rows = items
+          .map((item) => {
+            const evidenceId = item.evidence_id || item.id || "";
+            const label = evidenceId || item.tool_name || item.tool || "failed evidence";
+            const detail = item.reason || item.error || item.status || item.created_at || "";
+            const searchText = `${label} ${detail} ${item.tool_name || ""} ${item.action || ""}`;
+            return `<li data-failed-evidence-row="${escapeHtml(searchText.toLowerCase())}"><span>${escapeHtml(label)}</span> ${escapeHtml(detail)}${evidenceButton(evidenceId)}</li>`;
+          })
+          .join("");
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <strong>Failed evidence</strong>
+          <input id="failedEvidenceFilter" class="evidence-filter" placeholder="Filter failed evidence" />
+          <ul>${rows || "<li>No failed evidence returned</li>"}</ul>
+        `;
+        bindEvidenceButtons(target);
+        const filter = $("failedEvidenceFilter");
+        if (filter) {
+          filter.addEventListener("input", () => {
+            const query = filter.value.trim().toLowerCase();
+            target.querySelectorAll("[data-failed-evidence-row]").forEach((row) => {
+              row.classList.toggle("hidden", Boolean(query) && !row.dataset.failedEvidenceRow.includes(query));
+            });
+          });
+        }
+      }
+
+      async function loadEvidenceDetail(evidenceId) {
+        const id = (evidenceId || $("evidenceIdInput").value || "").trim();
+        if (!id) return;
+        if (!state.sessionId) {
+          showStatus($("agentStatus"), "Sign in before viewing evidence", true);
+          return;
+        }
+        $("viewEvidenceBtn").disabled = true;
+        try {
+          const response = await fetch(
+            `/api/evidence/${encodeURIComponent(id)}?session_id=${encodeURIComponent(state.sessionId)}`
+          );
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Evidence lookup failed");
+          renderEvidencePanel(payload);
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          $("viewEvidenceBtn").disabled = false;
+        }
+      }
+
+      async function loadEvidenceReplayPreview(evidenceId) {
+        const id = (evidenceId || $("evidenceIdInput").value || "").trim();
+        if (!id) return;
+        if (!state.sessionId) {
+          showStatus($("agentStatus"), "Sign in before viewing replay preview", true);
+          return;
+        }
+        $("replayPreviewBtn").disabled = true;
+        try {
+          const response = await fetch(
+            `/api/evidence/${encodeURIComponent(id)}/replay-preview?session_id=${encodeURIComponent(state.sessionId)}`
+          );
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Replay preview failed");
+          renderReplayPreviewPanel(payload);
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          $("replayPreviewBtn").disabled = false;
+        }
+      }
+
+      async function loadFailedEvidenceList() {
+        if (!state.sessionId) {
+          showStatus($("agentStatus"), "Sign in before viewing failed evidence", true);
+          return;
+        }
+        $("failedEvidenceBtn").disabled = true;
+        try {
+          const response = await fetch(
+            `/api/evidence/failed?session_id=${encodeURIComponent(state.sessionId)}`
+          );
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Failed evidence lookup failed");
+          renderFailedEvidencePanel(payload);
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          $("failedEvidenceBtn").disabled = false;
+        }
+      }
+
+      function renderConfirmation(card) {
+        const target = $("confirmCard");
+        if (!card) {
+          target.classList.add("hidden");
+          target.innerHTML = "";
+          return;
+        }
+        const strongConfirmation = Boolean(card.strong_confirmation_required);
+        const impact = card.impact || card.records || [];
+        const impactText = Array.isArray(impact)
+          ? `${impact.length} record${impact.length === 1 ? "" : "s"}`
+          : JSON.stringify(impact);
+        const stateBefore = card.state_before ? JSON.stringify(card.state_before) : "previewed";
+        const stateAfter = card.state_after ? JSON.stringify(card.state_after) : "pending confirm";
+        const recovery = card.recovery || card.next_action || "Cancel and rerun preview if anything looks wrong.";
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <h2>Confirmation required</h2>
+          <p class="confirm-note">What happened: preview is ready. What to do next: confirm this write or cancel and rerun preview.</p>
+          <div class="confirm-grid">
+            <div><span>Action</span>${escapeHtml(card.action || "write")}</div>
+            <div><span>Risk</span>${escapeHtml(card.risk || "medium")}</div>
+            <div><span>Evidence</span>${escapeHtml(card.evidence_id || "pending")}${evidenceButton(card.evidence_id)}</div>
+            <div><span>Endpoint</span>${escapeHtml(card.agent_endpoint || "agent endpoint")}</div>
+            <div><span>Impact</span>${escapeHtml(impactText)}</div>
+            <div><span>Strong confirmation</span>${strongConfirmation ? "Evidence ID required" : "Standard card"}</div>
+            <div><span>Before</span>${escapeHtml(stateBefore)}</div>
+            <div><span>After</span>${escapeHtml(stateAfter)}</div>
+          </div>
+          <p class="confirm-note">${escapeHtml(recovery)}</p>
+          ${
+            strongConfirmation
+              ? `<label for="strongConfirmationInput">Type evidence id to confirm</label>
+                 <input id="strongConfirmationInput" autocomplete="off" placeholder="${escapeHtml(
+                   card.evidence_id || "evidence id"
+                 )}" />`
+              : ""
+          }
+          <div class="row">
+            <button id="confirmBtn">Confirm</button>
+            <button class="secondary" id="cancelConfirmBtn">Cancel</button>
+          </div>
+        `;
+        $("confirmBtn").addEventListener("click", confirmLatest);
+        $("cancelConfirmBtn").addEventListener("click", () => renderConfirmation(null));
+        bindEvidenceButtons(target);
+      }
+
+      async function confirmLatest() {
+        if (!state.latestPayload) return;
+        $("confirmBtn").disabled = true;
+        const idempotencyKey =
+          state.settings.latestIdempotencyKey || `local-settings-${Date.now()}`;
+        state.settings.latestIdempotencyKey = idempotencyKey;
+        try {
+          const response = await fetch("/api/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: state.sessionId,
+              preview_payload: state.latestPayload,
+              idempotency_key: idempotencyKey,
+              strong_confirmation: $("strongConfirmationInput")
+                ? $("strongConfirmationInput").value
+                : null,
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Confirmation failed");
+          renderOutput(payload);
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+          $("confirmBtn").disabled = false;
+        }
+      }
+
+      function applySession(session) {
+        state.sessionId = session.session_id;
+        localStorage.setItem("wmsLocalAgentSessionId", state.sessionId);
+        $("workspace").classList.remove("signed-out");
+        $("loginPanel").classList.add("hidden");
+        $("agentPanel").classList.remove("hidden");
+        $("sessionMeta").textContent = `${session.tenant_id || "no tenant"} / ${session.role || "role"} / ${(session.allowed_tools || []).length} tools`;
+        renderOutput({
+          signed_in: true,
+          wms_api_base_url: session.wms_api_base_url,
+          tenant_id: session.tenant_id,
+          role: session.role,
+          agent_enabled: session.agent_enabled,
+          allowed_tools: session.allowed_tools,
+        });
+      }
+
+      async function loadSkills() {
+        const response = await fetch("/api/skills");
+        const payload = await response.json();
+        $("skillChips").innerHTML = "";
+        for (const skill of payload.skills || []) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = skill.name;
+          $("skillChips").appendChild(chip);
+        }
+      }
+
+      async function loadConfig() {
+        const response = await fetch("/api/config");
+        const payload = await response.json();
+        const configuredProviders = (payload.model_roster || [])
+          .filter((provider) => provider.configured)
+          .map((provider) => provider.label || provider.key)
+          .join(", ");
+        $("localStatus").textContent =
+          `${payload.model_provider || "model"} / ${payload.model_name || "no model"} / ` +
+          `${payload.model_configured ? "model configured" : "rule router fallback"} / ` +
+          `${payload.model_source || "source unknown"} / ` +
+          `${configuredProviders || "no backend model roster"} / ${payload.default_wms_api_base_url}`;
+        $("localStatus").classList.toggle("ok", Boolean(payload.model_configured));
+      }
+
+      $("loginBtn").addEventListener("click", async () => {
+        clearStatus($("loginStatus"));
+        setLoginStep("connect");
+        showStatus($("loginStatus"), "Connecting to WMS and checking your account...");
+        setButtonLoading($("loginBtn"), "Signing in");
+        try {
+          const response = await fetch("/api/session/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              wms_api_base_url: $("apiUrl").value,
+              email: $("email").value,
+              password: $("password").value,
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Could not sign in");
+          setLoginStep("tools");
+          showStatus($("loginStatus"), "Account verified. Loading allowed tools and skills...");
+          applySession(payload);
+          await loadSkills();
+          await loadConfig();
+          setLoginStep("ready");
+          showStatus($("loginStatus"), "Workspace ready.");
+        } catch (error) {
+          showStatus($("loginStatus"), error.message, true);
+          $("loginProgress").classList.add("hidden");
+        } finally {
+          clearButtonLoading($("loginBtn"));
+        }
+      });
+
+      $("sendBtn").addEventListener("click", async () => {
+        setButtonLoading($("sendBtn"), "Running");
+        showStatus($("agentStatus"), "Running through the governed WMS agent gate...");
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: state.sessionId, prompt: $("prompt").value }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Request failed");
+          renderOutput(payload);
+          clearStatus($("agentStatus"));
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          clearButtonLoading($("sendBtn"));
+        }
+      });
+
+      $("compareBtn").addEventListener("click", async () => {
+        setButtonLoading($("compareBtn"), "Comparing");
+        showStatus($("agentStatus"), "Comparing planner suggestions without executing a WMS tool...");
+        try {
+          const response = await fetch("/api/plans/compare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: state.sessionId, prompt: $("prompt").value }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Planner comparison failed");
+          renderOutput(payload);
+          clearStatus($("agentStatus"));
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          clearButtonLoading($("compareBtn"));
+        }
+      });
+
+      $("logoutBtn").addEventListener("click", async () => {
+        if (state.sessionId) await fetch(`/api/session/${state.sessionId}`, { method: "DELETE" });
+        localStorage.removeItem("wmsLocalAgentSessionId");
+        location.reload();
+      });
+
+      $("auditBtn").addEventListener("click", async () => {
+        try {
+          const response = await fetch("/api/audit?limit=20");
+          const payload = await response.json();
+          renderOutput(payload);
+          $("evidenceLookup").classList.remove("hidden");
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        }
+      });
+      $("viewEvidenceBtn").addEventListener("click", () => loadEvidenceDetail());
+      $("replayPreviewBtn").addEventListener("click", () => loadEvidenceReplayPreview());
+      $("failedEvidenceBtn").addEventListener("click", () => loadFailedEvidenceList());
+      $("mapBtn").addEventListener("click", () => loadWarehouseMap());
+      $("refreshMapBtn").addEventListener("click", () => loadWarehouseMap());
+      $("warehouseMapZoomOutBtn").addEventListener("click", () => setWarehouseMapZoom((state.map.view.scale || 1) - 0.25));
+      $("warehouseMapZoomInBtn").addEventListener("click", () => setWarehouseMapZoom((state.map.view.scale || 1) + 0.25));
+      $("warehouseMapResetViewBtn").addEventListener("click", () => resetWarehouseMapView());
+      $("warehouseMapFullscreenBtn").addEventListener("click", async () => {
+        await toggleCanvasFullscreen($("warehouseMapPanel"), drawWarehouseMap);
+      });
+      $("blueprintBtn").addEventListener("click", () => showBlueprintPanel());
+      document.querySelectorAll("[data-blueprint-page]").forEach((tab) => {
+        tab.addEventListener("click", () => setBlueprintPage(tab.dataset.blueprintPage));
+      });
+      $("blueprintBackToDrawBtn").addEventListener("click", () => setBlueprintPage("draw"));
+      $("blueprintGoDetailBtn").addEventListener("click", () => setBlueprintPage("detail"));
+      $("blueprintBackToReviewBtn").addEventListener("click", () => setBlueprintPage("review"));
+      $("blueprintZoomOutBtn").addEventListener("click", () => setBlueprintZoom((state.blueprint.view.scale || 1) - 0.25));
+      $("blueprintZoomInBtn").addEventListener("click", () => setBlueprintZoom((state.blueprint.view.scale || 1) + 0.25));
+      $("blueprintResetViewBtn").addEventListener("click", () => resetBlueprintView());
+      $("blueprintFullscreenBtn").addEventListener("click", async () => {
+        await toggleCanvasFullscreen($("blueprintPageReview"), drawBlueprint);
+      });
+      $("generateBlueprintBtn").addEventListener("click", (event) => {
+        event.preventDefault();
+        showBlueprintPanel();
+        generateBlueprintDraft();
+      });
+      $("clearBlueprintBtn").addEventListener("click", (event) => {
+        event.preventDefault();
+        state.blueprint.zones = [];
+        state.blueprint.selectedZoneId = null;
+        updateBlueprintSummary();
+        drawBlueprint();
+        renderBlueprintDetail(null);
+        setBlueprintPage("draw");
+      });
+      $("copyBlueprintBtn").addEventListener("click", async () => {
+        await navigator.clipboard?.writeText(JSON.stringify(blueprintDraftPayload(), null, 2));
+        $("copyBlueprintBtn").textContent = "Copied";
+        window.setTimeout(() => {
+          $("copyBlueprintBtn").textContent = "Copy draft JSON";
+        }, 1200);
+      });
+      $("validateBlueprintDraftBtn").addEventListener("click", validateBlueprintDraft);
+      $("previewBlueprintWmsBtn").addEventListener("click", previewBlueprintInWms);
+      $("blueprintFile").addEventListener("change", () => {
+        const file = $("blueprintFile").files?.[0];
+        if (!file) return;
+        const image = new Image();
+        image.onload = () => {
+          state.blueprint.image = image;
+          state.blueprint.imageName = file.name;
+          showBlueprintPanel();
+          drawBlueprint();
+        };
+        image.src = URL.createObjectURL(file);
+      });
+      $("blueprintCanvas").addEventListener("pointerdown", startBlueprintPan);
+      $("blueprintCanvas").addEventListener("pointermove", moveBlueprintPan);
+      $("blueprintCanvas").addEventListener("pointerup", endBlueprintPan);
+      $("blueprintCanvas").addEventListener("pointercancel", endBlueprintPan);
+      $("blueprintCanvas").addEventListener(
+        "wheel",
+        (event) => {
+          event.preventDefault();
+          const point = blueprintCanvasPoint(event);
+          const delta = event.deltaY > 0 ? -0.15 : 0.15;
+          setBlueprintZoom((state.blueprint.view.scale || 1) + delta, point.x, point.y);
+        },
+        { passive: false }
+      );
+      $("blueprintCanvas").addEventListener("click", (event) => {
+        if (state.blueprint.view.dragMoved) {
+          state.blueprint.view.dragMoved = false;
+          return;
+        }
+        const zone = blueprintZoneAtEvent(event);
+        if (!zone) return;
+        state.blueprint.selectedZoneId = zone.id;
+        renderBlueprintDetail(zone);
+        drawBlueprint();
+        setBlueprintPage("detail");
+      });
+      document.addEventListener("fullscreenchange", () => {
+        updateCanvasFullscreenLabels();
+        if (!$("warehouseMapPanel").classList.contains("hidden")) drawWarehouseMap();
+        if (!$("blueprintPanel").classList.contains("hidden")) drawBlueprint();
+      });
+      $("warehouseMapSelect").addEventListener("change", () => {
+        state.map.selectedWarehouseId = $("warehouseMapSelect").value;
+        resetWarehouseMapView(false);
+        summarizeWarehouseMap();
+        drawWarehouseMap();
+      });
+      $("warehouseMapCanvas").addEventListener("pointerdown", startWarehouseMapPan);
+      $("warehouseMapCanvas").addEventListener("pointermove", moveWarehouseMapPan);
+      $("warehouseMapCanvas").addEventListener("pointerup", endWarehouseMapPan);
+      $("warehouseMapCanvas").addEventListener("pointercancel", endWarehouseMapPan);
+      $("warehouseMapCanvas").addEventListener(
+        "wheel",
+        (event) => {
+          event.preventDefault();
+          const point = warehouseMapCanvasPoint(event);
+          const delta = event.deltaY > 0 ? -0.15 : 0.15;
+          setWarehouseMapZoom((state.map.view.scale || 1) + delta, point.x, point.y);
+        },
+        { passive: false }
+      );
+      $("warehouseMapCanvas").addEventListener("mousemove", (event) => {
+        if (state.map.view.isDragging) return;
+        showMapInspector(mapLocationAtEvent(event));
+      });
+      $("warehouseMapCanvas").addEventListener("mouseleave", () => showMapInspector(null));
+      window.addEventListener("resize", () => {
+        if (!$("warehouseMapPanel").classList.contains("hidden")) drawWarehouseMap();
+        if (!$("blueprintPanel").classList.contains("hidden")) drawBlueprint();
+      });
+
+      async function runExplicitTool(toolName, args) {
+        const response = await fetch("/api/tools/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: state.sessionId, tool_name: toolName, args }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Tool failed");
+        renderOutput(payload);
+      }
+
+      const SETTINGS_CONFIG = {
+        "receiving-codes": {
+          tool: "settings.receiving_codes.preview",
+          bodyKey: "settings",
+          preset: { prefix: "BOX", sequence_padding: 3 },
+        },
+        "receiving-labels": {
+          tool: "settings.receiving_labels.preview",
+          bodyKey: "settings",
+          preset: { fields: ["order_number", "sku_code", "tracking_number"] },
+        },
+        "client-profile": {
+          tool: "settings.client_profile.preview",
+          idKey: "client_id",
+          bodyKey: "changes",
+          idPlaceholder: "Client ID",
+          preset: { contact_email: "ops@example.com" },
+        },
+        sku: {
+          tool: "settings.sku.preview",
+          idKey: "sku_id",
+          bodyKey: "changes",
+          idPlaceholder: "SKU ID",
+          preset: { name: "Updated SKU" },
+        },
+        "warehouse-location": {
+          tool: "settings.warehouse_location.preview",
+          idKey: "location_id",
+          bodyKey: "changes",
+          idPlaceholder: "Location ID",
+          preset: { current_status: "blocked" },
+        },
+        "billing-rate-card": {
+          tool: "settings.billing_rate_card.preview",
+          idKey: "rate_card_id",
+          bodyKey: "changes",
+          idPlaceholder: "Rate card ID",
+          preset: { rules: { storage_per_pallet_day: 1.5 } },
+        },
+      };
+
+      function settingPreviewPayload(value) {
+        const toolResult = value && value.tool_result;
+        if (!toolResult) return null;
+        if (toolResult.result && typeof toolResult.result === "object") return toolResult.result;
+        return toolResult;
+      }
+
+      function formatValue(value) {
+        return escapeHtml(
+          typeof value === "object" && value !== null ? JSON.stringify(value) : value
+        );
+      }
+
+      function renderSettingsPreview(value) {
+        const preview = settingPreviewPayload(value);
+        const target = $("settingsDiff");
+        if (!preview || !Array.isArray(preview.changes)) {
+          target.classList.add("hidden");
+          target.innerHTML = "";
+          return;
+        }
+        state.settings.latestPreview = preview;
+        state.settings.latestIdempotencyKey =
+          value.confirmation_card && preview.evidence_id
+            ? `settings-${preview.evidence_id}`
+            : null;
+        const rows = preview.changes
+          .map(
+            (change) => `
+              <tr>
+                <td>${escapeHtml(change.field)}</td>
+                <td><code>${formatValue(change.current ?? change.before)}</code></td>
+                <td><code>${formatValue(change.proposed ?? change.after)}</code></td>
+              </tr>`
+          )
+          .join("");
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <strong>${escapeHtml(preview.action || "Settings preview")}</strong>
+          <div>${escapeHtml(preview.entity?.type || preview.target?.type || "entity")} /
+            ${escapeHtml(preview.entity?.id || preview.target?.id || "current tenant")}</div>
+          <table>
+            <thead><tr><th>Field</th><th>Current</th><th>Proposed</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="3">No changes</td></tr>'}</tbody>
+          </table>
+          <div>Affected: ${escapeHtml((preview.affected_workflows || []).join(", ") || "none")}</div>
+          <div>Evidence: ${escapeHtml(preview.evidence_id || "preview only")}${evidenceButton(preview.evidence_id)}</div>
+        `;
+        bindEvidenceButtons(target);
+      }
+
+      function renderSettingsResult(value) {
+        const target = $("settingsResult");
+        if (!value || !value.confirmed) {
+          if (!value || value.confirmation_card) return;
+          target.classList.add("hidden");
+          target.innerHTML = "";
+          return;
+        }
+        const result = value.result || {};
+        target.classList.remove("hidden");
+        target.innerHTML = `
+          <strong>Confirmed</strong>
+          <div>Endpoint: ${escapeHtml(value.endpoint)}</div>
+          <div>Idempotency: ${escapeHtml(value.idempotency_key)}</div>
+          <div>Evidence: ${escapeHtml(result.evidence_id || "n/a")}${evidenceButton(result.evidence_id)}</div>
+          <div>Changed: ${escapeHtml((result.changed_fields || []).join(", ") || "none")}</div>
+          <div>Next: ${escapeHtml(result.next_action || "review audit")}</div>
+        `;
+        bindEvidenceButtons(target);
+      }
+
+      function selectedSettingsConfig() {
+        return SETTINGS_CONFIG[$("settingsCategory").value] || SETTINGS_CONFIG["receiving-codes"];
+      }
+
+      function refreshSettingsForm() {
+        const config = selectedSettingsConfig();
+        state.settings.category = $("settingsCategory").value;
+        state.settings.latestPreview = null;
+        state.settings.latestIdempotencyKey = null;
+        $("settingsEntityId").classList.toggle("hidden", !config.idKey);
+        $("settingsEntityId").placeholder = config.idPlaceholder || "Entity ID";
+        $("settingsChangesJson").value = JSON.stringify(config.preset, null, 2);
+        refreshSimpleSettingsControls(config.preset);
+        $("settingsDiff").classList.add("hidden");
+        $("settingsResult").classList.add("hidden");
+        renderConfirmation(null);
+      }
+
+      function simpleSettingsCategory() {
+        const category = $("settingsCategory").value;
+        return [
+          "receiving-codes",
+          "receiving-labels",
+          "client-profile",
+          "sku",
+          "warehouse-location",
+        ].includes(category)
+          ? category
+          : null;
+      }
+
+      function refreshSimpleSettingsControls(settings) {
+        const category = simpleSettingsCategory();
+        $("settingsSimpleControls").classList.toggle("hidden", !category);
+        $("receivingCodeControls").classList.toggle("hidden", category !== "receiving-codes");
+        $("receivingLabelControls").classList.toggle("hidden", category !== "receiving-labels");
+        $("clientProfileControls").classList.toggle("hidden", category !== "client-profile");
+        $("skuControls").classList.toggle("hidden", category !== "sku");
+        $("warehouseLocationControls").classList.toggle(
+          "hidden",
+          category !== "warehouse-location"
+        );
+        const legends = {
+          "receiving-codes": "Receiving code",
+          "receiving-labels": "Receiving label fields",
+          "client-profile": "Client profile",
+          sku: "SKU master data",
+          "warehouse-location": "Warehouse location",
+        };
+        $("settingsSimpleLegend").textContent = legends[category] || "Simple fields";
+        if (category === "receiving-codes") {
+          $("receivingCodePrefix").value = settings.prefix || "";
+          $("receivingCodePadding").value = settings.sequence_padding || "";
+        }
+        if (category === "receiving-labels") {
+          $("receivingLabelFields").value = (settings.fields || []).join("\n");
+        }
+        if (category === "client-profile") {
+          $("clientProfileEmail").value = settings.contact_email || "";
+          $("clientProfilePhone").value = settings.contact_phone || "";
+        }
+        if (category === "sku") {
+          $("skuName").value = settings.name || "";
+          $("skuBarcode").value = settings.barcode || "";
+        }
+        if (category === "warehouse-location") {
+          $("warehouseLocationStatus").value = settings.current_status || "available";
+          $("warehouseLocationType").value = settings.location_type || "";
+        }
+      }
+
+      function settingsObjectFromJson() {
+        try {
+          return JSON.parse($("settingsChangesJson").value || "{}");
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function updateAdvancedJsonFromSimpleSettings() {
+        const category = simpleSettingsCategory();
+        if (!category) return;
+        const current = settingsObjectFromJson() || {};
+        let next = current;
+        if (category === "receiving-codes") {
+          next = {
+            ...current,
+            prefix: $("receivingCodePrefix").value.trim(),
+            sequence_padding: Number($("receivingCodePadding").value || 0),
+          };
+        }
+        if (category === "receiving-labels") {
+          next = {
+            ...current,
+            fields: $("receivingLabelFields")
+              .value.split(/\n|,/)
+              .map((field) => field.trim())
+              .filter(Boolean),
+          };
+        }
+        if (category === "client-profile") {
+          next = {
+            ...current,
+            contact_email: $("clientProfileEmail").value.trim(),
+            contact_phone: $("clientProfilePhone").value.trim(),
+          };
+        }
+        if (category === "sku") {
+          next = {
+            ...current,
+            name: $("skuName").value.trim(),
+            barcode: $("skuBarcode").value.trim(),
+          };
+        }
+        if (category === "warehouse-location") {
+          next = {
+            ...current,
+            current_status: $("warehouseLocationStatus").value,
+            location_type: $("warehouseLocationType").value.trim(),
+          };
+        }
+        $("settingsChangesJson").value = JSON.stringify(next, null, 2);
+        state.settings.latestPreview = null;
+        state.settings.latestIdempotencyKey = null;
+        renderConfirmation(null);
+      }
+
+      function settingsArgsFromForm() {
+        const config = selectedSettingsConfig();
+        let changes;
+        try {
+          changes = JSON.parse($("settingsChangesJson").value || "{}");
+        } catch (error) {
+          throw new Error("Settings JSON is invalid");
+        }
+        const args = { [config.bodyKey]: changes };
+        if (config.idKey) {
+          const idValue = $("settingsEntityId").value.trim();
+          if (!idValue) throw new Error(`${config.idPlaceholder || "Entity ID"} is required`);
+          args[config.idKey] = idValue;
+        }
+        return args;
+      }
+
+      $("settingsCategory").addEventListener("change", refreshSettingsForm);
+      $("settingsPresetBtn").addEventListener("click", (event) => {
+        event.preventDefault();
+        refreshSettingsForm();
+      });
+      $("settingsChangesJson").addEventListener("input", () => {
+        state.settings.latestPreview = null;
+        state.settings.latestIdempotencyKey = null;
+        const settings = settingsObjectFromJson();
+        if (settings) refreshSimpleSettingsControls(settings);
+        renderConfirmation(null);
+      });
+      $("receivingCodePrefix").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("receivingCodePadding").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("receivingLabelFields").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("clientProfileEmail").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("clientProfilePhone").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("skuName").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("skuBarcode").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("warehouseLocationStatus").addEventListener("change", updateAdvancedJsonFromSimpleSettings);
+      $("warehouseLocationType").addEventListener("input", updateAdvancedJsonFromSimpleSettings);
+      $("settingsEntityId").addEventListener("input", () => {
+        state.settings.latestPreview = null;
+        state.settings.latestIdempotencyKey = null;
+        renderConfirmation(null);
+      });
+      $("settingsPreviewBtn").addEventListener("click", async () => {
+        $("settingsPreviewBtn").disabled = true;
+        try {
+          const config = selectedSettingsConfig();
+          await runExplicitTool(config.tool, settingsArgsFromForm());
+        } catch (error) {
+          showStatus($("agentStatus"), error.message, true);
+        } finally {
+          $("settingsPreviewBtn").disabled = false;
+        }
+      });
+
+      document.querySelectorAll("[data-prompt]").forEach((button) => {
+        button.addEventListener("click", () => {
+          $("prompt").value = button.dataset.prompt;
+          $("prompt").focus();
+        });
+      });
+
+      loadSkills().catch(() => {});
+      loadConfig().catch(() => {});
+      refreshSettingsForm();
+    </script>
+  </body>
+</html>

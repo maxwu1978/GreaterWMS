@@ -1,0 +1,108 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+backend/uv.lock
+wms-agent/uv.lock
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+!**/.env*.example
+
+# Database
+*.db
+
+# Docker
+docker-compose.override.yml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+local-agent/local-agent-audit.jsonl
+tmp/
+tmp/local-agent/
+
+# Vercel local project metadata
+.vercel/
+
+# Capacitor / Xcode local build output
+frontend/ios/App/App/public/
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+frontend/ios/App/DerivedData/
+frontend/ios/App/*.xcworkspace/xcuserdata/
+frontend/ios/App/*.xcodeproj/xcuserdata/
+frontend/ios/App/*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# Claude
+.claude/
+survey_responses/
+
+# Project Codex skill
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/wms-roundtable/
+!.codex/skills/wms-roundtable/SKILL.md
+!.codex/skills/wms-agent-operator/
+!.codex/skills/wms-agent-operator/SKILL.md
+!.codex/skills/wms-receiving-operator/
+!.codex/skills/wms-receiving-operator/SKILL.md
+!.codex/skills/wms-fulfillment-operator/
+!.codex/skills/wms-fulfillment-operator/SKILL.md
+!.codex/skills/wms-inventory-operator/
+!.codex/skills/wms-inventory-operator/SKILL.md
+!.codex/skills/wms-release-gate-verifier/
+!.codex/skills/wms-release-gate-verifier/SKILL.md
+!.codex/skills/wms-recovery-debugger/
+!.codex/skills/wms-recovery-debugger/SKILL.md
+!.codex/skills/wms-local-agent-operator/
+!.codex/skills/wms-local-agent-operator/SKILL.md
+!.codex/skills/wms-agv-layout-planner/
+!.codex/skills/wms-agv-layout-planner/SKILL.md
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
+
+# Local customer AGV/WCS source files and scratch workspace
+# (root-anchored: on case-insensitive filesystems a bare "AGV/" also matches
+#  frontend/src/modules/agv/ and silently blocks git add)
+/AGV/
+
+# Session/scratch artifacts (never commit)
+.playwright-cli/
+output/
+project/
