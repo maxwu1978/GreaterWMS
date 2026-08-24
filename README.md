@@ -9,7 +9,8 @@ different source tree.
 
 - Active Git remote after migration: https://github.com/maxwu1978/GreaterWMS.git
 - Migration source: https://github.com/maxwu1978/wms-quickstart.git
-- Deployment branch: main
+- Migrated-system branch: main (staging and future cutover target)
+- Current legacy production branch: codex/cli-install-info
 - Source layout: backend/ (FastAPI), frontend/ (React/Vite), wms-agent/
   (local governed agent), mcp-server/ (MCP adapter), agv-simulator/
   (AGV/WCS sandbox)
@@ -110,6 +111,12 @@ The deployment declaration is render.yaml: the backend is a Render Docker web
 service rooted at backend, and the AGV sandbox is a separate service rooted at
 agv-simulator. The frontend is configured for Vercel in frontend/vercel.json.
 
+The current environment and immutable release mapping is recorded in
+`release/environment-manifest.json` and explained in
+`docs/43-environment-release-manifest.md`. Do not infer the live production
+version from `main`: the current customer-facing service is still the legacy
+Django pair until the coordinated cutover.
+
 Operational release procedures are in:
 
 - docs/10-render-deploy-operations.md
@@ -124,7 +131,8 @@ replace that verification.
 
 ## Handoff Rules
 
-1. Treat main and render.yaml as the deployment source of truth.
+1. Treat `release/environment-manifest.json` as the environment/version source
+   of truth, and treat `main` and `render.yaml` as the migrated-system source.
 2. Do not use archived docs or old GreaterWMS CLI examples as current commands.
 3. Use a least-privilege tenant account for Agent/MCP work; do not place secrets
    in source, audit logs, or committed examples.

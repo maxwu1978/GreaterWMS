@@ -1,4 +1,4 @@
-name: Render Backend Deploy
+name: Release Configuration Gate
 
 on:
   push:
@@ -6,41 +6,46 @@ on:
     paths:
       - "backend/**"
       - "render.yaml"
+      - "release/**"
+      - "tools/verify_release_manifest.py"
       - ".github/workflows/render-backend-deploy.yml"
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Full commit SHA currently deployed to migrated staging"
+        required: true
+        type: string
+      health_url:
+        description: "Staging health URL"
+        required: false
+        default: "https://wms-quickstart-staging.onrender.com/health"
+        type: string
 
 jobs:
-  verify-render-auto-deploy:
+  verify-release-manifest:
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for Render auto deploy
-        env:
-          EXPECTED_SHA: ${{ github.sha }}
-          # The active migrated service is the explicitly managed staging
-          # target. Production remains on the legacy Django service until the
-          # frontend, database, and API cutover are performed together.
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://wms-quickstart-staging.onrender.com/health' }}
+      - uses: actions/checkout@v6
+
+      - name: Validate environment mapping
         run: |
           set -euo pipefail
+          python3 tools/verify_release_manifest.py
 
-          for attempt in $(seq 1 30); do
-            body="$(curl --fail --silent --show-error "$HEALTH_URL" || true)"
-            if [ -n "$body" ]; then
-              echo "$body"
-              live_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("build_sha", ""))' <<< "$body" 2>/dev/null || true)"
-
-              if [ "$live_sha" = "$EXPECTED_SHA" ]; then
-                echo "Render is live at $EXPECTED_SHA"
-                exit 0
-              fi
-
-              echo "Attempt $attempt: live build_sha is $live_sha, waiting for $EXPECTED_SHA"
-            else
-              echo "Attempt $attempt: health endpoint did not return a body"
-            fi
-
-            sleep 20
-          done
-
-          echo "Render did not report $EXPECTED_SHA from $HEALTH_URL in time"
-          exit 1
+  verify-staging-health:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify explicitly deployed staging commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          HEALTH_URL: ${{ inputs.health_url }}
+        run: |
+          set -euo pipefail
+          body="$(curl --fail --silent --show-error "$HEALTH_URL")"
+          echo "$body"
+          live_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("build_sha", ""))' <<< "$body")"
+          if [ "$live_sha" != "$EXPECTED_SHA" ]; then
+            echo "Expected $EXPECTED_SHA but staging reports $live_sha" >&2
+            exit 1
+          fi

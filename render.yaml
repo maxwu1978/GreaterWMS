@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: wms-quickstart
+    name: wms-quickstart-staging
     runtime: docker
     repo: https://github.com/maxwu1978/GreaterWMS
     branch: main

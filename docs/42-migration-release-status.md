@@ -6,7 +6,7 @@ Snapshot: 2026-08-25
 
 - Active repository: `https://github.com/maxwu1978/GreaterWMS.git`
 - Active branch: `main`
-- Current migration commit: `99b2dbe7c559a3be1d6e241c8d4a940c18ad3022`
+- Current migration commit: `36ae74e651076df03afed755a69621bb05da0588`
 - Source snapshot: `https://github.com/maxwu1978/wms-quickstart.git`
 - Local source remote: `quickstart-source`
 - Local active remote: `origin` (`GreaterWMS`)
@@ -53,8 +53,8 @@ insert-only conflict behavior so it can be safely re-run or rejected.
 - Repository: `maxwu1978/GreaterWMS`
 - Branch: `main`
 - Root: `backend`
-- Live deploy: `dep-da67rvvqj5pc73er0jkg`
-- Live commit: `99b2dbe7c559a3be1d6e241c8d4a940c18ad3022`
+- Live deploy: `dep-da68oaf10e5c73eieq3g`
+- Live commit: `36ae74e651076df03afed755a69621bb05da0588`
 - Health: `https://wms-quickstart-staging.onrender.com/health`
 
 The health response was verified after deployment and returned `status=ok`,
@@ -97,8 +97,10 @@ already pushed and running in staging.
 
 ## Next Release Gate
 
-Before production cutover, do not deploy from `quickstart-source`, either
-legacy branch, or `codex/cli-install-info`. Use only `origin/main`, record the
-target database, and deploy backend and frontend as one release. If rollback is
-required before cutover, use `legacy/django-production-20260824`, not the old
-baseline branch.
+Before production cutover, do not deploy from `quickstart-source` or the old
+`legacy/greaterwms-original-20260824` baseline. The current production
+rollback point is the immutable tag `prod-legacy-2026-08-24` at
+`7592afe87ec94309276d9181103a504f3d91fc32`. The migrated system uses
+`origin/main`; record the target database and deploy backend and frontend as
+one release. See `release/environment-manifest.json` for the authoritative
+environment mapping.

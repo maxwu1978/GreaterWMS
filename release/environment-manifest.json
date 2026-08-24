@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-08-25",
+  "repository": "https://github.com/maxwu1978/GreaterWMS.git",
+  "environments": {
+    "legacy_production": {
+      "purpose": "Current customer-facing GreaterWMS service",
+      "render_service_id": "srv-d9v6ahvqj5pc73d4spp0",
+      "render_service_name": "greaterwms-production",
+      "frontend_url": "https://app.maxsmartwms.online",
+      "api_url": "https://api.maxsmartwms.online",
+      "git_branch": "codex/cli-install-info",
+      "verified_commit": "7592afe87ec94309276d9181103a504f3d91fc32",
+      "release_tag": "prod-legacy-2026-08-24",
+      "database_role": "read_only_migration_source",
+      "deploy_policy": "Do not deploy main here until the coordinated cutover is approved."
+    },
+    "migrated_staging": {
+      "purpose": "FastAPI/React migration rehearsal and validation",
+      "render_service_id": "srv-d7qgk4rbc2fs73fsjbo0",
+      "render_service_name": "wms-quickstart-staging",
+      "health_url": "https://wms-quickstart-staging.onrender.com/health",
+      "git_branch": "main",
+      "verified_commit": "36ae74e651076df03afed755a69621bb05da0588",
+      "database_target": "WMS-VM",
+      "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."
+    }
+  },
+  "invariants": [
+    "legacy_production and migrated_staging must never share a deployment target or customer traffic.",
+    "A production release must be identified by an immutable commit and release tag.",
+    "main is the source branch for the migrated system, not the current legacy production service.",
+    "Production data is read-only during migration rehearsal; target writes require a rollback plan.",
+    "Backend, frontend, API domain, and database cutover must be approved as one release."
+  ]
+}
