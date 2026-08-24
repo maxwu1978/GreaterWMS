@@ -11,6 +11,7 @@ the operational source of truth.
 | Document | Use |
 | --- | --- |
 | `41-project-handoff.md` | Current repository identity, architecture, startup, deployment, workflow, and takeover procedure |
+| `42-migration-release-status.md` | Current QuickStart-to-GreaterWMS migration, staging deployment, and production cutover status |
 | `project-plan.md` | Chronological project decisions, release evidence, and current closure status |
 | `13-engineering-environment.md` | Canonical workspace, production baseline, and local engineering hygiene |
 | `10-render-deploy-operations.md` | Render backend deployment, production environment, and email provider operations |

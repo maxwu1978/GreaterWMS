@@ -16,7 +16,10 @@ jobs:
       - name: Wait for Render auto deploy
         env:
           EXPECTED_SHA: ${{ github.sha }}
-          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://wms-quickstart.onrender.com/health' }}
+          # The active migrated service is the explicitly managed staging
+          # target. Production remains on the legacy Django service until the
+          # frontend, database, and API cutover are performed together.
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://wms-quickstart-staging.onrender.com/health' }}
         run: |
           set -euo pipefail
 
