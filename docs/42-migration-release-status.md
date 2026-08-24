@@ -6,7 +6,8 @@ Snapshot: 2026-08-25
 
 - Active repository: `https://github.com/maxwu1978/GreaterWMS.git`
 - Active branch: `main`
-- Current migration commit: `36ae74e651076df03afed755a69621bb05da0588`
+- Migration implementation commit: `36ae74e651076df03afed755a69621bb05da0588`
+- Current main/release commit: `dc4e80fb9e773715708d1858251f5d6e6fe4d78d`
 - Source snapshot: `https://github.com/maxwu1978/wms-quickstart.git`
 - Local source remote: `quickstart-source`
 - Local active remote: `origin` (`GreaterWMS`)
@@ -54,7 +55,7 @@ insert-only conflict behavior so it can be safely re-run or rejected.
 - Branch: `main`
 - Root: `backend`
 - Live deploy: `dep-da68oaf10e5c73eieq3g`
-- Live commit: `36ae74e651076df03afed755a69621bb05da0588`
+- Live commit: `dc4e80fb9e773715708d1858251f5d6e6fe4d78d`
 - Health: `https://wms-quickstart-staging.onrender.com/health`
 
 The health response was verified after deployment and returned `status=ok`,
