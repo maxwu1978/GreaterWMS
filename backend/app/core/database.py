@@ -12,7 +12,7 @@ from contextvars import ContextVar
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, ORMExecuteState, Session
 
 from app.core.config import settings
 
@@ -105,37 +105,55 @@ _TENANT_TABLES = {
     "return_order_lines",
     "kits",
     "kit_components",
+    "pack_list_documents",
+    "pack_list_lines",
 }
 
 
-if _is_sqlite:
-    from sqlalchemy.orm import ORMExecuteState, Session
+@event.listens_for(Session, "do_orm_execute")
+def _inject_tenant_filter(execute_state: ORMExecuteState):
+    """
+    Automatically inject WHERE tenant_id = :tid on all SELECT queries
+    for tenant-scoped tables when using SQLite.
 
-    @event.listens_for(Session, "do_orm_execute")
-    def _inject_tenant_filter(execute_state: ORMExecuteState):
-        """
-        Automatically inject WHERE tenant_id = :tid on all SELECT queries
-        for tenant-scoped tables when using SQLite (no RLS).
-        """
-        if not execute_state.is_select:
-            return
+    Register this listener unconditionally and inspect the bound session's
+    dialect at execution time. Tests and local tools commonly bind a SQLite
+    session while the application module itself is configured for PostgreSQL.
+    """
+    if not execute_state.is_select or execute_state.session.get_bind().dialect.name != "sqlite":
+        return
 
-        tenant_id = get_current_tenant_id()
-        if not tenant_id:
-            return  # platform admin or unauthenticated — no filter
+    tenant_id = get_current_tenant_id()
+    if not tenant_id:
+        return  # platform admin or unauthenticated — no filter
 
-        # Check if any of the queried entities have tenant_id
-        try:
-            for mapper in execute_state.all_mappers:
-                table_name = mapper.local_table.name
-                if table_name in _TENANT_TABLES:
-                    tenant_col = mapper.local_table.c.get("tenant_id")
-                    if tenant_col is not None:
-                        execute_state.statement = execute_state.statement.where(
-                            tenant_col == tenant_id
-                        )
-        except Exception:
-            pass  # If we can't determine mappers, skip filtering
+    # Check if any of the queried entities have tenant_id
+    try:
+        for mapper in execute_state.all_mappers:
+            table_name = mapper.local_table.name
+            if table_name in _TENANT_TABLES:
+                tenant_col = mapper.local_table.c.get("tenant_id")
+                if tenant_col is not None:
+                    execute_state.statement = execute_state.statement.where(tenant_col == tenant_id)
+    except Exception:
+        pass  # If we can't determine mappers, skip filtering
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_sqlite_tenant_writes(session: Session, _flush_context, _instances) -> None:
+    """Reject cross-tenant ORM writes when the local database is SQLite."""
+    if session.get_bind().dialect.name != "sqlite":
+        return
+
+    tenant_id = get_current_tenant_id()
+    if not tenant_id or get_is_platform_admin():
+        return
+
+    for collection in (session.new, session.dirty, session.deleted):
+        for instance in collection:
+            instance_tenant_id = getattr(instance, "tenant_id", None)
+            if instance_tenant_id is not None and instance_tenant_id != tenant_id:
+                raise ValueError("Cross-tenant write rejected by SQLite tenant isolation")
 
 
 # Context var for platform admin bypass

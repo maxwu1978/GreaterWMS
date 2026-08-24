@@ -267,6 +267,7 @@ WCS_TASK_BINDING_INDEX_SQL_STATEMENTS = [
 ]
 
 AGENT_SCHEMA_RLS_TABLES = ("agent_evidence", "wcs_task_bindings")
+PACK_LIST_SCHEMA_RLS_TABLES = ("pack_list_documents", "pack_list_lines")
 
 
 async def _ensure_postgres_tenant_rls(conn, table_name: str) -> None:
@@ -455,6 +456,8 @@ async def ensure_schema_and_seed_defaults() -> None:
             for index_sql in WCS_TASK_BINDING_INDEX_SQL_STATEMENTS:
                 await conn.execute(text(index_sql))
             for table_name in AGENT_SCHEMA_RLS_TABLES:
+                await _ensure_postgres_tenant_rls(conn, table_name)
+            for table_name in PACK_LIST_SCHEMA_RLS_TABLES:
                 await _ensure_postgres_tenant_rls(conn, table_name)
             await conn.execute(
                 text(
