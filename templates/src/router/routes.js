@@ -43,7 +43,7 @@ const routes = [{
         const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
         const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
         const auth = String(LocalStorage.getItem('auth') || '').trim()
-        if (auth === '1' && (role === 'admin' || mode === 'admin')) {
+        if (auth === '1' && ['admin', 'manager', 'warehouse'].includes(role) && (mode !== 'admin' || role === 'admin')) {
           next()
         } else {
           next({ name: 'dashboard' })

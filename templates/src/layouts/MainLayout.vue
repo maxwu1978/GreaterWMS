@@ -315,7 +315,7 @@
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
           <q-item
-            v-if="isPlatformAdmin"
+            v-if="canViewMail2Task"
             clickable
             :to="{ name: 'source-intake' }"
             @click="linkChange('source-intake')"
@@ -818,6 +818,10 @@ export default {
     isPlatformAdmin () {
       return String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
         String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1'
+    },
+    canViewMail2Task () {
+      const role = String(this.staff_type || '').trim().toLowerCase()
+      return this.authin === '1' && ['admin', 'manager', 'warehouse'].includes(role)
     }
   },
   methods: {
