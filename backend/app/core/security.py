@@ -29,6 +29,10 @@ class UserPermission(StrEnum):
     BILLING_MANAGE = "billing.manage"
     PLANNER_MANAGE = "planner.manage"
     PORTAL_VIEW = "portal.view"
+    MAILTASK_MANAGE = "mailtask.manage"
+    MAILTASK_EXECUTE = "mailtask.execute"
+    MAILTASK_APPROVE_OUTBOUND = "mailtask.approve_outbound"
+    RECONCILIATION_VIEW = "reconciliation.view"
 
 
 class TokenPayload(BaseModel):
@@ -99,12 +103,17 @@ def default_permissions_for_role(role: UserRole | str) -> list[str]:
             UserPermission.USERS_MANAGE.value,
             UserPermission.BILLING_MANAGE.value,
             UserPermission.PLANNER_MANAGE.value,
+            UserPermission.MAILTASK_MANAGE.value,
+            UserPermission.MAILTASK_EXECUTE.value,
+            UserPermission.MAILTASK_APPROVE_OUTBOUND.value,
+            UserPermission.RECONCILIATION_VIEW.value,
         ]
     if normalized_role == UserRole.OPERATOR:
         return [
             UserPermission.RECEIVING_EXECUTE.value,
             UserPermission.PICKING_EXECUTE.value,
             UserPermission.SHIPPING_EXECUTE.value,
+            UserPermission.MAILTASK_EXECUTE.value,
         ]
     if normalized_role == UserRole.CLIENT_VIEWER:
         return [UserPermission.PORTAL_VIEW.value]

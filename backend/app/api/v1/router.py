@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     inventory,
     inventory_rules,
     kits,
+    mailtasks,
     maintenance,
     onboarding,
     operations,
@@ -92,6 +93,7 @@ api_v1_router.include_router(integrations.router, prefix="/integrations", tags=[
 api_v1_router.include_router(survey.router, prefix="/survey", tags=["Survey"])
 api_v1_router.include_router(agv.router, prefix="/agv", tags=["AGV"])
 api_v1_router.include_router(agent.router, prefix="/agent", tags=["Agent"])
+api_v1_router.include_router(mailtasks.router, prefix="/mailtasks", tags=["MailTask"])
 api_v1_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
 # Destructive ops/seed toolkit — dev-only by default. Production must opt in
 # explicitly (MAINTENANCE_API_ENABLED=true) for UAT bootstrap/cleanup windows.

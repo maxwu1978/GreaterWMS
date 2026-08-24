@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 465
     SMTP_FROM_EMAIL: str = ""
 
+    # MailTask intake
+    # The Agent Skill reads the mailbox. This service token only permits the
+    # Skill to submit a structured, tenant-scoped intake payload.
+    MAILTASK_INGEST_ENABLED: bool = False
+    MAILTASK_INGEST_TOKEN: str = ""
+    MAILTASK_INGEST_TENANT_ID: str = ""
+
     # External agent team
     MINIMAX_API_KEY: str = ""
     MINIMAX_BASE_URL: str = "https://api.minimaxi.com/v1"

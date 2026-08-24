@@ -14,12 +14,15 @@ Dependency order in an endpoint:
   3. endpoint logic → queries run under correct RLS context
 """
 
+import hmac
 import time
+from datetime import UTC, datetime
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.database import (
     apply_session_context,
     async_session_factory,
@@ -40,6 +43,46 @@ bearer_scheme = HTTPBearer()
 # In-memory subscription cache with 5-minute TTL
 _CACHE_TTL = 300
 _subscription_cache: dict[str, dict] = {}
+
+
+async def get_mailtask_ingest_context(
+    x_mailtask_token: str | None = Header(default=None, alias="X-MailTask-Token"),
+) -> TokenPayload:
+    """Authenticate the read-only mailbox Skill's controlled intake boundary.
+
+    This is deliberately separate from human JWT authentication. The token is
+    tenant-bound, can be revoked by rotating the deployment secret, and is
+    disabled by default until the mailbox Skill is ready for a staging run.
+    """
+    if (
+        not settings.MAILTASK_INGEST_ENABLED
+        or not settings.MAILTASK_INGEST_TOKEN
+        or not settings.MAILTASK_INGEST_TENANT_ID
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MailTask intake is not enabled",
+        )
+    if not x_mailtask_token or not hmac.compare_digest(
+        x_mailtask_token.strip(), settings.MAILTASK_INGEST_TOKEN.strip()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MailTask intake token",
+        )
+
+    set_current_tenant_id(settings.MAILTASK_INGEST_TENANT_ID)
+    set_is_platform_admin(False)
+    return TokenPayload(
+        sub="service:mailtask-skill",
+        tenant_id=settings.MAILTASK_INGEST_TENANT_ID,
+        role=UserRole.OPERATOR,
+        permissions=[
+            "mailtask.execute",
+            "mailtask.manage",
+        ],
+        exp=datetime.now(UTC),
+    )
 
 
 async def get_current_user(

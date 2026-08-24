@@ -107,6 +107,10 @@ _TENANT_TABLES = {
     "kit_components",
     "pack_list_documents",
     "pack_list_lines",
+    "mail_messages",
+    "mail_tasks",
+    "mail_attachments",
+    "mail_task_approvals",
 }
 
 
