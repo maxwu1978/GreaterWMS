@@ -3,8 +3,8 @@
     <q-card flat bordered class="source-intake-card">
       <q-card-section class="row items-center q-pb-sm">
         <div>
-          <div class="text-h6 text-weight-bold">Source Intake</div>
-          <div class="text-caption text-grey-7">External instructions and email evidence</div>
+          <div class="text-h6 text-weight-bold">Mail2Task</div>
+          <div class="text-caption text-grey-7">Email evidence, task routing and WMS handoff</div>
         </div>
         <q-space />
         <q-btn flat round icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
@@ -14,10 +14,10 @@
 
       <q-card-section class="row items-center q-col-gutter-sm q-py-sm">
         <div class="col-12 col-sm-4 col-md-3">
-          <q-select v-model="status" dense outlined clearable emit-value map-options :options="statusOptions" label="Status" @input="load" />
+          <q-select v-model="status" dense outlined clearable emit-value map-options :options="statusOptions" label="Task status" @input="load" />
         </div>
         <div class="col-12 col-sm-4 col-md-3">
-          <q-select v-model="operation" dense outlined clearable emit-value map-options :options="operationOptions" label="Operation" @input="load" />
+          <q-select v-model="operation" dense outlined clearable emit-value map-options :options="operationOptions" label="Flow" @input="load" />
         </div>
         <div class="col-12 col-sm-4 col-md-4">
           <q-input v-model="search" dense outlined clearable label="Search" @keyup.enter="load" />
@@ -45,7 +45,7 @@
         :loading="loading"
         :pagination.sync="pagination"
         :rows-per-page-options="[0]"
-        no-data-label="No source records"
+        no-data-label="No Mail2Task records"
       >
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
@@ -55,7 +55,10 @@
         </template>
         <template v-slot:body-cell-document="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ documentLabel(props.row.document_type) }}</div>
+            <q-badge outline color="primary">{{ taskTypeLabel(props.row) }}</q-badge>
+            <div class="text-caption text-grey-7 ellipsis" :title="documentLabel(props.row.document_type)">
+              {{ compactText(documentLabel(props.row.document_type), 22) }}
+            </div>
           </q-td>
         </template>
         <template v-slot:body-cell-source="props">
@@ -90,6 +93,11 @@
             </div>
           </q-td>
         </template>
+        <template v-slot:body-cell-owner="props">
+          <q-td :props="props">
+            <div class="text-weight-medium">{{ ownerLabel(props.row.owner_role) }}</div>
+          </q-td>
+        </template>
         <template v-slot:body-cell-next_action="props">
           <q-td
             :props="props"
@@ -111,15 +119,15 @@
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-h6">Source Record {{ detail ? detail.id : '' }}</div>
-            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }}</div>
+            <div class="text-h6">Mail2Task {{ detail ? detail.id : '' }}</div>
+            <div v-if="detail" class="text-caption text-grey-7">Email evidence {{ detail.source_evidence_id }}</div>
           </div>
           <q-space />
           <q-btn flat round dense icon="close" v-close-popup aria-label="Close" />
         </q-card-section>
         <q-separator />
         <q-card-section v-if="detail">
-          <div class="source-intake-section-title">Source</div>
+          <div class="source-intake-section-title">Task</div>
           <div class="source-intake-detail-grid">
             <div><span>Status</span><strong><q-badge :color="statusColor(detail.status)">{{ statusLabel(detail.status) }}</q-badge></strong></div>
             <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
@@ -127,7 +135,7 @@
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
           </div>
           <q-separator class="q-my-md" />
-          <div class="source-intake-section-title">Original Email</div>
+          <div class="source-intake-section-title">Email Evidence</div>
           <div class="source-intake-source-card q-pa-sm q-mb-md">
             <div class="source-intake-detail-grid">
               <div><span>Channel</span><strong>{{ sourceTypeLabel(detail.source_type) }}</strong></div>
@@ -162,7 +170,7 @@
               <div class="text-caption text-grey-7 q-mt-sm">The forwarded message is retained as evidence, but is not the customer source used for business extraction.</div>
             </div>
           </div>
-          <div class="source-intake-section-title">Business Link</div>
+          <div class="source-intake-section-title">WMS Handoff</div>
           <div class="source-intake-detail-grid">
             <div><span>Matched entity</span><strong>{{ detail.matched_entity_type || '-' }}</strong></div>
             <div><span>Entity reference</span><strong>{{ detail.matched_entity_ref || '-' }}</strong></div>
@@ -177,7 +185,7 @@
             <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
             <div>{{ detail.exception_summary }}</div>
           </div>
-          <div class="source-intake-section-title">Information From Email</div>
+          <div class="source-intake-section-title">Extracted Fields</div>
           <div v-if="extractionRows.length" class="source-intake-extractions">
             <div v-for="item in extractionRows" :key="item.key" class="source-intake-extraction q-pa-sm q-mb-xs">
               <div class="row items-center q-col-gutter-sm">
@@ -204,7 +212,7 @@
             <div><span>Storage</span><strong>{{ detail.storage_uri ? 'Stored · ' + formatBytes(detail.storage_size) : 'Not stored' }}</strong></div>
             <div><span>Content hash</span><strong class="source-intake-hash" :title="detail.content_hash">{{ shortHash(detail.content_hash) }}</strong></div>
           </div>
-          <div class="source-intake-section-title q-mt-md">Processing Events</div>
+          <div class="source-intake-section-title q-mt-md">Task Audit Trail</div>
           <q-timeline color="primary" layout="dense">
             <q-timeline-entry v-for="event in (detail.events || [])" :key="event.id" :title="eventLabel(event.event_type)" :subtitle="formatDate(event.created_at)">
               {{ event.message || event.status }}
@@ -221,7 +229,7 @@
 import { getauth } from 'boot/axios_request.js'
 
 export default {
-  name: 'SourceIntake',
+  name: 'Mail2Task',
   data () {
     return {
       loading: false,
@@ -237,31 +245,32 @@ export default {
       pagination: { rowsPerPage: 0 },
       offset: 0,
       statusOptions: [
-        { label: 'Captured', value: 'CAPTURED' },
-        { label: 'Analyzing', value: 'ANALYZING' },
-        { label: 'Review required', value: 'REVIEW_REQUIRED' },
-        { label: 'Ready for preview', value: 'READY_FOR_PREVIEW' },
-        { label: 'Approval required', value: 'APPROVAL_REQUIRED' },
-        { label: 'Executing', value: 'EXECUTING' },
-        { label: 'Completed', value: 'COMPLETED' },
+        { label: 'New', value: 'CAPTURED' },
+        { label: 'Parsing', value: 'ANALYZING' },
+        { label: 'Review', value: 'REVIEW_REQUIRED' },
+        { label: 'Ready', value: 'READY_FOR_PREVIEW' },
+        { label: 'Approval', value: 'APPROVAL_REQUIRED' },
+        { label: 'WMS work', value: 'EXECUTING' },
+        { label: 'Done', value: 'COMPLETED' },
         { label: 'Blocked', value: 'BLOCKED' },
         { label: 'Duplicate', value: 'DUPLICATE' },
         { label: 'Failed', value: 'FAILED' }
       ],
       operationOptions: [
-        { label: 'Inbound', value: 'INBOUND' },
-        { label: 'Outbound', value: 'OUTBOUND' },
-        { label: 'Supporting', value: 'SUPPORTING' },
-        { label: 'Unknown', value: 'UNKNOWN' }
+        { label: 'IB · Inbound', value: 'INBOUND' },
+        { label: 'OB · Outbound', value: 'OUTBOUND' },
+        { label: 'SUP · Supporting', value: 'SUPPORTING' },
+        { label: 'Other', value: 'UNKNOWN' }
       ],
       columns: [
-        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 11%' },
-        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 13%' },
-        { name: 'source', label: 'Original source', field: 'sender_email', align: 'left', style: 'width: 22%' },
-        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
-        { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
-        { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
-        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 16%' },
+        { name: 'received_at', label: 'Received', field: 'sent_at', align: 'left', style: 'width: 11%' },
+        { name: 'document', label: 'Type', field: 'document_type', align: 'left', style: 'width: 10%' },
+        { name: 'source', label: 'Sender', field: 'sender_email', align: 'left', style: 'width: 20%' },
+        { name: 'reference', label: 'Task / Ref', field: 'external_reference', align: 'left', style: 'width: 15%' },
+        { name: 'operation', label: 'Flow', field: 'operation', align: 'left', style: 'width: 8%' },
+        { name: 'owner', label: 'Owner', field: 'owner_role', align: 'left', style: 'width: 10%' },
+        { name: 'status', label: 'Task status', field: 'status', align: 'left', style: 'width: 12%' },
+        { name: 'next_action', label: 'Next', field: 'next_action', align: 'left', style: 'width: 14%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
       ]
     }
@@ -269,13 +278,13 @@ export default {
   computed: {
     countItems () {
       const statuses = [
-        { key: 'CAPTURED', label: 'Captured' },
-        { key: 'ANALYZING', label: 'Analyzing' },
+        { key: 'CAPTURED', label: 'New' },
+        { key: 'ANALYZING', label: 'Parsing' },
         { key: 'REVIEW_REQUIRED', label: 'Review' },
         { key: 'READY_FOR_PREVIEW', label: 'Ready' },
         { key: 'APPROVAL_REQUIRED', label: 'Approval' },
-        { key: 'EXECUTING', label: 'Executing' },
-        { key: 'COMPLETED', label: 'Completed' },
+        { key: 'EXECUTING', label: 'WMS work' },
+        { key: 'COMPLETED', label: 'Done' },
         { key: 'BLOCKED', label: 'Blocked' },
         { key: 'DUPLICATE', label: 'Duplicate' },
         { key: 'FAILED', label: 'Failed' }
@@ -348,6 +357,29 @@ export default {
       const localBudget = Math.max(8, 27 - domain.length)
       return `${local.slice(0, localBudget)}…@${domain}`
     },
+    compactText (value, length) {
+      const text = String(value || '').trim()
+      if (text.length <= length) return text || '-'
+      return `${text.slice(0, length - 1)}…`
+    },
+    taskTypeLabel (row) {
+      const operation = String((row && row.operation) || '').toUpperCase()
+      if (operation === 'INBOUND') return 'IB'
+      if (operation === 'OUTBOUND') return 'OB'
+      if (operation === 'SUPPORTING') return 'SUP'
+      return 'TASK'
+    },
+    ownerLabel (value) {
+      const role = String(value || '').trim()
+      const labels = {
+        WAREHOUSE: 'Warehouse',
+        LOGISTICS: 'Logistics',
+        SUNNY: 'Sunny',
+        MAGGIE: 'Maggie',
+        MARK: 'Mark'
+      }
+      return labels[role.toUpperCase()] || this.compactText(role, 14) || 'Unassigned'
+    },
     referenceTooltip (row) {
       const reference = row.external_reference || row.matched_entity_ref || '-'
       const preview = String(row.email_body_preview || '').trim()
@@ -368,13 +400,13 @@ export default {
     },
     statusLabel (value) {
       return {
-        CAPTURED: 'Captured',
-        ANALYZING: 'Analyzing',
-        REVIEW_REQUIRED: 'Review required',
+        CAPTURED: 'New',
+        ANALYZING: 'Parsing',
+        REVIEW_REQUIRED: 'Review',
         READY_FOR_PREVIEW: 'Ready',
-        APPROVAL_REQUIRED: 'Approval required',
-        EXECUTING: 'Executing',
-        COMPLETED: 'Completed',
+        APPROVAL_REQUIRED: 'Approval',
+        EXECUTING: 'WMS work',
+        COMPLETED: 'Done',
         BLOCKED: 'Blocked',
         DUPLICATE: 'Duplicate',
         FAILED: 'Failed'

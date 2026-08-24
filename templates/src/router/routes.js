@@ -1,5 +1,16 @@
 import { LocalStorage } from 'quasar'
 
+const platformAdminGuard = (to, from, next) => {
+  const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
+  const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
+  const auth = String(LocalStorage.getItem('auth') || '').trim()
+  if (auth === '1' && (role === 'admin' || mode === 'admin')) {
+    next()
+  } else {
+    next({ name: 'dashboard' })
+  }
+}
+
 const routes = [{
   path: '/',
   component: () => import('layouts/MainLayout.vue'),
@@ -36,19 +47,15 @@ const routes = [{
       ]
     },
     {
+      path: 'mail2task',
+      name: 'mail2task',
+      component: () => import('pages/sourceIntake.vue'),
+      beforeEnter: platformAdminGuard
+    },
+    {
       path: 'source-intake',
       name: 'source-intake',
-      component: () => import('pages/sourceIntake.vue'),
-      beforeEnter: (to, from, next) => {
-        const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
-        const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
-        const auth = String(LocalStorage.getItem('auth') || '').trim()
-        if (auth === '1' && (role === 'admin' || mode === 'admin')) {
-          next()
-        } else {
-          next({ name: 'dashboard' })
-        }
-      }
+      redirect: { name: 'mail2task' }
     },
     {
       path: 'inbound',
