@@ -53,6 +53,9 @@ export const queryKeys = {
     putaway: (...filters: readonly unknown[]) => ["putaway-tasks", ...filters] as const,
     inventoryPending: () => ["inventory-tasks-pending"] as const,
   },
+  mailTasks: {
+    list: (...filters: readonly unknown[]) => ["mail-tasks", ...filters] as const,
+  },
   putaway: {
     warehouses: () => ["putaway-warehouses"] as const,
     locations: (warehouseIdsKey: unknown) => ["putaway-locations", warehouseIdsKey] as const,

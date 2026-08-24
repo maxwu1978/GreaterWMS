@@ -14,9 +14,15 @@ function defaultPermissionsForRole(role: string | null) {
       "users.manage",
       "billing.manage",
       "planner.manage",
+      "mailtask.manage",
+      "mailtask.execute",
+      "mailtask.approve_outbound",
+      "reconciliation.view",
     ];
   }
-  if (role === "operator") return ["receiving.execute", "picking.execute", "shipping.execute"];
+  if (role === "operator") {
+    return ["receiving.execute", "picking.execute", "shipping.execute", "mailtask.execute"];
+  }
   if (role === "client_viewer") return ["portal.view"];
   return [];
 }
