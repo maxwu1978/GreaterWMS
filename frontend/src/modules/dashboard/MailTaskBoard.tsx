@@ -116,8 +116,25 @@ export default function MailTaskBoard() {
   if (!canView) return null;
 
   return (
-    <section className="mt-6 border border-[#cfcfcf] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" data-testid="mailtask-board" aria-label="Mail2Task business task work queue">
-      <div className="bg-[#303b5b] text-white"><div className="flex flex-wrap items-end justify-between gap-5 px-5 py-5 sm:px-6"><div><div className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#c9d1e0]"><span className="h-2 w-2 animate-pulse rounded-full bg-[#70d19a]" /> Mail2Task workbench</div><h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">Business task queue</h2><p className="mt-1 text-xs text-[#d7deea]">One row = one business task · linked emails are evidence · status is shared by all related messages</p></div><div className="grid grid-cols-3 divide-x divide-white/20 border border-white/20 bg-white/5"><div className="min-w-[72px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Tasks</p><p className="mt-1 font-mono text-xl font-bold">{data.length}</p></div><div className="min-w-[88px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Maggie</p><p className="mt-1 font-mono text-xl font-bold">{pendingCount}</p></div><div className="min-w-[88px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Exception</p><p className="mt-1 font-mono text-xl font-bold">{exceptionCount}</p></div></div></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/15 px-5 py-2.5 text-[11px] sm:px-6"><span className="font-mono uppercase tracking-[0.14em] text-[#cbd3df]">Queue / business tasks</span><button type="button" onClick={() => void refetch()} className="inline-flex items-center gap-2 border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"><RefreshCw size={13} className={isFetching ? "animate-spin" : undefined} /> Refresh</button></div></div>
+    <section className="border border-[#d7d7d7] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.22)]" data-testid="mailtask-board" aria-label="Mail2Task business task work queue">
+      <div className="flex min-h-12 items-center gap-3 bg-[#596782] px-3 text-white sm:px-4">
+        <h2 className="text-[16px] font-bold uppercase tracking-[0.08em]">Mail to Task</h2>
+        <div className="ml-auto flex items-center gap-3 text-[11px] font-bold uppercase">
+          <span className="text-[#f1cf74]">{isError ? "STAGED" : "LIVE"}</span>
+          <button type="button" aria-label="Refresh mail tasks" onClick={() => void refetch()} className="inline-flex h-7 w-7 items-center justify-center hover:bg-white/10"><RefreshCw size={16} className={isFetching ? "animate-spin" : undefined} /></button>
+        </div>
+      </div>
+      <div className="flex min-h-10 items-center border-b border-[#dfe3ea] px-3 text-[12px] sm:px-4">
+        <span className="text-[#667085]">Incoming email work queue</span>
+        <div className="ml-auto flex items-center gap-3 text-[11px] font-bold uppercase"><span className="text-[#667085]">Open {data.length}</span><span className="text-[#b54708]">Due {pendingCount}</span><span className="text-[#b42318]">Review {exceptionCount}</span></div>
+      </div>
+      <div className="flex min-h-10 items-center border-b border-[#dfe3ea] bg-[#f5f6f8] px-3 sm:px-4">
+        <span className="border-b-[3px] border-[#1976d2] px-3 py-2.5 text-[14px] font-semibold uppercase text-[#1976d2]">All</span>
+        <span className="px-3 py-2.5 text-[14px] font-semibold uppercase text-[#333]">IB</span>
+        <span className="px-3 py-2.5 text-[14px] font-semibold uppercase text-[#333]">OB</span>
+        <span className="px-3 py-2.5 text-[14px] font-semibold uppercase text-[#333]">Review</span>
+        <span className="ml-auto border border-[#1976d2] px-2 py-1 text-[10px] font-semibold text-[#1976d2]">PS MAIL</span>
+      </div>
       {isLoading ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#777]"><RefreshCw size={16} className="animate-spin" /> Loading business task queue...</div> : isError ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#9a3f38]"><AlertTriangle size={17} /> Mail2Task queue is temporarily unavailable.</div> : data.length === 0 ? <div className="px-6 py-12 text-sm text-[#777]">No email-derived business tasks are waiting.</div> : <div className="overflow-x-auto"><div className="hidden min-w-[1080px] grid-cols-[112px_minmax(240px,1.35fr)_minmax(220px,1.2fr)_190px_170px_92px] bg-[#eef0f4] text-[10px] font-bold uppercase tracking-[0.12em] text-[#626a77] sm:grid"><span className="px-3 py-3">Status</span><span className="border-l border-[#d7dbe2] px-3 py-3">Business task / ref</span><span className="border-l border-[#d7dbe2] px-3 py-3">Pending action / owner</span><span className="border-l border-[#d7dbe2] px-3 py-3">Mail evidence</span><span className="border-l border-[#d7dbe2] px-3 py-3">WMS handoff</span><span className="border-l border-[#d7dbe2] px-3 py-3">Open</span></div>{data.map((task) => <MailTaskRow key={task.id} task={task} canApprove={canApprove} />)}</div>}
       <div className="border-t border-[#d6d6d6] bg-[#fafafa] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#888] sm:px-5">Auto refresh 30s · Mail2Task is the email-to-task workbench; Warehouse Operations remains the execution board</div>
     </section>

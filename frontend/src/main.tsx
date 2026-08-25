@@ -6,6 +6,16 @@ import App from "./App";
 import "./index.css";
 import { I18nProvider } from "./shared/i18n";
 
+// Port 8123 was previously used by the legacy Vue preview and may still have
+// a service worker registered for that origin. Remove only local development
+// registrations so an old cached shell cannot survive a source switch. The
+// production build never executes this branch.
+if (import.meta.env.DEV && "serviceWorker" in navigator) {
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    for (const registration of registrations) void registration.unregister();
+  });
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -9,7 +9,8 @@
   }
 
   body {
-    @apply bg-[#f2efe8] text-[#13212c] antialiased;
+    @apply bg-[#f3f3f3] text-[#222] antialiased;
+    font-family: Roboto, Arial, sans-serif;
     overflow-x: hidden;
   }
 

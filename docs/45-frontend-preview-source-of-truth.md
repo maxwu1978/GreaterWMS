@@ -1,0 +1,59 @@
+# Frontend Preview Source of Truth
+
+Snapshot: 2026-08-25
+
+## Problem fixed
+
+The repository had two different frontend preview paths:
+
+- the legacy Vue build served from a temporary `/tmp/.../templates/dist/spa`
+  directory on port `8123`; and
+- the migrated React/Vite build in `frontend/`, used for the Vercel staging
+  preview.
+
+They were not the same application shell. A reviewer could therefore inspect a
+standalone or legacy page while the deploy candidate was the migrated React
+page, producing a false visual review result.
+
+## New rule
+
+The migrated release has one preview source: `/frontend` in this repository.
+The production GreaterWMS page remains the visual reference until cutover, but
+the preview artifact must always be built from the same `/frontend` tree that
+will be deployed with the migrated FastAPI service.
+
+Do not use a temporary `templates/dist/spa` server as the migrated preview. It
+is a legacy reference artifact only and must not be presented as the release
+candidate.
+
+## Reproducible preview
+
+```bash
+cd frontend
+npm run check:greaterwms-shell
+npm run build
+npm run preview:greaterwms
+```
+
+The canonical local URL is `http://127.0.0.1:8130/`. The API base URL is set at
+build time with `VITE_API_BASE_URL`; for staging, use the staging API URL from
+`release/environment-manifest.json`.
+
+## UI contract
+
+- `Dashboard` renders only the legacy-style `Warehouse Operations` execution
+  board.
+- `Mail2Task` is the only email-to-task workbench and owns task status,
+  owners, email evidence, attachments, and WMS handoff.
+- The migrated shell keeps the production GreaterWMS geometry: 56px top bar,
+  200px drawer, compact grey work surface, and horizontally scrollable legacy
+  tables.
+- `npm run check:greaterwms-shell` fails if Dashboard and Mail2Task are merged
+  again or the shell markers are removed.
+
+## Release boundary
+
+The current production alias `https://app.maxsmartwms.online` remains on the
+legacy frontend/API pair. This change does not promote or deploy production.
+Any future cutover must promote the tested `/frontend` artifact together with
+the migrated API and database release, never one side independently.

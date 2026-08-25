@@ -24,6 +24,8 @@
       "git_branch": "codex/mail2task-business-groups-20260825",
       "verified_commit": "88b3bf6729dff96b117759328c8c182a19d16f05",
       "migration_database": "WMS-VM",
+      "frontend_source": "frontend/ (single preview and cutover candidate)",
+      "frontend_preview_contract": "docs/45-frontend-preview-source-of-truth.md",
       "auto_deploy": false,
       "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."
     }

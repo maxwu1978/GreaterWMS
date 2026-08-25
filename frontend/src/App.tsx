@@ -9,6 +9,7 @@ const RegisterPage = lazy(() => import("./modules/auth/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./modules/auth/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./modules/auth/ResetPasswordPage"));
 const DashboardPage = lazy(() => import("./modules/dashboard/DashboardPage"));
+const Mail2TaskPage = lazy(() => import("./modules/dashboard/Mail2TaskPage"));
 const ReceivingPage = lazy(() => import("./modules/receiving/ReceivingPage"));
 const InboundOrderDetailPage = lazy(() => import("./modules/receiving/InboundOrderDetailPage"));
 const InventoryPage = lazy(() => import("./modules/inventory/InventoryPage"));
@@ -91,6 +92,7 @@ export default function App() {
           }
         >
           <Route path="/dashboard" element={<TenantRoute><DashboardPage /></TenantRoute>} />
+          <Route path="/mail2task" element={<TenantRoute><Mail2TaskPage /></TenantRoute>} />
           <Route path="/receiving" element={<TenantRoute><ReceivingPage /></TenantRoute>} />
           <Route path="/receiving/orders/:orderId" element={<TenantRoute><InboundOrderDetailPage /></TenantRoute>} />
           <Route path="/putaway" element={<TenantRoute><PutawayPage /></TenantRoute>} />

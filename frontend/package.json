@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "preview:greaterwms": "vite preview --host 127.0.0.1 --port 8130",
     "lint": "eslint .",
-    "check:ui-language": "node ./scripts/check-ui-language.mjs"
+    "check:ui-language": "node ./scripts/check-ui-language.mjs",
+    "check:greaterwms-shell": "node ./scripts/verify-greaterwms-shell.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.3.1",
