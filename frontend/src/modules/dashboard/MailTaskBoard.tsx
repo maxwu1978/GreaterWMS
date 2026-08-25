@@ -11,6 +11,7 @@ import {
   updateMailTaskStatus,
 } from "../../shared/api/mailtasks";
 import { queryKeys } from "../../shared/api/queryKeys";
+import { isGreaterWmsPreviewMode } from "../../shared/previewMode";
 
 const statusClass: Record<string, string> = {
   "Needs Maggie Processing": "border-[#c8d3e4] bg-[#eef4fc] text-[#345d8e]",
@@ -43,13 +44,86 @@ function formatDate(value: string | null | undefined): string {
   });
 }
 
+const previewMailTasks: MailTaskSummary[] = [
+  {
+    id: "preview-mailtask-ib",
+    task_key: "MT-IB-001",
+    business_task_key: "BT-IB-001",
+    source_message_key: "preview/message/001",
+    subject: "Delta receiving notice · ASN 240824-01",
+    title: "Delta receiving notice · ASN 240824-01",
+    next_action: "Create inbound order",
+    external_reference: "ASN-240824-01",
+    record_type: "IB",
+    direction: "Inbound",
+    task_status: "Needs Maggie Processing",
+    task_owner: "Maggie",
+    physical_execution_owner: "Mark",
+    approval_status: "Not required",
+    exception_flag: false,
+    wms_system: "LEGACY_PROD",
+    wms_doc_no: null,
+    linked_message_count: 2,
+    latest_message_subject: "Delta receiving notice · ASN 240824-01",
+    latest_message_at: "2026-08-24T11:38:00Z",
+    latest_source_message_key: "preview/message/001",
+  },
+  {
+    id: "preview-mailtask-ob",
+    task_key: "MT-OB-001",
+    business_task_key: "BT-OB-001",
+    source_message_key: "preview/message/002",
+    subject: "Delta outbound instruction · DO-240824-07",
+    title: "Delta outbound instruction · DO-240824-07",
+    next_action: "Sunny approval",
+    external_reference: "DO-240824-07",
+    record_type: "OB",
+    direction: "Outbound",
+    task_status: "Awaiting Sunny Approval",
+    task_owner: "Sunny",
+    physical_execution_owner: "Mark",
+    approval_status: "Pending",
+    exception_flag: false,
+    wms_system: "LEGACY_PROD",
+    wms_doc_no: "DO-240824-07",
+    linked_message_count: 2,
+    latest_message_subject: "Delta outbound instruction · DO-240824-07",
+    latest_message_at: "2026-08-24T11:42:00Z",
+    latest_source_message_key: "preview/message/002",
+  },
+  {
+    id: "preview-mailtask-review",
+    task_key: "MT-REVIEW-001",
+    business_task_key: "BT-REVIEW-001",
+    source_message_key: "preview/message/003",
+    subject: "BOL revision requires review",
+    title: "BOL revision requires review",
+    next_action: "Confirm document change",
+    external_reference: "BOL-240824-03",
+    record_type: "REVIEW",
+    direction: "Outbound",
+    task_status: "Needs Review",
+    task_owner: "Sunny",
+    physical_execution_owner: "Mark",
+    approval_status: "Review",
+    exception_flag: true,
+    wms_system: "LEGACY_PROD",
+    wms_doc_no: null,
+    linked_message_count: 1,
+    latest_message_subject: "BOL revision requires review",
+    latest_message_at: "2026-08-24T11:44:00Z",
+    latest_source_message_key: "preview/message/003",
+  },
+];
+
 function MailTaskRow({ task, canApprove }: { task: MailTaskSummary; canApprove: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const previewMode = isGreaterWmsPreviewMode();
   const queryClient = useQueryClient();
   const detailQuery = useQuery({
     queryKey: queryKeys.mailTasks.detail(task.task_key),
     queryFn: () => fetchMailTask(task.task_key),
-    enabled: expanded,
+    enabled: expanded && !previewMode,
   });
   const statusMutation = useMutation({
     mutationFn: (nextStatus: MailTaskStatus) => updateMailTaskStatus(task.task_key, nextStatus),
@@ -109,7 +183,10 @@ export default function MailTaskBoard() {
   const permissions = useAuthStore((state) => state.permissions);
   const canView = permissions.includes("*") || permissions.includes("mailtask.execute") || permissions.includes("mailtask.manage");
   const canApprove = permissions.includes("*") || permissions.includes("mailtask.approve_outbound");
-  const { data = [], isLoading, isError, isFetching, refetch } = useQuery({ queryKey: queryKeys.mailTasks.list(), queryFn: () => fetchMailTasks({ limit: 100 }), enabled: canView, refetchInterval: canView ? 30_000 : false });
+  const previewMode = isGreaterWmsPreviewMode();
+  const { data: fetchedData = [], isLoading: fetchedLoading, isError, isFetching, refetch } = useQuery({ queryKey: queryKeys.mailTasks.list(), queryFn: () => fetchMailTasks({ limit: 100 }), enabled: canView && !previewMode, refetchInterval: canView && !previewMode ? 30_000 : false });
+  const data = previewMode ? previewMailTasks : fetchedData;
+  const isLoading = !previewMode && fetchedLoading;
   const exceptionCount = data.filter((task) => task.exception_flag).length;
   const pendingCount = data.filter((task) => task.task_status === "Needs Maggie Processing").length;
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isGreaterWmsPreviewMode } from "../previewMode";
 
 function defaultPermissionsForRole(role: string | null) {
   if (role === "platform_admin") return ["*"];
@@ -56,6 +57,15 @@ function readStoredPermissions() {
 }
 
 function readInitialAuth() {
+  if (isGreaterWmsPreviewMode()) {
+    return {
+      token: "greaterwms-preview",
+      role: "tenant_admin",
+      tenantId: "preview",
+      jobTitle: "Preview",
+      permissions: ["*"],
+    };
+  }
   const token = localStorage.getItem("wms_token");
   const tokenAuth = decodeTokenAuth(token);
   const role = tokenAuth?.role || localStorage.getItem("wms_role");

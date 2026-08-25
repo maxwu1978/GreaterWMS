@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, CalendarClock, Maximize2, Minus, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchOperationsBoard, type OperationsBoardItem, type OperationsBoardLane } from "../../shared/api/operationsBoard";
+import { fetchOperationsBoard, type OperationsBoardItem, type OperationsBoardLane, type OperationsBoardResponse } from "../../shared/api/operationsBoard";
 import { queryKeys } from "../../shared/api/queryKeys";
+import { isGreaterWmsPreviewMode } from "../../shared/previewMode";
 
 type BoardFilter = "all" | "urgent" | OperationsBoardLane;
 
@@ -133,13 +134,46 @@ function BoardRow({ item }: { item: OperationsBoardItem }) {
   );
 }
 
+const previewOperationsData: OperationsBoardResponse = {
+  generated_at: "2026-08-25T11:44:00Z",
+  warehouse_id: "PEAK SMART LOGISTICS",
+  counts: { total: 1, now: 0, next: 0, delayed: 1, blocked: 0, by_operation: { receiving: 1 } },
+  items: [{
+    id: "preview-inbound-001",
+    category: "Inbound",
+    operation: "receiving",
+    lane: "delayed",
+    source_status: "awaiting_arrival",
+    reference_type: "ASN",
+    reference_id: "preview-asn-240824-01",
+    reference_number: "ASN2...8191",
+    client_id: "delta",
+    client_name: "Delta",
+    priority: 1,
+    due_at: "2026-08-25T05:00:00Z",
+    created_at: "2026-08-24T11:38:00Z",
+    quantity: 18,
+    quantity_progress: 0,
+    location_label: "DOCK → STG",
+    assigned_type: "Warehouse",
+    assigned_to: "Warehouse",
+    action_key: "receiving",
+    action_route: "/receiving",
+    blocker_code: null,
+  }],
+};
+
 export default function OperationsBoard() {
   const [filter, setFilter] = useState<BoardFilter>("all");
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+  const previewMode = isGreaterWmsPreviewMode();
+  const { data: fetchedData, isLoading: fetchedLoading, isError, refetch, isFetching } = useQuery({
     queryKey: queryKeys.operationsBoard(),
     queryFn: fetchOperationsBoard,
-    refetchInterval: 30_000,
+    enabled: !previewMode,
+    refetchInterval: previewMode ? false : 30_000,
   });
+  const data = previewMode ? previewOperationsData : fetchedData;
+  const isLoading = !previewMode && fetchedLoading;
 
   const items = data?.items || [];
   const visibleItems = filter === "all"

@@ -39,6 +39,14 @@ The canonical local URL is `http://127.0.0.1:8130/`. The API base URL is set at
 build time with `VITE_API_BASE_URL`; for staging, use the staging API URL from
 `release/environment-manifest.json`.
 
+The Vercel Preview build sets `VITE_PREVIEW_MODE=1`. In that mode the root URL
+opens directly on the read-only GreaterWMS `Warehouse Operations` board with
+fixed review data, so visual review does not depend on browser login state,
+cached local storage, service workers, or a live staging response. The preview
+data is clearly synthetic and must never be treated as operational data. A
+normal production build does not set this flag and keeps the normal landing and
+login flow.
+
 ## UI contract
 
 - `Dashboard` renders only the legacy-style `Warehouse Operations` execution

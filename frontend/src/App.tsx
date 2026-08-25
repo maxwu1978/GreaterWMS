@@ -1,6 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { defaultRouteForRole, useAuthStore } from "./shared/hooks/useAuth";
+import { isGreaterWmsPreviewMode } from "./shared/previewMode";
 import Layout from "./shared/components/Layout";
 const LandingPage = lazy(() => import("./modules/marketing/LandingPage"));
 const MaxSmartAgvPreview = lazy(() => import("./modules/marketing/MaxSmartAgvPreview"));
@@ -71,12 +72,14 @@ export default function App() {
   const token = useAuthStore((s) => s.token);
   const role = useAuthStore((s) => s.role);
   const defaultRoute = defaultRouteForRole(role);
+  const previewMode = isGreaterWmsPreviewMode();
+  const previewQuery = previewMode && import.meta.env.VITE_PREVIEW_MODE !== "1" ? "?greaterwms_preview=1" : "";
   const isNativeShell = window.location.protocol === "capacitor:";
 
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>
-        <Route path="/" element={token ? <Navigate to={defaultRoute} replace /> : isNativeShell ? <LoginPage /> : <LandingPage />} />
+        <Route path="/" element={token ? <Navigate to={`${defaultRoute}${previewQuery}`} replace /> : isNativeShell ? <LoginPage /> : <LandingPage />} />
         <Route path="/agv-site-preview" element={<MaxSmartAgvPreview />} />
         <Route path="/login" element={token ? <Navigate to={defaultRoute} replace /> : <LoginPage />} />
         <Route path="/register" element={token ? <Navigate to={defaultRoute} replace /> : <RegisterPage />} />
