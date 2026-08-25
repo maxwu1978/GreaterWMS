@@ -7,7 +7,8 @@ Snapshot: 2026-08-25
 - Active repository: `https://github.com/maxwu1978/GreaterWMS.git`
 - Active migrated release branch: `codex/mail2task-business-groups-20260825`
 - Migration implementation commit: `36ae74e651076df03afed755a69621bb05da0588`
-- Current migrated staging release commit: `88b3bf6729dff96b117759328c8c182a19d16f05`
+- Current migrated staging release commit: `88b3bf6729dff96b117759328c8c182a19d16f05` (backend)
+- Current migrated frontend preview commit: `9bd58464` (`Unify GreaterWMS frontend preview shell`)
 - Source snapshot: `https://github.com/maxwu1978/wms-quickstart.git`
 - Local source remote: `quickstart-source`
 - Local active remote: `origin` (`GreaterWMS`)
@@ -65,13 +66,15 @@ document at `/api/openapi.json` also returned successfully.
 ### Migrated frontend preview
 
 - Vercel project: `wms-quickstart-frontend`
-- Deployment: `dpl_Dh6xX5QrqtHQBo4xeZcA1jstkV9g`
-- Preview URL: `https://wms-quickstart-frontend-fdgbjerp6-maxw-2608s-projects.vercel.app`
+- Deployment: `dpl_6GfWg57Zu61ta2ujNtPiLMWdqXZD`
+- Preview URL: `https://wms-quickstart-frontend-i8s1te990-maxw-2608s-projects.vercel.app`
 - Target: `preview` (not production)
 - API base: `https://wms-quickstart-staging.onrender.com/api/v1`
 
-The preview returned HTTP 200 and its built JavaScript contains the staging API
-base. The production alias `https://app.maxsmartwms.online` was not promoted.
+The preview returned HTTP 200 and its built JavaScript contains the migrated
+Mail2Task route. The production alias `https://app.maxsmartwms.online` was not
+promoted. The preview is built from `/frontend`; the old temporary
+`templates/dist/spa` server is not a valid migrated preview.
 
 ### Current production path
 

@@ -26,6 +26,9 @@
       "migration_database": "WMS-VM",
       "frontend_source": "frontend/ (single preview and cutover candidate)",
       "frontend_preview_contract": "docs/45-frontend-preview-source-of-truth.md",
+      "frontend_preview_commit": "9bd58464",
+      "frontend_preview_deployment": "dpl_6GfWg57Zu61ta2ujNtPiLMWdqXZD",
+      "frontend_preview_url": "https://wms-quickstart-frontend-i8s1te990-maxw-2608s-projects.vercel.app",
       "auto_deploy": false,
       "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."
     }
