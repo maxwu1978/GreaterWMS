@@ -21,8 +21,8 @@
       "render_service_id": "srv-d7qgk4rbc2fs73fsjbo0",
       "render_service_name": "wms-quickstart-staging",
       "health_url": "https://wms-quickstart-staging.onrender.com/health",
-      "git_branch": "main",
-      "verified_commit": "dc4e80fb9e773715708d1858251f5d6e6fe4d78d",
+      "git_branch": "codex/mail2task-business-groups-20260825",
+      "verified_commit": "88b3bf6729dff96b117759328c8c182a19d16f05",
       "migration_database": "WMS-VM",
       "auto_deploy": false,
       "deploy_policy": "Deploy an explicit commit and verify build_sha before accepting the environment."

@@ -11,7 +11,7 @@ QuickStart-to-GreaterWMS migration. The machine-readable source of truth is
 | Environment | Render service | Code line | Verified version | Traffic |
 | --- | --- | --- | --- | --- |
 | Legacy production | `greaterwms-production` / `srv-d9v6ahvqj5pc73d4spp0` | `codex/cli-install-info` | `7592afe8` / `prod-legacy-2026-08-24` | Customer traffic |
-| Migrated staging | `wms-quickstart-staging` / `srv-d7qgk4rbc2fs73fsjbo0` | `main` | `dc4e80fb` | No customer traffic |
+| Migrated staging | `wms-quickstart-staging` / `srv-d7qgk4rbc2fs73fsjbo0` | `codex/mail2task-business-groups-20260825` (service configured for `main`) | `88b3bf67` | No customer traffic |
 
 The legacy production frontend and API remain a matched Django pair. The
 migrated FastAPI/React pair is a separate validation target. `main` must not be
@@ -53,7 +53,7 @@ curl --fail --silent --show-error \
 ```
 
 The current staging health response must report
-`build_sha=dc4e80fb9e773715708d1858251f5d6e6fe4d78d`. Do not paste database
+`build_sha=88b3bf6729dff96b117759328c8c182a19d16f05`. Do not paste database
 URLs, Render API tokens, or customer source files into this document or into
 GitHub issues.
 

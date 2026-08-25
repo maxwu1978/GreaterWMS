@@ -10,11 +10,16 @@ changing code or deploying anything.
 
 - Repository: `https://github.com/maxwu1978/GreaterWMS.git`
 - Local checkout: `/Users/wuqingxin/Desktop/test/Program/3-仓库管理系统/tmp/greatewms-source`
-- Active branch: `main`
-- Current `main` commit: `68d9ff02eb9e2ba27b7af13d70bc6212721ff1ab`
+- Active migrated release branch: `codex/mail2task-business-groups-20260825`
+- Current migrated release commit: `88b3bf6729dff96b117759328c8c182a19d16f05`
 - Migration source remote: `https://github.com/maxwu1978/wms-quickstart.git`
 - Production rollback tag: `prod-legacy-2026-08-24`
 - Working tree at handoff: clean
+
+The GitHub `main` ref currently points to the legacy Django line at
+`5371d0af`; the migrated staging release above was deployed by explicit commit
+from the dedicated release branch. Do not force-update `main` while the two
+code lines are being kept separate.
 
 The active `main` tree is the migrated FastAPI/React system. The legacy Django
 production code is retained in the `codex/cli-install-info` line and the
@@ -26,7 +31,7 @@ version.
 | Environment | Service | Code | Current status |
 | --- | --- | --- | --- |
 | Customer production | `greaterwms-production` / `srv-d9v6ahvqj5pc73d4spp0` | `codex/cli-install-info` at `7592afe8` | Healthy; auto-deploy disabled |
-| Migrated staging | `wms-quickstart-staging` / `srv-d7qgk4rbc2fs73fsjbo0` | `main`; runtime `dc4e80fb` | Healthy; explicit deploy only |
+| Migrated staging | `wms-quickstart-staging` / `srv-d7qgk4rbc2fs73fsjbo0` | explicit `88b3bf67`; runtime `88b3bf67` | Healthy; explicit deploy only |
 | AGV sandbox | `wms-agv-sandbox` | `main` / `agv-simulator` | Separate non-customer service |
 
 Production URLs:
@@ -37,7 +42,7 @@ Production URLs:
 Migrated staging health:
 
 - `https://wms-quickstart-staging.onrender.com/health`
-- Expected runtime SHA: `dc4e80fb9e773715708d1858251f5d6e6fe4d78d`
+- Expected runtime SHA: `88b3bf6729dff96b117759328c8c182a19d16f05`
 
 The production health endpoint returns `{"status":"ok"}` from the legacy
 service and does not expose a build SHA. Render deployment history is the

@@ -5,9 +5,9 @@ Snapshot: 2026-08-25
 ## Repository
 
 - Active repository: `https://github.com/maxwu1978/GreaterWMS.git`
-- Active branch: `main`
+- Active migrated release branch: `codex/mail2task-business-groups-20260825`
 - Migration implementation commit: `36ae74e651076df03afed755a69621bb05da0588`
-- Current main/release commit: `dc4e80fb9e773715708d1858251f5d6e6fe4d78d`
+- Current migrated staging release commit: `88b3bf6729dff96b117759328c8c182a19d16f05`
 - Source snapshot: `https://github.com/maxwu1978/wms-quickstart.git`
 - Local source remote: `quickstart-source`
 - Local active remote: `origin` (`GreaterWMS`)
@@ -52,10 +52,10 @@ insert-only conflict behavior so it can be safely re-run or rejected.
 - Render service: `wms-quickstart-staging`
 - Service ID: `srv-d7qgk4rbc2fs73fsjbo0`
 - Repository: `maxwu1978/GreaterWMS`
-- Branch: `main`
+- Service branch setting: `main`; deployed release branch: `codex/mail2task-business-groups-20260825`
 - Root: `backend`
-- Live deploy: `dep-da68oaf10e5c73eieq3g`
-- Live commit: `dc4e80fb9e773715708d1858251f5d6e6fe4d78d`
+- Live deploy: `dep-da6ifffavr4c7390dnfg`
+- Live commit: `88b3bf6729dff96b117759328c8c182a19d16f05`
 - Health: `https://wms-quickstart-staging.onrender.com/health`
 
 The health response was verified after deployment and returned `status=ok`,
