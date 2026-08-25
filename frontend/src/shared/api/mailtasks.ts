@@ -20,8 +20,12 @@ export type MailTaskStatus =
 export type MailTaskSummary = {
   id: string;
   task_key: string;
+  business_task_key: string;
   source_message_key: string;
   subject: string;
+  title?: string | null;
+  next_action?: string | null;
+  external_reference?: string | null;
   record_type: string;
   direction: string;
   task_status: MailTaskStatus;
@@ -31,6 +35,25 @@ export type MailTaskSummary = {
   exception_flag: boolean;
   wms_system?: string | null;
   wms_doc_no?: string | null;
+  linked_message_count: number;
+  latest_message_subject: string;
+  latest_message_at?: string | null;
+  latest_source_message_key?: string | null;
+};
+
+export type MailTaskMessage = {
+  source_message_key: string;
+  subject: string;
+  sender: string;
+  received_at: string;
+  thread_id?: string | null;
+  decision: string;
+  attachment_names?: string[] | null;
+  attachment_read_status?: string | null;
+};
+
+export type MailTaskDetail = MailTaskSummary & {
+  messages: MailTaskMessage[];
 };
 
 export function fetchMailTasks(params?: {
@@ -40,6 +63,10 @@ export function fetchMailTasks(params?: {
   limit?: number;
 }): Promise<MailTaskSummary[]> {
   return api.get("/mailtasks/", { params }).then((response) => response.data);
+}
+
+export function fetchMailTask(taskKey: string): Promise<MailTaskDetail> {
+  return api.get(`/mailtasks/${encodeURIComponent(taskKey)}`).then((response) => response.data);
 }
 
 export function updateMailTaskStatus(

@@ -270,6 +270,7 @@ AGENT_SCHEMA_RLS_TABLES = ("agent_evidence", "wcs_task_bindings")
 PACK_LIST_SCHEMA_RLS_TABLES = ("pack_list_documents", "pack_list_lines")
 MAILTASK_SCHEMA_RLS_TABLES = (
     "mail_messages",
+    "mail_task_groups",
     "mail_tasks",
     "mail_attachments",
     "mail_task_approvals",

@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Mail, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { useAuthStore } from "../../shared/hooks/useAuth";
 import {
   decideOutboundApproval,
+  fetchMailTask,
   fetchMailTasks,
   type MailTaskStatus,
   type MailTaskSummary,
@@ -17,6 +19,8 @@ const statusClass: Record<string, string> = {
   "Ready for WMS": "border-[#9ccfb0] bg-[#edf9f1] text-[#2d7047]",
   "Needs Review": "border-[#d69a93] bg-[#fff1ef] text-[#9a3f38]",
   Blocked: "border-[#d69a93] bg-[#fff1ef] text-[#9a3f38]",
+  Executed: "border-[#9ccfb0] bg-[#edf9f1] text-[#2d7047]",
+  Closed: "border-[#b7b7b7] bg-[#f5f5f5] text-[#555]",
 };
 
 function canAdvance(task: MailTaskSummary): MailTaskStatus | null {
@@ -26,65 +30,78 @@ function canAdvance(task: MailTaskSummary): MailTaskStatus | null {
   return null;
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function MailTaskRow({ task, canApprove }: { task: MailTaskSummary; canApprove: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   const queryClient = useQueryClient();
+  const detailQuery = useQuery({
+    queryKey: queryKeys.mailTasks.detail(task.task_key),
+    queryFn: () => fetchMailTask(task.task_key),
+    enabled: expanded,
+  });
   const statusMutation = useMutation({
     mutationFn: (nextStatus: MailTaskStatus) => updateMailTaskStatus(task.task_key, nextStatus),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.list() }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.list() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.detail(task.task_key) });
+    },
   });
   const approvalMutation = useMutation({
-    mutationFn: () => decideOutboundApproval(task.task_key, "approve", "Approved in GreaterWMS Dashboard"),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.list() }),
+    mutationFn: () => decideOutboundApproval(task.task_key, "approve", "Approved in GreaterWMS Mail2Task"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.list() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.mailTasks.detail(task.task_key) });
+    },
   });
   const nextStatus = canAdvance(task);
   const isBusy = statusMutation.isPending || approvalMutation.isPending;
+  const badge = statusClass[task.task_status] || "border-[#d0d0d0] bg-[#f7f7f7] text-[#555]";
 
   return (
-    <div className="grid gap-3 border-t border-[#e1e4e8] px-4 py-4 sm:grid-cols-[minmax(0,1.4fr)_140px_150px_120px_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex border px-2 py-1 text-[10px] font-bold tracking-[0.1em] ${statusClass[task.task_status] || "border-[#d0d0d0] bg-[#f7f7f7] text-[#555]"}`}>
-            {task.task_status}
-          </span>
-          {task.exception_flag && <AlertTriangle size={14} className="text-[#c9574f]" aria-label="Task exception" />}
+    <>
+      <div className="hidden min-w-[1080px] grid-cols-[112px_minmax(240px,1.35fr)_minmax(220px,1.2fr)_190px_170px_92px] items-stretch border-t border-[#dedede] text-[13px] odd:bg-white even:bg-[#fafafa] hover:bg-[#f1f4f8] sm:grid">
+        <div className="flex flex-col justify-center px-3 py-4">
+          <span className={`inline-flex w-fit border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{task.task_status}</span>
+          {task.exception_flag && <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#c9574f]"><AlertTriangle size={12} /> Exception</span>}
         </div>
-        <p className="mt-2 truncate font-semibold text-[#202020]">{task.subject || task.task_key}</p>
-        <p className="truncate font-mono text-[11px] text-[#7b8490]">{task.task_key}</p>
+        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+          <div className="flex items-center gap-2"><p className="truncate font-semibold text-[#202020]">{task.title || task.subject || "Business task"}</p><span className="shrink-0 border border-[#9db7d6] bg-[#eef4fc] px-1.5 py-0.5 text-[10px] font-bold text-[#345d8e]">{task.record_type}</span></div>
+          <p className="mt-1 truncate font-mono text-[11px] text-[#4d5662]">{task.external_reference || task.business_task_key}</p>
+          <p className="mt-1 truncate text-[11px] text-[#858b94]">{task.direction} · Owner {task.task_owner || "Unassigned"}</p>
+        </div>
+        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+          <p className="font-semibold text-[#252525]">{task.next_action || "Review task details"}</p>
+          <p className="mt-1 text-[11px] text-[#777]">Physical: {task.physical_execution_owner || "Unassigned"}</p>
+          <p className="mt-1 text-[11px] text-[#777]">Approval: {task.approval_status}</p>
+        </div>
+        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+          <p className="flex items-center gap-1.5 font-semibold text-[#252525]"><Mail size={13} className="text-[#5d6b8b]" /> {task.linked_message_count} email{task.linked_message_count === 1 ? "" : "s"}</p>
+          <p className="mt-1 truncate text-[11px] text-[#555]" title={task.latest_message_subject}>{task.latest_message_subject}</p>
+          <p className="mt-1 font-mono text-[10px] text-[#888]">Latest {formatDate(task.latest_message_at)}</p>
+        </div>
+        <div className="border-l border-[#e6e6e6] px-3 py-4 text-xs text-[#4d5662]">{task.wms_doc_no ? <><p className="font-semibold">{task.wms_system || "WMS"}</p><p className="mt-1 font-mono">{task.wms_doc_no}</p></> : <p>WMS reference pending</p>}</div>
+        <div className="flex items-center justify-center border-l border-[#e6e6e6] px-2 py-4"><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="inline-flex items-center gap-1 border border-[#9aa4bb] bg-white px-2 py-2 text-[11px] font-semibold text-[#4c5d82] hover:border-[#5d6b8b] hover:bg-[#5d6b8b] hover:text-white">{expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Detail</button></div>
       </div>
-      <div className="text-xs text-[#4d5662]">
-        <p className="font-semibold">{task.record_type} · {task.direction}</p>
-        <p className="mt-1">Owner: {task.task_owner || "Unassigned"}</p>
+
+      <div className="border-t border-[#dedede] bg-white px-3 py-3 text-[12px] sm:hidden">
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className={`inline-flex border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{task.task_status}</span><p className="mt-2 truncate font-semibold text-[#202020]">{task.title || task.subject || "Business task"}</p><p className="truncate font-mono text-[10px] text-[#777]">{task.external_reference || task.business_task_key}</p></div><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="shrink-0 border border-[#9aa4bb] bg-white p-2 text-[#4c5d82]">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#eeeeee] pt-2 text-[11px] text-[#555]"><span>Next: <strong className="text-[#252525]">{task.next_action || "Review task details"}</strong></span><span>Owner: <strong className="text-[#252525]">{task.task_owner || "Unassigned"}</strong></span><span className="flex items-center gap-1"><Mail size={12} /> {task.linked_message_count} email{task.linked_message_count === 1 ? "" : "s"}</span><span>Latest: {formatDate(task.latest_message_at)}</span></div>
       </div>
-      <div className="text-xs text-[#4d5662]">
-        <p>Physical: {task.physical_execution_owner || "Unassigned"}</p>
-        <p className="mt-1">Approval: {task.approval_status}</p>
-      </div>
-      <div className="text-xs text-[#4d5662]">
-        {task.wms_doc_no ? `${task.wms_system || "WMS"}: ${task.wms_doc_no}` : "WMS reference pending"}
-      </div>
-      <div className="flex flex-wrap gap-2 sm:justify-end">
-        {task.task_status === "Awaiting Sunny Approval" && canApprove && (
-          <button
-            type="button"
-            disabled={isBusy}
-            onClick={() => approvalMutation.mutate()}
-            className="inline-flex items-center gap-1 border border-[#5d936d] bg-[#edf9f1] px-3 py-2 text-xs font-semibold text-[#2d7047] hover:bg-[#dff2e5] disabled:opacity-50"
-          >
-            <Check size={13} /> Approve OB
-          </button>
-        )}
-        {nextStatus && (
-          <button
-            type="button"
-            disabled={isBusy}
-            onClick={() => statusMutation.mutate(nextStatus)}
-            className="border border-[#9aa4bb] bg-white px-3 py-2 text-xs font-semibold text-[#4c5d82] hover:border-[#5d6b8b] hover:bg-[#5d6b8b] hover:text-white disabled:opacity-50"
-          >
-            {nextStatus === "WMS In Progress" ? "Start WMS" : nextStatus}
-          </button>
-        )}
-      </div>
-    </div>
+
+      {expanded && <div className="border-t border-[#d7dbe2] bg-[#f7f8fa] px-4 py-4 sm:col-span-6 sm:px-5"><div className="grid gap-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.8fr)_auto]"><div><p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#747d89]">Business task</p><p className="mt-1 break-all font-mono text-[11px] text-[#303b5b]">{task.business_task_key}</p><p className="mt-2 text-xs text-[#555]">Latest source: <span className="font-mono">{task.latest_source_message_key || "--"}</span></p></div><div><p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#747d89]">Email evidence timeline</p>{detailQuery.isLoading ? <p className="mt-2 text-xs text-[#777]">Loading linked emails...</p> : detailQuery.isError ? <p className="mt-2 text-xs text-[#9a3f38]">Email evidence unavailable.</p> : detailQuery.data?.messages.length ? <div className="mt-2 space-y-2">{detailQuery.data.messages.map((message) => <div key={message.source_message_key} className="border border-[#d7dbe2] bg-white px-3 py-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="truncate text-xs font-semibold text-[#252525]">{message.subject || "(no subject)"}</p><span className="font-mono text-[10px] text-[#888]">{formatDate(message.received_at)}</span></div><p className="mt-1 truncate font-mono text-[10px] text-[#697382]">{message.source_message_key} · {message.sender}</p></div>)}</div> : <p className="mt-2 text-xs text-[#777]">No linked email evidence.</p>}</div><div className="flex flex-wrap items-start gap-2 lg:justify-end">{task.task_status === "Awaiting Sunny Approval" && canApprove && <button type="button" disabled={isBusy} onClick={() => approvalMutation.mutate()} className="inline-flex items-center gap-1 border border-[#5d936d] bg-[#edf9f1] px-3 py-2 text-xs font-semibold text-[#2d7047] hover:bg-[#dff2e5] disabled:opacity-50"><Check size={13} /> Approve OB</button>}{nextStatus && <button type="button" disabled={isBusy} onClick={() => statusMutation.mutate(nextStatus)} className="border border-[#9aa4bb] bg-white px-3 py-2 text-xs font-semibold text-[#4c5d82] hover:border-[#5d6b8b] hover:bg-[#5d6b8b] hover:text-white disabled:opacity-50">{nextStatus === "WMS In Progress" ? "Start WMS" : nextStatus}</button>}</div></div></div>}
+    </>
   );
 }
 
@@ -92,41 +109,17 @@ export default function MailTaskBoard() {
   const permissions = useAuthStore((state) => state.permissions);
   const canView = permissions.includes("*") || permissions.includes("mailtask.execute") || permissions.includes("mailtask.manage");
   const canApprove = permissions.includes("*") || permissions.includes("mailtask.approve_outbound");
-  const { data = [], isLoading, isError, isFetching, refetch } = useQuery({
-    queryKey: queryKeys.mailTasks.list(),
-    queryFn: () => fetchMailTasks({ limit: 100 }),
-    enabled: canView,
-    refetchInterval: canView ? 30_000 : false,
-  });
+  const { data = [], isLoading, isError, isFetching, refetch } = useQuery({ queryKey: queryKeys.mailTasks.list(), queryFn: () => fetchMailTasks({ limit: 100 }), enabled: canView, refetchInterval: canView ? 30_000 : false });
+  const exceptionCount = data.filter((task) => task.exception_flag).length;
+  const pendingCount = data.filter((task) => task.task_status === "Needs Maggie Processing").length;
 
   if (!canView) return null;
 
   return (
-    <section className="mt-6 border border-[#cfcfcf] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" data-testid="mailtask-board" aria-label="MailTask work queue">
-      <div className="flex flex-wrap items-end justify-between gap-4 bg-[#39415f] px-5 py-5 text-white sm:px-6">
-        <div>
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#c9d1e0]">Mail to task</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">Inbound information queue</h2>
-          <p className="mt-1 text-xs text-[#d7deea]">Agent email intake · Maggie processing · Sunny outbound approval · Mark physical execution</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          className="inline-flex items-center gap-2 border border-white/30 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20"
-        >
-          <RefreshCw size={13} className={isFetching ? "animate-spin" : undefined} /> Refresh
-        </button>
-      </div>
-      {isLoading ? (
-        <div className="flex items-center gap-2 px-5 py-8 text-sm text-[#777]"><RefreshCw size={15} className="animate-spin" /> Loading MailTasks...</div>
-      ) : isError ? (
-        <div className="flex items-center gap-2 px-5 py-8 text-sm text-[#9a3f38]"><AlertTriangle size={15} /> MailTask queue is temporarily unavailable.</div>
-      ) : data.length === 0 ? (
-        <div className="px-5 py-8 text-sm text-[#777]">No email-derived tasks are waiting.</div>
-      ) : (
-        <div>{data.map((task) => <MailTaskRow key={task.id} task={task} canApprove={canApprove} />)}</div>
-      )}
-      <div className="border-t border-[#d6d6d6] bg-[#fafafa] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#888]">Auto refresh 30s · Dashboard is a projection of MailTask records</div>
+    <section className="mt-6 border border-[#cfcfcf] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" data-testid="mailtask-board" aria-label="Mail2Task business task work queue">
+      <div className="bg-[#303b5b] text-white"><div className="flex flex-wrap items-end justify-between gap-5 px-5 py-5 sm:px-6"><div><div className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#c9d1e0]"><span className="h-2 w-2 animate-pulse rounded-full bg-[#70d19a]" /> Mail2Task workbench</div><h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">Business task queue</h2><p className="mt-1 text-xs text-[#d7deea]">One row = one business task · linked emails are evidence · status is shared by all related messages</p></div><div className="grid grid-cols-3 divide-x divide-white/20 border border-white/20 bg-white/5"><div className="min-w-[72px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Tasks</p><p className="mt-1 font-mono text-xl font-bold">{data.length}</p></div><div className="min-w-[88px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Maggie</p><p className="mt-1 font-mono text-xl font-bold">{pendingCount}</p></div><div className="min-w-[88px] px-3 py-2 text-center"><p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cbd3df]">Exception</p><p className="mt-1 font-mono text-xl font-bold">{exceptionCount}</p></div></div></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/15 px-5 py-2.5 text-[11px] sm:px-6"><span className="font-mono uppercase tracking-[0.14em] text-[#cbd3df]">Queue / business tasks</span><button type="button" onClick={() => void refetch()} className="inline-flex items-center gap-2 border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"><RefreshCw size={13} className={isFetching ? "animate-spin" : undefined} /> Refresh</button></div></div>
+      {isLoading ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#777]"><RefreshCw size={16} className="animate-spin" /> Loading business task queue...</div> : isError ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#9a3f38]"><AlertTriangle size={17} /> Mail2Task queue is temporarily unavailable.</div> : data.length === 0 ? <div className="px-6 py-12 text-sm text-[#777]">No email-derived business tasks are waiting.</div> : <div className="overflow-x-auto"><div className="hidden min-w-[1080px] grid-cols-[112px_minmax(240px,1.35fr)_minmax(220px,1.2fr)_190px_170px_92px] bg-[#eef0f4] text-[10px] font-bold uppercase tracking-[0.12em] text-[#626a77] sm:grid"><span className="px-3 py-3">Status</span><span className="border-l border-[#d7dbe2] px-3 py-3">Business task / ref</span><span className="border-l border-[#d7dbe2] px-3 py-3">Pending action / owner</span><span className="border-l border-[#d7dbe2] px-3 py-3">Mail evidence</span><span className="border-l border-[#d7dbe2] px-3 py-3">WMS handoff</span><span className="border-l border-[#d7dbe2] px-3 py-3">Open</span></div>{data.map((task) => <MailTaskRow key={task.id} task={task} canApprove={canApprove} />)}</div>}
+      <div className="border-t border-[#d6d6d6] bg-[#fafafa] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#888] sm:px-5">Auto refresh 30s · Mail2Task is the email-to-task workbench; Warehouse Operations remains the execution board</div>
     </section>
   );
 }

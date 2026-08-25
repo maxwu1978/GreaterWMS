@@ -55,6 +55,7 @@ export const queryKeys = {
   },
   mailTasks: {
     list: (...filters: readonly unknown[]) => ["mail-tasks", ...filters] as const,
+    detail: (taskKey: unknown) => ["mail-task-detail", taskKey] as const,
   },
   putaway: {
     warehouses: () => ["putaway-warehouses"] as const,

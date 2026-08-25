@@ -2,12 +2,13 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -24,6 +25,7 @@ from app.models.mail_task import (
     MailTaskApproval,
     MailTaskApprovalStatus,
     MailTaskDirection,
+    MailTaskGroup,
     MailTaskRecordType,
     MailTaskStatus,
     PhysicalExecutionStatus,
@@ -73,6 +75,9 @@ class MailAttachmentPayload(CanonicalModel):
 
 class MailTaskPayload(CanonicalModel):
     task_key: str = Field(min_length=1, max_length=180, alias="TaskKey")
+    business_task_key: str | None = Field(
+        default=None, max_length=180, alias="BusinessTaskKey"
+    )
     source_message_key: str = Field(min_length=1, max_length=255, alias="SourceMessageKey")
     thread_id: str | None = Field(default=None, max_length=255, alias="ThreadID")
     source_document_id: str = Field(default="message", max_length=180, alias="SourceDocumentID")
@@ -179,8 +184,12 @@ class MailTaskIntakeRequest(CanonicalModel):
 class MailTaskSummary(BaseModel):
     id: str
     task_key: str
+    business_task_key: str
     source_message_key: str
     subject: str
+    title: str | None
+    next_action: str | None
+    external_reference: str | None
     record_type: str
     direction: str
     task_status: str
@@ -190,6 +199,25 @@ class MailTaskSummary(BaseModel):
     exception_flag: bool
     wms_system: str | None
     wms_doc_no: str | None
+    linked_message_count: int
+    latest_message_subject: str
+    latest_message_at: datetime | None
+    latest_source_message_key: str | None
+
+
+class MailTaskMessageSummary(BaseModel):
+    source_message_key: str
+    subject: str
+    sender: str
+    received_at: datetime
+    thread_id: str | None
+    decision: str
+    attachment_names: list[str] | None
+    attachment_read_status: str | None
+
+
+class MailTaskDetail(MailTaskSummary):
+    messages: list[MailTaskMessageSummary]
 
 
 class MailTaskIntakeResponse(BaseModel):
@@ -315,21 +343,129 @@ def _normalized_status(payload: MailTaskPayload) -> MailTaskStatus:
     return payload.task_status
 
 
-def _task_summary(task: MailTask, subject: str) -> MailTaskSummary:
+def _group_key(payload: MailTaskPayload) -> str:
+    """Return the stable business identity supplied/derived by Mail2Task."""
+    if payload.business_task_key:
+        raw_key = payload.business_task_key.strip()
+        return raw_key
+    reference = next(
+        (
+            value.strip()
+            for value in (
+                payload.external_reference,
+                payload.bol_number,
+                payload.do_number,
+                payload.container_or_tracking,
+                payload.load_id,
+                payload.po,
+                payload.dn,
+            )
+            if value and value.strip()
+        ),
+        None,
+    )
+    if reference:
+        raw_key = f"{payload.direction.value}:{reference}"
+    elif payload.thread_id:
+        raw_key = f"{payload.direction.value}:thread:{payload.thread_id}"
+    else:
+        # No reference means we must not merge messages on subject text alone.
+        raw_key = f"{payload.direction.value}:message:{payload.source_message_key}"
+    if len(raw_key) <= 180:
+        return raw_key
+    # Keep the DB key bounded while preserving deterministic identity.
+    return f"{raw_key[:145]}:{sha256(raw_key.encode()).hexdigest()[:34]}"
+
+
+def _group_summary(
+    group: MailTaskGroup,
+    *,
+    source_message_key: str,
+    subject: str,
+    linked_message_count: int,
+    latest_message_at: datetime | None,
+) -> MailTaskSummary:
     return MailTaskSummary(
-        id=task.id,
-        task_key=task.task_key,
-        source_message_key=task.source_message_key,
+        id=group.id,
+        task_key=group.task_group_key,
+        business_task_key=group.task_group_key,
+        source_message_key=source_message_key,
         subject=subject,
-        record_type=task.record_type,
-        direction=task.direction,
-        task_status=task.task_status,
-        task_owner=task.task_owner,
-        physical_execution_owner=task.physical_execution_owner,
-        approval_status=task.approval_status,
-        exception_flag=task.exception_flag,
-        wms_system=task.wms_system,
-        wms_doc_no=task.wms_doc_no,
+        title=group.title,
+        next_action=group.next_action,
+        external_reference=group.external_reference,
+        record_type=group.record_type,
+        direction=group.direction,
+        task_status=group.task_status,
+        task_owner=group.task_owner,
+        physical_execution_owner=group.physical_execution_owner,
+        approval_status=group.approval_status,
+        exception_flag=group.exception_flag,
+        wms_system=group.wms_system,
+        wms_doc_no=group.wms_doc_no,
+        linked_message_count=linked_message_count,
+        latest_message_subject=subject,
+        latest_message_at=latest_message_at,
+        latest_source_message_key=source_message_key,
+    )
+
+
+async def _load_group_summary(db: AsyncSession, group: MailTaskGroup) -> MailTaskSummary:
+    linked_message_count = int(
+        await db.scalar(
+            select(func.count(MailTask.id)).where(
+                MailTask.tenant_id == group.tenant_id,
+                MailTask.business_task_id == group.id,
+            )
+        )
+        or 0
+    )
+    latest = await db.execute(
+        select(MailMessage.source_message_key, MailMessage.subject, MailMessage.received_at)
+        .join(MailTask, MailTask.mail_message_id == MailMessage.id)
+        .where(
+            MailTask.tenant_id == group.tenant_id,
+            MailTask.business_task_id == group.id,
+        )
+        .order_by(MailMessage.received_at.desc(), MailMessage.created_at.desc())
+        .limit(1)
+    )
+    latest_row = latest.first()
+    return _group_summary(
+        group,
+        source_message_key=(latest_row.source_message_key if latest_row else ""),
+        subject=(latest_row.subject if latest_row else group.title or group.task_group_key),
+        linked_message_count=linked_message_count,
+        latest_message_at=(latest_row.received_at if latest_row else group.latest_message_at),
+    )
+
+
+async def _load_group_detail(db: AsyncSession, group: MailTaskGroup) -> MailTaskDetail:
+    summary = await _load_group_summary(db, group)
+    rows = await db.execute(
+        select(MailMessage)
+        .join(MailTask, MailTask.mail_message_id == MailMessage.id)
+        .where(
+            MailTask.tenant_id == group.tenant_id,
+            MailTask.business_task_id == group.id,
+        )
+        .order_by(MailMessage.received_at.desc(), MailMessage.created_at.desc())
+    )
+    return MailTaskDetail(
+        **summary.model_dump(),
+        messages=[
+            MailTaskMessageSummary(
+                source_message_key=message.source_message_key,
+                subject=message.subject,
+                sender=message.sender,
+                received_at=message.received_at,
+                thread_id=message.thread_id,
+                decision=message.decision,
+                attachment_names=message.attachment_names,
+                attachment_read_status=message.attachment_read_status,
+            )
+            for message in rows.scalars()
+        ],
     )
 
 
@@ -359,6 +495,151 @@ async def _upsert_message(
     return message, False
 
 
+async def _upsert_group(
+    db: AsyncSession,
+    tenant_id: str,
+    message: MailMessage,
+    payload: MailTaskPayload,
+    actor_user_id: str,
+) -> tuple[MailTaskGroup, bool]:
+    group_key = _group_key(payload)
+    group = await db.scalar(
+        select(MailTaskGroup).where(
+            MailTaskGroup.tenant_id == tenant_id,
+            MailTaskGroup.task_group_key == group_key,
+        )
+    )
+    status_value = _normalized_status(payload).value
+    approval_required = payload.direction == MailTaskDirection.OUTBOUND or payload.approval_required
+    approval_status = (
+        MailTaskApprovalStatus.PENDING.value
+        if approval_required
+        else MailTaskApprovalStatus.NOT_REQUIRED.value
+    )
+    canonical_payload = jsonable_encoder(payload.model_dump(by_alias=True, exclude_none=True))
+    if group is None:
+        group = MailTaskGroup(
+            tenant_id=tenant_id,
+            task_group_key=group_key,
+            title=payload.title,
+            record_type=payload.record_type.value,
+            direction=payload.direction.value,
+            external_reference=payload.external_reference
+            or payload.bol_number
+            or payload.do_number
+            or payload.container_or_tracking,
+            next_action=payload.next_action,
+            task_status=status_value,
+            task_owner=payload.task_owner or "Maggie",
+            intake_owner=payload.intake_owner or "Sunny",
+            physical_execution_owner=payload.physical_execution_owner
+            or ("Mark" if payload.record_type in {MailTaskRecordType.IB, MailTaskRecordType.OB} else None),
+            physical_execution_status=payload.physical_execution_status.value,
+            wms_system=payload.wms_system,
+            wms_doc_no=payload.wms_doc_no,
+            wms_order_id=payload.wms_order_id,
+            wms_match_status=payload.wms_match_status,
+            wms_current_status=payload.wms_current_status,
+            wms_match_method=payload.wms_match_method,
+            wms_match_confidence=payload.wms_match_confidence,
+            approval_required=approval_required,
+            approval_type=payload.approval_type,
+            approval_status=approval_status,
+            approved_by=payload.approved_by,
+            approved_at=payload.approved_at,
+            approval_evidence=jsonable_encoder(payload.approval_evidence)
+            if payload.approval_evidence is not None
+            else None,
+            exception_flag=payload.exception_flag,
+            exception_description=payload.exception_description,
+            latest_mail_message_id=message.id,
+            latest_message_at=message.received_at,
+            last_updated_by=actor_user_id,
+            canonical_payload=canonical_payload,
+        )
+        db.add(group)
+        await db.flush()
+        return group, True
+
+    if group.record_type != payload.record_type.value or group.direction != payload.direction.value:
+        group.exception_flag = True
+        group.exception_description = (
+            "Different emails were matched to this business task with conflicting record type "
+            "or direction; manual review required"
+        )
+
+    if group.task_status in {MailTaskStatus.CLOSED.value, MailTaskStatus.EXCLUDED.value}:
+        group.exception_flag = True
+        group.exception_description = (
+            "A new source update was received for a closed/excluded business task; manual review required"
+        )
+    else:
+        for field_name, value in {
+            "title": payload.title,
+            "external_reference": payload.external_reference
+            or payload.bol_number
+            or payload.do_number
+            or payload.container_or_tracking,
+            "next_action": payload.next_action,
+        }.items():
+            if value:
+                setattr(group, field_name, value)
+        if approval_required:
+            group.approval_required = True
+            if group.approval_status == MailTaskApprovalStatus.NOT_REQUIRED.value:
+                group.approval_status = MailTaskApprovalStatus.PENDING.value
+        for field_name, value in {
+            "wms_system": payload.wms_system,
+            "wms_doc_no": payload.wms_doc_no,
+            "wms_order_id": payload.wms_order_id,
+            "wms_match_status": payload.wms_match_status,
+            "wms_current_status": payload.wms_current_status,
+            "wms_match_method": payload.wms_match_method,
+            "wms_match_confidence": payload.wms_match_confidence,
+        }.items():
+            if value is not None:
+                setattr(group, field_name, value)
+
+    received_at = message.received_at.replace(tzinfo=None)
+    latest_message_at = (
+        group.latest_message_at.replace(tzinfo=None) if group.latest_message_at else None
+    )
+    if latest_message_at is None or received_at >= latest_message_at:
+        group.latest_mail_message_id = message.id
+        group.latest_message_at = message.received_at
+    group.last_updated_by = actor_user_id
+    group.canonical_payload = canonical_payload
+    await db.flush()
+    return group, False
+
+
+def _sync_task_from_group(task: MailTask, group: MailTaskGroup) -> None:
+    """Keep the legacy per-message projection aligned with the group authority."""
+    task.business_task_id = group.id
+    task.task_status = group.task_status
+    task.task_owner = group.task_owner
+    task.intake_owner = group.intake_owner
+    task.physical_execution_owner = group.physical_execution_owner
+    task.physical_execution_status = group.physical_execution_status
+    task.wms_system = group.wms_system
+    task.wms_doc_no = group.wms_doc_no
+    task.wms_order_id = group.wms_order_id
+    task.wms_match_status = group.wms_match_status
+    task.wms_current_status = group.wms_current_status
+    task.wms_match_method = group.wms_match_method
+    task.wms_match_confidence = group.wms_match_confidence
+    task.approval_required = group.approval_required
+    task.approval_type = group.approval_type
+    task.approval_status = group.approval_status
+    task.approved_by = group.approved_by
+    task.approved_at = group.approved_at
+    task.approval_evidence = group.approval_evidence
+    task.exception_flag = task.exception_flag or group.exception_flag
+    if group.exception_description:
+        task.exception_description = group.exception_description
+    task.last_updated_by = group.last_updated_by
+
+
 async def _upsert_task(
     db: AsyncSession,
     tenant_id: str,
@@ -386,27 +667,32 @@ async def _upsert_task(
             detail=f"TaskKey {payload.task_key} is already bound to another source document",
         )
 
-    status_value = _normalized_status(payload).value
-    is_outbound = payload.direction == MailTaskDirection.OUTBOUND
-    approval_required = is_outbound or payload.approval_required
-    approval_status = (
-        MailTaskApprovalStatus.PENDING.value
-        if approval_required
-        else MailTaskApprovalStatus.NOT_REQUIRED.value
+    group, _group_created = await _upsert_group(
+        db, tenant_id, message, payload, actor_user_id
     )
+    if task is not None and task.business_task_id and task.business_task_id != group.id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"TaskKey {payload.task_key} is already bound to another business task",
+        )
+
+    status_value = group.task_status
+    approval_required = group.approval_required
+    approval_status = group.approval_status
     canonical_payload = jsonable_encoder(payload.model_dump(by_alias=True, exclude_none=True))
 
     if task is None:
         task = MailTask(
             tenant_id=tenant_id,
             task_key=payload.task_key,
+            business_task_id=group.id,
             mail_message_id=message.id,
             source_message_key=payload.source_message_key,
             source_document_id=payload.source_document_id,
             record_type=payload.record_type.value,
             direction=payload.direction.value,
             task_status=status_value,
-            physical_execution_status=payload.physical_execution_status.value,
+            physical_execution_status=group.physical_execution_status,
             approval_required=approval_required,
             approval_status=approval_status,
             canonical_payload=canonical_payload,
@@ -419,12 +705,13 @@ async def _upsert_task(
     else:
         created = False
         unchanged = task.canonical_payload == canonical_payload
-        if task.task_status in {MailTaskStatus.CLOSED.value, MailTaskStatus.EXCLUDED.value}:
+        if group.task_status in {MailTaskStatus.CLOSED.value, MailTaskStatus.EXCLUDED.value}:
             if not unchanged:
                 task.exception_flag = True
-                task.exception_description = "A new source update was received for a closed/excluded task; manual review required"
+                task.exception_description = "A new source update was received for a closed/excluded business task; manual review required"
                 task.last_updated_by = actor_user_id
                 task.canonical_payload = canonical_payload
+                task.business_task_id = group.id
             return task, created, unchanged
 
     task_values = payload.model_dump(exclude_none=True)
@@ -445,6 +732,7 @@ async def _upsert_task(
     task_values.pop("source_evidence", None)
     task_values.pop("thread_id", None)
     task_values.pop("source_attachment", None)
+    task_values.pop("business_task_key", None)
     if not created:
         for field_name in {
             "task_status",
@@ -476,6 +764,7 @@ async def _upsert_task(
         MailTaskRecordType.OB,
     }:
         task.physical_execution_owner = "Mark"
+    _sync_task_from_group(task, group)
     await db.flush()
     return task, created, unchanged
 
@@ -524,10 +813,10 @@ async def _ingest(
 ) -> dict[str, Any]:
     message, _message_created = await _upsert_message(db, tenant_id, body.email)
     tasks: list[MailTask] = []
+    group_ids: list[str] = []
     created_tasks = 0
     updated_tasks = 0
     unchanged_tasks = 0
-    subject = body.email.subject
 
     for payload in body.tasks:
         task, created, unchanged = await _upsert_task(
@@ -541,6 +830,8 @@ async def _ingest(
             updated_tasks += 1
         await _record_agent_evidence(db, tenant_id, task, payload, actor_user_id)
         tasks.append(task)
+        if task.business_task_id and task.business_task_id not in group_ids:
+            group_ids.append(task.business_task_id)
 
     attachment_count = 0
     for attachment in body.attachments:
@@ -560,6 +851,16 @@ async def _ingest(
             db.add(MailAttachment(tenant_id=tenant_id, mail_message_id=message.id, **values))
             attachment_count += 1
     await db.flush()
+    groups = []
+    for group_id in group_ids:
+        group = await db.scalar(
+            select(MailTaskGroup).where(
+                MailTaskGroup.tenant_id == tenant_id,
+                MailTaskGroup.id == group_id,
+            )
+        )
+        if group is not None:
+            groups.append(await _load_group_summary(db, group))
 
     return MailTaskIntakeResponse(
         source_message_key=body.email.source_message_key,
@@ -569,7 +870,7 @@ async def _ingest(
         updated_tasks=updated_tasks,
         unchanged_tasks=unchanged_tasks,
         attachment_count=attachment_count,
-        tasks=[_task_summary(task, subject) for task in tasks],
+        tasks=groups,
     ).model_dump()
 
 
@@ -591,6 +892,44 @@ async def ingest_mailtasks(
     return MailTaskIntakeResponse.model_validate(result)
 
 
+async def _resolve_group(
+    db: AsyncSession, tenant_id: str, task_key: str
+) -> MailTaskGroup | None:
+    group = await db.scalar(
+        select(MailTaskGroup).where(
+            MailTaskGroup.tenant_id == tenant_id,
+            MailTaskGroup.task_group_key == task_key,
+        )
+    )
+    if group is not None:
+        return group
+    task = await db.scalar(
+        select(MailTask).where(
+            MailTask.tenant_id == tenant_id,
+            MailTask.task_key == task_key,
+        )
+    )
+    if task is None or task.business_task_id is None:
+        return None
+    return await db.scalar(
+        select(MailTaskGroup).where(
+            MailTaskGroup.tenant_id == tenant_id,
+            MailTaskGroup.id == task.business_task_id,
+        )
+    )
+
+
+async def _sync_group_children(db: AsyncSession, group: MailTaskGroup) -> None:
+    children = await db.scalars(
+        select(MailTask).where(
+            MailTask.tenant_id == group.tenant_id,
+            MailTask.business_task_id == group.id,
+        )
+    )
+    for child in children:
+        _sync_task_from_group(child, group)
+
+
 @router.get("/", response_model=list[MailTaskSummary])
 async def list_mailtasks(
     task_status: str | None = Query(default=None, alias="status"),
@@ -606,22 +945,29 @@ async def list_mailtasks(
     db: AsyncSession = Depends(get_db_session),
 ) -> list[MailTaskSummary]:
     tenant_id = _tenant_id(current_user)
-    query = (
-        select(MailTask, MailMessage.subject)
-        .join(MailMessage, MailMessage.id == MailTask.mail_message_id)
-        .where(MailTask.tenant_id == tenant_id)
-    )
+    # Direct function calls in regression tests do not pass FastAPI's resolved Query default.
+    if not isinstance(limit, int):
+        limit = 100
+    if not isinstance(task_status, str):
+        task_status = None
+    if not isinstance(direction, str):
+        direction = None
+    if not isinstance(task_owner, str):
+        task_owner = None
+    query = select(MailTaskGroup).where(MailTaskGroup.tenant_id == tenant_id)
     if task_status:
-        query = query.where(MailTask.task_status == task_status)
+        query = query.where(MailTaskGroup.task_status == task_status)
     if direction:
-        query = query.where(MailTask.direction == direction)
+        query = query.where(MailTaskGroup.direction == direction)
     if task_owner:
-        query = query.where(MailTask.task_owner == task_owner)
-    rows = (await db.execute(query.order_by(MailTask.created_at.desc()).limit(limit))).all()
-    return [_task_summary(task, subject) for task, subject in rows]
+        query = query.where(MailTaskGroup.task_owner == task_owner)
+    groups = (
+        await db.scalars(query.order_by(MailTaskGroup.updated_at.desc()).limit(limit))
+    ).all()
+    return [await _load_group_summary(db, group) for group in groups]
 
 
-@router.get("/{task_key}", response_model=MailTaskSummary)
+@router.get("/{task_key}", response_model=MailTaskDetail)
 async def get_mailtask(
     task_key: str,
     current_user: TokenPayload = Depends(
@@ -631,18 +977,12 @@ async def get_mailtask(
         )
     ),
     db: AsyncSession = Depends(get_db_session),
-) -> MailTaskSummary:
+) -> MailTaskDetail:
     tenant_id = _tenant_id(current_user)
-    row = await db.execute(
-        select(MailTask, MailMessage.subject)
-        .join(MailMessage, MailMessage.id == MailTask.mail_message_id)
-        .where(MailTask.tenant_id == tenant_id, MailTask.task_key == task_key)
-    )
-    result = row.first()
-    if not result:
-        raise HTTPException(status_code=404, detail="MailTask not found")
-    task, subject = result
-    return _task_summary(task, subject)
+    group = await _resolve_group(db, tenant_id, task_key)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Business MailTask not found")
+    return await _load_group_detail(db, group)
 
 
 @router.patch("/{task_key}/status", response_model=MailTaskSummary)
@@ -653,15 +993,13 @@ async def update_mailtask_status(
     db: AsyncSession = Depends(get_db_session),
 ) -> MailTaskSummary:
     tenant_id = _tenant_id(current_user)
-    task = await db.scalar(
-        select(MailTask).where(MailTask.tenant_id == tenant_id, MailTask.task_key == task_key)
-    )
-    if not task:
-        raise HTTPException(status_code=404, detail="MailTask not found")
+    group = await _resolve_group(db, tenant_id, task_key)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Business MailTask not found")
     next_status = body.task_status
-    current_status = MailTaskStatus(task.task_status)
+    current_status = MailTaskStatus(group.task_status)
     if next_status == current_status:
-        return await get_mailtask(task_key, current_user=current_user, db=db)
+        return await _load_group_summary(db, group)
     if next_status not in _STATUS_TRANSITIONS.get(current_status, set()):
         raise HTTPException(
             status_code=409,
@@ -669,19 +1007,20 @@ async def update_mailtask_status(
         )
     if (
         next_status == MailTaskStatus.READY_FOR_WMS
-        and task.direction == MailTaskDirection.OUTBOUND.value
-        and task.approval_status != MailTaskApprovalStatus.APPROVED.value
+        and group.direction == MailTaskDirection.OUTBOUND.value
+        and group.approval_status != MailTaskApprovalStatus.APPROVED.value
     ):
         raise HTTPException(
             status_code=409,
             detail="Outbound task requires Sunny approval before it is ready for WMS",
         )
-    task.task_status = next_status.value
-    task.last_updated_by = current_user.sub
+    group.task_status = next_status.value
+    group.last_updated_by = current_user.sub
     if body.note:
-        task.exception_description = body.note
+        group.exception_description = body.note
+    await _sync_group_children(db, group)
     await db.flush()
-    return await get_mailtask(task_key, current_user=current_user, db=db)
+    return await _load_group_summary(db, group)
 
 
 @router.post("/{task_key}/outbound-approval", response_model=MailTaskSummary)
@@ -694,14 +1033,12 @@ async def decide_outbound_approval(
     db: AsyncSession = Depends(get_db_session),
 ) -> MailTaskSummary:
     tenant_id = _tenant_id(current_user)
-    task = await db.scalar(
-        select(MailTask).where(MailTask.tenant_id == tenant_id, MailTask.task_key == task_key)
-    )
-    if not task:
-        raise HTTPException(status_code=404, detail="MailTask not found")
-    if task.direction != MailTaskDirection.OUTBOUND.value:
+    group = await _resolve_group(db, tenant_id, task_key)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Business MailTask not found")
+    if group.direction != MailTaskDirection.OUTBOUND.value:
         raise HTTPException(status_code=409, detail="Only outbound MailTasks require this approval")
-    if task.task_status != MailTaskStatus.AWAITING_SUNNY_APPROVAL.value:
+    if group.task_status != MailTaskStatus.AWAITING_SUNNY_APPROVAL.value:
         raise HTTPException(
             status_code=409,
             detail="Outbound task must be Awaiting Sunny Approval before approval decision",
@@ -713,9 +1050,20 @@ async def decide_outbound_approval(
         if body.decision == "approve"
         else MailTaskApprovalStatus.REJECTED
     )
+    task = await db.scalar(
+        select(MailTask)
+        .where(
+            MailTask.tenant_id == tenant_id,
+            MailTask.business_task_id == group.id,
+        )
+        .order_by(MailTask.updated_at.desc())
+    )
+    if task is None:
+        raise HTTPException(status_code=409, detail="Business MailTask has no email evidence")
     approval = MailTaskApproval(
         tenant_id=tenant_id,
         mail_task_id=task.id,
+        business_task_id=group.id,
         approval_type="outbound_execution",
         status=decision_status.value,
         approver_user_id=current_user.sub,
@@ -724,15 +1072,16 @@ async def decide_outbound_approval(
         decided_at=now,
     )
     db.add(approval)
-    task.approval_status = decision_status.value
-    task.approved_by = current_user.sub if body.decision == "approve" else None
-    task.approved_at = now if body.decision == "approve" else None
-    task.approval_evidence = jsonable_encoder(body.evidence)
-    task.task_status = (
+    group.approval_status = decision_status.value
+    group.approved_by = current_user.sub if body.decision == "approve" else None
+    group.approved_at = now if body.decision == "approve" else None
+    group.approval_evidence = jsonable_encoder(body.evidence)
+    group.task_status = (
         MailTaskStatus.READY_FOR_WMS.value
         if body.decision == "approve"
         else MailTaskStatus.NEEDS_REVIEW.value
     )
-    task.last_updated_by = current_user.sub
+    group.last_updated_by = current_user.sub
+    await _sync_group_children(db, group)
     await db.flush()
-    return await get_mailtask(task_key, current_user=current_user, db=db)
+    return await _load_group_summary(db, group)

@@ -110,8 +110,64 @@ class MailMessage(Base, TimestampMixin, TenantMixin):
     source_payload: Mapped[dict | None] = mapped_column(JsonType)
 
 
+class MailTaskGroup(Base, TimestampMixin, TenantMixin):
+    """Authoritative business task assembled from one or more source emails."""
+
+    __tablename__ = "mail_task_groups"
+    __table_args__ = (
+        Index("ix_mail_task_groups_tenant_status_owner", "tenant_id", "task_status", "task_owner"),
+        Index("ix_mail_task_groups_tenant_direction_status", "tenant_id", "direction", "task_status"),
+        UniqueConstraint("tenant_id", "task_group_key", name="uq_mail_task_groups_tenant_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    task_group_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(500))
+    record_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
+    external_reference: Mapped[str | None] = mapped_column(String(255))
+    next_action: Mapped[str | None] = mapped_column(Text)
+
+    task_status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default=MailTaskStatus.NEW.value
+    )
+    task_owner: Mapped[str | None] = mapped_column(String(180))
+    intake_owner: Mapped[str | None] = mapped_column(String(180))
+    physical_execution_owner: Mapped[str | None] = mapped_column(String(180))
+    physical_execution_status: Mapped[str] = mapped_column(
+        String(40), nullable=False, default=PhysicalExecutionStatus.NOT_ASSIGNED.value
+    )
+
+    wms_system: Mapped[str | None] = mapped_column(String(40))
+    wms_doc_no: Mapped[str | None] = mapped_column(String(180))
+    wms_order_id: Mapped[str | None] = mapped_column(String(120))
+    wms_match_status: Mapped[str | None] = mapped_column(String(40))
+    wms_current_status: Mapped[str | None] = mapped_column(String(80))
+    wms_match_method: Mapped[str | None] = mapped_column(String(80))
+    wms_match_confidence: Mapped[float | None] = mapped_column(Numeric(6, 4))
+
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approval_type: Mapped[str | None] = mapped_column(String(80))
+    approval_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default=MailTaskApprovalStatus.NOT_REQUIRED.value
+    )
+    approved_by: Mapped[str | None] = mapped_column(String(180))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_evidence: Mapped[dict | list | str | None] = mapped_column(JsonType)
+
+    exception_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exception_description: Mapped[str | None] = mapped_column(Text)
+    latest_mail_message_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("mail_messages.id")
+    )
+    latest_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_updated_by: Mapped[str | None] = mapped_column(String(180))
+    canonical_payload: Mapped[dict | None] = mapped_column(JsonType)
+
+
 class MailTask(Base, TimestampMixin, TenantMixin):
-    """Canonical task projection created from one relevant source message."""
+    """Per-message task/evidence projection linked to a business task group."""
 
     __tablename__ = "mail_tasks"
     __table_args__ = (
@@ -131,6 +187,9 @@ class MailTask(Base, TimestampMixin, TenantMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
     task_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    business_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("mail_task_groups.id"), nullable=True, index=True
+    )
     mail_message_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("mail_messages.id"), nullable=False
     )
@@ -253,6 +312,7 @@ class MailTaskApproval(Base, TimestampMixin, TenantMixin):
     __tablename__ = "mail_task_approvals"
     __table_args__ = (
         Index("ix_mail_task_approvals_tenant_task", "tenant_id", "mail_task_id"),
+        Index("ix_mail_task_approvals_tenant_group", "tenant_id", "business_task_id"),
         Index("ix_mail_task_approvals_tenant_status", "tenant_id", "status"),
     )
 
@@ -260,6 +320,9 @@ class MailTaskApproval(Base, TimestampMixin, TenantMixin):
     tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
     mail_task_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("mail_tasks.id"), nullable=False
+    )
+    business_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("mail_task_groups.id"), nullable=True
     )
     approval_type: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -274,6 +337,7 @@ __all__ = [
     "MailDecision",
     "MailMessage",
     "MailTask",
+    "MailTaskGroup",
     "MailTaskApproval",
     "MailTaskApprovalStatus",
     "MailTaskDirection",

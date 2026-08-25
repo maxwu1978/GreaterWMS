@@ -7,7 +7,13 @@ from app.models.client import Client
 from app.models.idempotency import IdempotencyRecord
 from app.models.inventory import SKU, Inventory, InventoryTransaction
 from app.models.kit import Kit, KitComponent
-from app.models.mail_task import MailAttachment, MailMessage, MailTask, MailTaskApproval
+from app.models.mail_task import (
+    MailAttachment,
+    MailMessage,
+    MailTask,
+    MailTaskApproval,
+    MailTaskGroup,
+)
 from app.models.order import (
     HandlingUnit,
     InboundOrder,
@@ -49,6 +55,7 @@ __all__ = [
     "PackListLine",
     "MailMessage",
     "MailTask",
+    "MailTaskGroup",
     "MailAttachment",
     "MailTaskApproval",
     "HandlingUnit",

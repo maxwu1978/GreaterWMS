@@ -13,6 +13,7 @@ from app.api.v1.endpoints.mailtasks import (
     OutboundApprovalRequest,
     decide_outbound_approval,
     ingest_mailtasks,
+    list_mailtasks,
     update_mailtask_status,
 )
 from app.core.config import settings
@@ -20,7 +21,13 @@ from app.core.database import set_current_tenant_id
 from app.core.deps import get_mailtask_ingest_context
 from app.core.security import TokenPayload, UserPermission, UserRole
 from app.models.agent_evidence import AgentEvidence
-from app.models.mail_task import MailAttachment, MailTask, MailTaskApproval, MailTaskStatus
+from app.models.mail_task import (
+    MailAttachment,
+    MailTask,
+    MailTaskApproval,
+    MailTaskGroup,
+    MailTaskStatus,
+)
 
 
 def _user(
@@ -150,6 +157,68 @@ async def test_mailtask_ingest_token_is_disabled_by_default_and_tenant_bound(mon
     assert context.sub == "service:mailtask-skill"
     assert context.tenant_id == "first-agv-tenant"
     assert UserPermission.MAILTASK_EXECUTE.value in context.permissions
+
+
+@pytest.mark.asyncio
+async def test_related_emails_share_one_business_task_and_status_propagates(
+    db: AsyncSession, tenant_id: str
+):
+    set_current_tenant_id(tenant_id)
+    processor = _user(tenant_id, user_id="maggie")
+    first_body = _outbound_payload("mac-mail:msg-101")
+    first_body.tasks[0].business_task_key = "OB:DELTA-OUT-001"
+    first_body.tasks[0].external_reference = "DELTA-OUT-001"
+    second_body = _outbound_payload("mac-mail:msg-102")
+    second_body.tasks[0].task_key = "mac-mail:msg-102:BOL-001-UPDATE"
+    second_body.tasks[0].business_task_key = "OB:DELTA-OUT-001"
+    second_body.tasks[0].external_reference = "DELTA-OUT-001"
+
+    await ingest_mailtasks(
+        body=first_body,
+        x_idempotency_key="mailtask-group-001",
+        current_user=_user(tenant_id, user_id="service:mailtask-skill"),
+        db=db,
+    )
+    await ingest_mailtasks(
+        body=second_body,
+        x_idempotency_key="mailtask-group-002",
+        current_user=_user(tenant_id, user_id="service:mailtask-skill"),
+        db=db,
+    )
+
+    assert await db.scalar(select(func.count()).select_from(MailTaskGroup)) == 1
+    assert await db.scalar(select(func.count()).select_from(MailTask)) == 2
+    rows = await list_mailtasks(current_user=processor, db=db)
+    assert len(rows) == 1
+    assert rows[0].task_key == "OB:DELTA-OUT-001"
+    assert rows[0].business_task_key == "OB:DELTA-OUT-001"
+    assert rows[0].linked_message_count == 2
+
+    updated = await update_mailtask_status(
+        task_key="OB:DELTA-OUT-001",
+        body=MailTaskStatusRequest(task_status=MailTaskStatus.NEEDS_SUNNY_REVIEW),
+        current_user=processor,
+        db=db,
+    )
+    assert updated.task_status == MailTaskStatus.NEEDS_SUNNY_REVIEW.value
+    children = (await db.scalars(select(MailTask).order_by(MailTask.task_key))).all()
+    assert [child.task_status for child in children] == [
+        MailTaskStatus.NEEDS_SUNNY_REVIEW.value,
+        MailTaskStatus.NEEDS_SUNNY_REVIEW.value,
+    ]
+
+    # Legacy child task keys still resolve to the same business-task authority.
+    await update_mailtask_status(
+        task_key="mac-mail:msg-102:BOL-001-UPDATE",
+        body=MailTaskStatusRequest(task_status=MailTaskStatus.AWAITING_SUNNY_APPROVAL),
+        current_user=processor,
+        db=db,
+    )
+    group = await db.scalar(
+        select(MailTaskGroup).where(MailTaskGroup.task_group_key == "OB:DELTA-OUT-001")
+    )
+    assert group is not None
+    assert group.task_status == MailTaskStatus.AWAITING_SUNNY_APPROVAL.value
 
 
 @pytest.mark.asyncio
