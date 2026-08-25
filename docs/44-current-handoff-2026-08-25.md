@@ -46,9 +46,10 @@ Migrated staging health:
 
 Migrated frontend preview (single source: `frontend/`):
 
-- Vercel deployment: `dpl_6GfWg57Zu61ta2ujNtPiLMWdqXZD`
-- URL: `https://wms-quickstart-frontend-i8s1te990-maxw-2608s-projects.vercel.app`
+- Vercel deployment: `dpl_7FgeV75gEdtM4BPQeVyDZmdSvTJp`
+- URL: `https://wms-quickstart-frontend-eu0zr5gll-maxw-2608s-projects.vercel.app`
 - Target: `preview`; production alias was not promoted
+- Frontend commit: `fc093f6b`; Preview build flag: `VITE_PREVIEW_MODE=1`
 - Preview contract: `docs/45-frontend-preview-source-of-truth.md`
 
 The production health endpoint returns `{"status":"ok"}` from the legacy
