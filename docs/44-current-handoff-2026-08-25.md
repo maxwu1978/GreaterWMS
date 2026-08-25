@@ -44,6 +44,12 @@ Migrated staging health:
 - `https://wms-quickstart-staging.onrender.com/health`
 - Expected runtime SHA: `88b3bf6729dff96b117759328c8c182a19d16f05`
 
+Migrated frontend preview:
+
+- Vercel deployment: `dpl_Dh6xX5QrqtHQBo4xeZcA1jstkV9g`
+- URL: `https://wms-quickstart-frontend-fdgbjerp6-maxw-2608s-projects.vercel.app`
+- Target: `preview`; production alias was not promoted
+
 The production health endpoint returns `{"status":"ok"}` from the legacy
 service and does not expose a build SHA. Render deployment history is the
 source for the verified production commit.

@@ -62,6 +62,17 @@ The health response was verified after deployment and returned `status=ok`,
 `version=0.2.0`, `branch=main`, and the live migration commit. The OpenAPI
 document at `/api/openapi.json` also returned successfully.
 
+### Migrated frontend preview
+
+- Vercel project: `wms-quickstart-frontend`
+- Deployment: `dpl_Dh6xX5QrqtHQBo4xeZcA1jstkV9g`
+- Preview URL: `https://wms-quickstart-frontend-fdgbjerp6-maxw-2608s-projects.vercel.app`
+- Target: `preview` (not production)
+- API base: `https://wms-quickstart-staging.onrender.com/api/v1`
+
+The preview returned HTTP 200 and its built JavaScript contains the staging API
+base. The production alias `https://app.maxsmartwms.online` was not promoted.
+
 ### Current production path
 
 The production DNS is still:
