@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Mail, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "../../shared/hooks/useAuth";
+import { GreaterWmsTable, GreaterWmsTableCell, GreaterWmsTableHeader, GreaterWmsTableHeaderCell, GreaterWmsTableRow } from "../../shared/components/GreaterWmsTable";
 import {
   decideOutboundApproval,
   fetchMailTask,
@@ -23,6 +24,20 @@ const statusClass: Record<string, string> = {
   Executed: "border-[#9ccfb0] bg-[#edf9f1] text-[#2d7047]",
   Closed: "border-[#b7b7b7] bg-[#f5f5f5] text-[#555]",
 };
+
+const MAIL_TASK_TABLE_COLUMNS = "152px minmax(270px,1.5fr) minmax(230px,1.25fr) 210px 180px 84px";
+const MAIL_TASK_TABLE_MIN_WIDTH = 1120;
+const compactStatusLabel: Record<string, string> = {
+  "Needs Maggie Processing": "Maggie processing",
+  "Needs Sunny Review": "Sunny review",
+  "Awaiting Sunny Approval": "Sunny approval",
+  "Ready for WMS": "Ready for WMS",
+  "Needs Review": "Needs review",
+};
+
+function statusLabel(status: string): string {
+  return compactStatusLabel[status] || status;
+}
 
 function canAdvance(task: MailTaskSummary): MailTaskStatus | null {
   if (task.task_status === "Needs Maggie Processing") return "Needs Sunny Review";
@@ -116,7 +131,7 @@ const previewMailTasks: MailTaskSummary[] = [
   },
 ];
 
-function MailTaskRow({ task, canApprove }: { task: MailTaskSummary; canApprove: boolean }) {
+function MailTaskRow({ task, canApprove, rowIndex }: { task: MailTaskSummary; canApprove: boolean; rowIndex: number }) {
   const [expanded, setExpanded] = useState(false);
   const previewMode = isGreaterWmsPreviewMode();
   const queryClient = useQueryClient();
@@ -145,32 +160,32 @@ function MailTaskRow({ task, canApprove }: { task: MailTaskSummary; canApprove: 
 
   return (
     <>
-      <div className="hidden min-w-[1080px] grid-cols-[112px_minmax(240px,1.35fr)_minmax(220px,1.2fr)_190px_170px_92px] items-stretch border-t border-[#dedede] text-[13px] odd:bg-white even:bg-[#fafafa] hover:bg-[#f1f4f8] sm:grid">
-        <div className="flex flex-col justify-center px-3 py-4">
-          <span className={`inline-flex w-fit border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{task.task_status}</span>
+      <GreaterWmsTableRow columns={MAIL_TASK_TABLE_COLUMNS} minWidth={MAIL_TASK_TABLE_MIN_WIDTH} stripe={rowIndex % 2 === 1 ? "alternate" : "base"}>
+        <GreaterWmsTableCell className="flex flex-col justify-center">
+          <span title={task.task_status} className={`inline-flex w-fit max-w-full border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{statusLabel(task.task_status)}</span>
           {task.exception_flag && <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#c9574f]"><AlertTriangle size={12} /> Exception</span>}
-        </div>
-        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+        </GreaterWmsTableCell>
+        <GreaterWmsTableCell>
           <div className="flex items-center gap-2"><p className="truncate font-semibold text-[#202020]">{task.title || task.subject || "Business task"}</p><span className="shrink-0 border border-[#9db7d6] bg-[#eef4fc] px-1.5 py-0.5 text-[10px] font-bold text-[#345d8e]">{task.record_type}</span></div>
           <p className="mt-1 truncate font-mono text-[11px] text-[#4d5662]">{task.external_reference || task.business_task_key}</p>
           <p className="mt-1 truncate text-[11px] text-[#858b94]">{task.direction} · Owner {task.task_owner || "Unassigned"}</p>
-        </div>
-        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+        </GreaterWmsTableCell>
+        <GreaterWmsTableCell>
           <p className="font-semibold text-[#252525]">{task.next_action || "Review task details"}</p>
           <p className="mt-1 text-[11px] text-[#777]">Physical: {task.physical_execution_owner || "Unassigned"}</p>
           <p className="mt-1 text-[11px] text-[#777]">Approval: {task.approval_status}</p>
-        </div>
-        <div className="min-w-0 border-l border-[#e6e6e6] px-3 py-4">
+        </GreaterWmsTableCell>
+        <GreaterWmsTableCell>
           <p className="flex items-center gap-1.5 font-semibold text-[#252525]"><Mail size={13} className="text-[#5d6b8b]" /> {task.linked_message_count} email{task.linked_message_count === 1 ? "" : "s"}</p>
           <p className="mt-1 truncate text-[11px] text-[#555]" title={task.latest_message_subject}>{task.latest_message_subject}</p>
           <p className="mt-1 font-mono text-[10px] text-[#888]">Latest {formatDate(task.latest_message_at)}</p>
-        </div>
-        <div className="border-l border-[#e6e6e6] px-3 py-4 text-xs text-[#4d5662]">{task.wms_doc_no ? <><p className="font-semibold">{task.wms_system || "WMS"}</p><p className="mt-1 font-mono">{task.wms_doc_no}</p></> : <p>WMS reference pending</p>}</div>
-        <div className="flex items-center justify-center border-l border-[#e6e6e6] px-2 py-4"><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="inline-flex items-center gap-1 border border-[#9aa4bb] bg-white px-2 py-2 text-[11px] font-semibold text-[#4c5d82] hover:border-[#5d6b8b] hover:bg-[#5d6b8b] hover:text-white">{expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Detail</button></div>
-      </div>
+        </GreaterWmsTableCell>
+        <GreaterWmsTableCell className="text-xs text-[#4d5662]">{task.wms_doc_no ? <><p className="font-semibold">{task.wms_system || "WMS"}</p><p className="mt-1 font-mono">{task.wms_doc_no}</p></> : <p>WMS reference pending</p>}</GreaterWmsTableCell>
+        <GreaterWmsTableCell className="flex items-center justify-center px-2"><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="inline-flex items-center gap-1 border border-[#9aa4bb] bg-white px-2 py-2 text-[11px] font-semibold text-[#4c5d82] hover:border-[#5d6b8b] hover:bg-[#5d6b8b] hover:text-white">{expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Detail</button></GreaterWmsTableCell>
+      </GreaterWmsTableRow>
 
       <div className="border-t border-[#dedede] bg-white px-3 py-3 text-[12px] sm:hidden">
-        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className={`inline-flex border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{task.task_status}</span><p className="mt-2 truncate font-semibold text-[#202020]">{task.title || task.subject || "Business task"}</p><p className="truncate font-mono text-[10px] text-[#777]">{task.external_reference || task.business_task_key}</p></div><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="shrink-0 border border-[#9aa4bb] bg-white p-2 text-[#4c5d82]">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></div>
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span title={task.task_status} className={`inline-flex border px-2 py-1 text-[10px] font-bold tracking-[0.08em] ${badge}`}>{statusLabel(task.task_status)}</span><p className="mt-2 truncate font-semibold text-[#202020]">{task.title || task.subject || "Business task"}</p><p className="truncate font-mono text-[10px] text-[#777]">{task.external_reference || task.business_task_key}</p></div><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} className="shrink-0 border border-[#9aa4bb] bg-white p-2 text-[#4c5d82]">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></div>
         <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[#eeeeee] pt-2 text-[11px] text-[#555]"><span>Next: <strong className="text-[#252525]">{task.next_action || "Review task details"}</strong></span><span>Owner: <strong className="text-[#252525]">{task.task_owner || "Unassigned"}</strong></span><span className="flex items-center gap-1"><Mail size={12} /> {task.linked_message_count} email{task.linked_message_count === 1 ? "" : "s"}</span><span>Latest: {formatDate(task.latest_message_at)}</span></div>
       </div>
 
@@ -193,7 +208,7 @@ export default function MailTaskBoard() {
   if (!canView) return null;
 
   return (
-    <section className="border border-[#d7d7d7] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.22)]" data-testid="mailtask-board" aria-label="Mail2Task business task work queue">
+    <section className="w-full rounded-[2px] border border-[#d7d7d7] bg-white shadow-[0_4px_14px_rgba(0,0,0,0.22)]" data-testid="mailtask-board" aria-label="Mail2Task business task work queue">
       <div className="flex min-h-12 items-center gap-3 bg-[#596782] px-3 text-white sm:px-4">
         <h2 className="text-[16px] font-bold uppercase tracking-[0.08em]">Mail to Task</h2>
         <div className="ml-auto flex items-center gap-3 text-[11px] font-bold uppercase">
@@ -212,7 +227,17 @@ export default function MailTaskBoard() {
         <span className="px-3 py-2.5 text-[14px] font-semibold uppercase text-[#333]">Review</span>
         <span className="ml-auto border border-[#1976d2] px-2 py-1 text-[10px] font-semibold text-[#1976d2]">PS MAIL</span>
       </div>
-      {isLoading ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#777]"><RefreshCw size={16} className="animate-spin" /> Loading business task queue...</div> : isError ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#9a3f38]"><AlertTriangle size={17} /> Mail2Task queue is temporarily unavailable.</div> : data.length === 0 ? <div className="px-6 py-12 text-sm text-[#777]">No email-derived business tasks are waiting.</div> : <div className="overflow-x-auto"><div className="hidden min-w-[1080px] grid-cols-[112px_minmax(240px,1.35fr)_minmax(220px,1.2fr)_190px_170px_92px] bg-[#eef0f4] text-[10px] font-bold uppercase tracking-[0.12em] text-[#626a77] sm:grid"><span className="px-3 py-3">Status</span><span className="border-l border-[#d7dbe2] px-3 py-3">Business task / ref</span><span className="border-l border-[#d7dbe2] px-3 py-3">Pending action / owner</span><span className="border-l border-[#d7dbe2] px-3 py-3">Mail evidence</span><span className="border-l border-[#d7dbe2] px-3 py-3">WMS handoff</span><span className="border-l border-[#d7dbe2] px-3 py-3">Open</span></div>{data.map((task) => <MailTaskRow key={task.id} task={task} canApprove={canApprove} />)}</div>}
+      {isLoading ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#777]"><RefreshCw size={16} className="animate-spin" /> Loading business task queue...</div> : isError ? <div className="flex items-center gap-3 px-6 py-12 text-sm text-[#9a3f38]"><AlertTriangle size={17} /> Mail2Task queue is temporarily unavailable.</div> : data.length === 0 ? <div className="px-6 py-12 text-sm text-[#777]">No email-derived business tasks are waiting.</div> : <GreaterWmsTable>
+        <GreaterWmsTableHeader columns={MAIL_TASK_TABLE_COLUMNS} minWidth={MAIL_TASK_TABLE_MIN_WIDTH}>
+          <GreaterWmsTableHeaderCell>Status</GreaterWmsTableHeaderCell>
+          <GreaterWmsTableHeaderCell>Business task / ref</GreaterWmsTableHeaderCell>
+          <GreaterWmsTableHeaderCell>Pending action / owner</GreaterWmsTableHeaderCell>
+          <GreaterWmsTableHeaderCell>Mail evidence</GreaterWmsTableHeaderCell>
+          <GreaterWmsTableHeaderCell>WMS handoff</GreaterWmsTableHeaderCell>
+          <GreaterWmsTableHeaderCell>Open</GreaterWmsTableHeaderCell>
+        </GreaterWmsTableHeader>
+        {data.map((task, rowIndex) => <MailTaskRow key={task.id} task={task} canApprove={canApprove} rowIndex={rowIndex} />)}
+      </GreaterWmsTable>}
       <div className="border-t border-[#d6d6d6] bg-[#fafafa] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#888] sm:px-5">Auto refresh 30s · Mail2Task is the email-to-task workbench; Warehouse Operations remains the execution board</div>
     </section>
   );

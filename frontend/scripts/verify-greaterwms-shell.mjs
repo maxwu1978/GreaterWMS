@@ -13,6 +13,9 @@ const layout = read("src/shared/components/Layout.tsx");
 const app = read("src/App.tsx");
 const dashboard = read("src/modules/dashboard/DashboardPage.tsx");
 const mail2task = read("src/modules/dashboard/Mail2TaskPage.tsx");
+const operationsBoard = read("src/modules/dashboard/OperationsBoard.tsx");
+const mailTaskBoard = read("src/modules/dashboard/MailTaskBoard.tsx");
+const tablePrimitive = read("src/shared/components/GreaterWmsTable.tsx");
 const failures = [];
 
 const requiredShellMarkers = [
@@ -30,6 +33,13 @@ for (const marker of requiredShellMarkers) {
 if (!app.includes('path="/mail2task"')) failures.push("Mail2Task route is missing");
 if (dashboard.includes("MailTaskBoard")) failures.push("Dashboard must not render MailTaskBoard");
 if (!mail2task.includes("MailTaskBoard")) failures.push("Mail2Task page must render MailTaskBoard");
+if (!tablePrimitive.includes("GREATER_WMS_TABLE_SPEC")) failures.push("shared GreaterWmsTable visual contract is missing");
+if (!operationsBoard.includes("GreaterWmsTableHeader") || !operationsBoard.includes("GreaterWmsTableRow")) {
+  failures.push("Warehouse Operations must use the shared GreaterWmsTable primitives");
+}
+if (!mailTaskBoard.includes("GreaterWmsTableHeader") || !mailTaskBoard.includes("GreaterWmsTableRow")) {
+  failures.push("Mail2Task must use the shared GreaterWmsTable primitives");
+}
 
 if (failures.length) {
   console.error("GreaterWMS shell contract failed:");
@@ -37,4 +47,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("GreaterWMS shell contract passed: one legacy-style shell, separate Dashboard and Mail2Task routes.");
+console.log("GreaterWMS shell/table contract passed: one legacy-style shell, separate Dashboard and Mail2Task routes, shared operational table primitives.");
