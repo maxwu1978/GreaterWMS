@@ -381,12 +381,12 @@ export default {
       ],
       columns: [
         { name: 'status', label: 'Task / Mail', field: 'task_status', align: 'left', style: 'min-width: 120px; width: 135px; max-width: 160px;', headerStyle: 'min-width: 120px; width: 135px; max-width: 160px;' },
+        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'min-width: 95px; width: 105px; max-width: 120px;', headerStyle: 'min-width: 95px; width: 105px; max-width: 120px;' },
         { name: 'task', label: 'Task', field: 'task_id', align: 'left', style: 'min-width: 130px; width: 150px; max-width: 170px;', headerStyle: 'min-width: 130px; width: 150px; max-width: 170px;' },
         { name: 'reference', label: 'Ref / Type', field: 'external_reference', align: 'left', style: 'min-width: 105px; width: 120px; max-width: 140px;', headerStyle: 'min-width: 105px; width: 120px; max-width: 140px;' },
         { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'min-width: 110px; width: 130px; max-width: 160px;', headerStyle: 'min-width: 110px; width: 130px; max-width: 160px;' },
         { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'min-width: 75px; width: 90px; max-width: 110px;', headerStyle: 'min-width: 75px; width: 90px; max-width: 110px;' },
         { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'min-width: 110px; width: 125px; max-width: 150px;', headerStyle: 'min-width: 110px; width: 125px; max-width: 150px;' },
-        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'min-width: 95px; width: 105px; max-width: 120px;', headerStyle: 'min-width: 95px; width: 105px; max-width: 120px;' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
