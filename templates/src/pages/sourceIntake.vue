@@ -117,8 +117,8 @@
           <q-td
             :props="props"
             class="source-intake-next"
-            :title="props.row.task_next_action || props.row.next_action || props.row.exception_summary || ''"
-          ><span class="source-intake-next-label">{{ shortNextAction(props.row.task_next_action || props.row.next_action || props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-')) }}</span></q-td>
+            :title="nextActionTooltip(props.row)"
+          ><span class="source-intake-next-label">{{ nextActionLabel(props.row) }}</span></q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -155,7 +155,8 @@
           </div>
           <div class="source-intake-workflow q-mt-md">
             <div class="source-intake-field-label">Role handoff</div>
-            <div class="text-weight-medium">{{ detail.task_next_action || detail.next_action || 'No next action recorded.' }}</div>
+            <div class="text-weight-medium">{{ nextActionLabel(detail) }}</div>
+            <div class="text-caption text-grey-7 source-intake-wrap">{{ rawNextAction(detail) || 'No next action recorded.' }}</div>
             <div class="row q-col-gutter-sm q-mt-sm">
               <div class="col-12 col-sm-5">
                 <q-select v-model="assignmentRole" dense outlined emit-value map-options :options="taskRoleOptions" label="Assign role" />
@@ -249,9 +250,9 @@
             <div><span>Classification confidence</span><strong>{{ confidenceLabel(detail.classification_confidence) }}</strong></div>
           </div>
           <div class="source-intake-field-label q-mt-md">Next action</div>
-          <div class="text-weight-medium q-mb-sm">{{ detail.next_action_label || '-' }}</div>
+          <div class="text-weight-medium q-mb-sm">{{ nextActionLabel(detail) }}</div>
           <div class="source-intake-field-label">Instructions</div>
-          <div class="q-mb-md source-intake-wrap">{{ detail.next_action || '-' }}</div>
+          <div class="q-mb-md source-intake-wrap">{{ rawNextAction(detail) || '-' }}</div>
           <div v-if="detail.exception_summary" class="source-intake-exception q-pa-sm q-mb-md">
             <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
             <div>{{ detail.exception_summary }}</div>
@@ -300,6 +301,27 @@
 import { getauth, postauth } from 'boot/axios_request.js'
 import GreaterWmsOperationsTable from 'components/GreaterWmsOperationsTable.vue'
 import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
+
+const MAIL_TASK_NEXT_ACTIONS = Object.freeze({
+  PREPARE_WMS: Object.freeze({ label: 'Prepare WMS', owner: 'Maggie' }),
+  APPROVE_OUTBOUND: Object.freeze({ label: 'Approve outbound', owner: 'Sunny' }),
+  START_SITE: Object.freeze({ label: 'Start site work', owner: 'Mark' }),
+  COMPLETE_SITE: Object.freeze({ label: 'Complete site work', owner: 'Mark' }),
+  COMPLETE_WMS: Object.freeze({ label: 'Update WMS', owner: 'Maggie' }),
+  RESOLVE_EXCEPTION: Object.freeze({ label: 'Resolve exception', owner: 'Sunny' }),
+  COMPLETE: Object.freeze({ label: 'Complete', owner: '' }),
+  REVIEW: Object.freeze({ label: 'Review', owner: 'Sunny' })
+})
+
+const MAIL_TASK_STATUS_NEXT_ACTIONS = Object.freeze({
+  OPEN: 'PREPARE_WMS',
+  AWAITING_SUNNY_APPROVAL: 'APPROVE_OUTBOUND',
+  READY_FOR_MARK: 'START_SITE',
+  SITE_IN_PROGRESS: 'COMPLETE_SITE',
+  WMS_FINALIZATION: 'COMPLETE_WMS',
+  COMPLETED: 'COMPLETE',
+  BLOCKED: 'RESOLVE_EXCEPTION'
+})
 
 export default {
   name: 'SourceIntake',
@@ -777,9 +799,9 @@ export default {
     compactSourceTime (value) {
       if (!value) return '-'
       const raw = String(value).trim()
-      const isoLike = raw.match(/^(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})[ T](\d{1,2}):(\d{2})/)
+      const isoLike = raw.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})[ T](\d{1,2}):(\d{2})/)
       const chineseLike = raw.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日(?:[ T]?(\d{1,2}):(\d{2}))?/)
-      const monthFirst = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2}))?/)
+      const monthFirst = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[ T](\d{1,2}):(\d{2}))?/)
       const match = isoLike || chineseLike
       if (match) {
         const month = match === isoLike ? match[2] : String(match[2]).padStart(2, '0')
@@ -983,18 +1005,55 @@ export default {
       if (row && row.assigned_staff_name) return row.assigned_staff_name
       return { SUPERVISOR: 'Sunny', WMS_OPERATOR: 'Maggie', SITE_OPERATOR: 'Mark' }[row && row.assigned_role] || 'Unassigned'
     },
-    shortNextAction (value) {
-      const action = String(value || '-').replace(/^(Sunny|Maggie|Mark):\s*/i, '')
-      const replacements = {
-        'confirm physical receipt': 'Confirm receipt',
-        'approve outbound request': 'Approve outbound',
-        'complete site work': 'Complete site work',
-        'update WMS and record reference': 'Update WMS',
-        'prepare WMS handoff': 'Prepare WMS',
-        'resolve exception and reopen': 'Resolve / reopen'
+    rawNextAction (row) {
+      if (!row) return ''
+      return String(row.task_next_action || row.next_action || row.next_action_label || (row.exception_summary ? 'Review exception' : '')).trim()
+    },
+    nextActionDescriptor (row) {
+      const item = row || {}
+      const explicitCode = String(item.task_next_action_code || '').trim().toUpperCase()
+      if (MAIL_TASK_NEXT_ACTIONS[explicitCode]) {
+        return { code: explicitCode, ...MAIL_TASK_NEXT_ACTIONS[explicitCode] }
       }
-      const compact = replacements[action] || action
-      return compact.length <= 24 ? compact : `${compact.slice(0, 21)}…`
+
+      const statusCode = String(item.task_status || '').trim().toUpperCase()
+      const statusAction = MAIL_TASK_STATUS_NEXT_ACTIONS[statusCode]
+      if (statusAction && MAIL_TASK_NEXT_ACTIONS[statusAction]) {
+        return { code: statusAction, ...MAIL_TASK_NEXT_ACTIONS[statusAction] }
+      }
+
+      const instruction = this.rawNextAction(item).toLowerCase()
+      let inferredCode = ''
+      if (instruction.includes('approve') && instruction.includes('outbound')) {
+        inferredCode = 'APPROVE_OUTBOUND'
+      } else if (instruction.includes('no further action') || ['complete', 'completed'].includes(instruction)) {
+        inferredCode = 'COMPLETE'
+      } else if (['resolve exception', 'clarify', 'request clarification', 'reopen'].some(token => instruction.includes(token))) {
+        inferredCode = 'RESOLVE_EXCEPTION'
+      } else if (instruction.includes('complete') && (instruction.includes('site') || instruction.includes('physical'))) {
+        inferredCode = 'COMPLETE_SITE'
+      } else if (instruction.includes('prepare') && instruction.includes('wms')) {
+        inferredCode = 'PREPARE_WMS'
+      } else if (instruction.includes('wms') && ['record', 'update', 'close', 'complete'].some(token => instruction.includes(token))) {
+        inferredCode = 'COMPLETE_WMS'
+      } else if (['physical receiving', 'site movement', 'site work', 'confirm physical receipt'].some(token => instruction.includes(token))) {
+        inferredCode = 'START_SITE'
+      }
+
+      const code = inferredCode || 'REVIEW'
+      return { code, ...MAIL_TASK_NEXT_ACTIONS[code] }
+    },
+    nextActionLabel (row) {
+      return this.nextActionDescriptor(row).label
+    },
+    nextActionTooltip (row) {
+      const action = this.nextActionDescriptor(row)
+      const detail = this.rawNextAction(row)
+      return [
+        `Next: ${action.label}`,
+        action.owner ? `Role: ${action.owner}` : '',
+        detail ? `Instruction: ${detail}` : ''
+      ].filter(Boolean).join('\n')
     },
     confidenceLabel (value) {
       if (value === null || value === undefined || value === '') return 'Not recorded'

@@ -79,6 +79,30 @@ ACTION_LABELS = {
     'REOPEN': 'Reopen for review',
 }
 
+# MailTask next actions are a controlled display taxonomy. The database keeps
+# the full human instruction in ``next_action`` for evidence and audit, while
+# the API also exposes a stable code/label pair for list views and reports.
+TASK_NEXT_ACTIONS = {
+    'PREPARE_WMS': {'label': 'Prepare WMS', 'owner_role': MailTask.WMS_OPERATOR},
+    'APPROVE_OUTBOUND': {'label': 'Approve outbound', 'owner_role': MailTask.SUPERVISOR},
+    'START_SITE': {'label': 'Start site work', 'owner_role': MailTask.SITE_OPERATOR},
+    'COMPLETE_SITE': {'label': 'Complete site work', 'owner_role': MailTask.SITE_OPERATOR},
+    'COMPLETE_WMS': {'label': 'Update WMS', 'owner_role': MailTask.WMS_OPERATOR},
+    'RESOLVE_EXCEPTION': {'label': 'Resolve exception', 'owner_role': MailTask.SUPERVISOR},
+    'COMPLETE': {'label': 'Complete', 'owner_role': ''},
+    'REVIEW': {'label': 'Review', 'owner_role': MailTask.SUPERVISOR},
+}
+
+TASK_STATUS_NEXT_ACTIONS = {
+    MailTask.OPEN: 'PREPARE_WMS',
+    MailTask.AWAITING_SUNNY_APPROVAL: 'APPROVE_OUTBOUND',
+    MailTask.READY_FOR_MARK: 'START_SITE',
+    MailTask.SITE_IN_PROGRESS: 'COMPLETE_SITE',
+    MailTask.WMS_FINALIZATION: 'COMPLETE_WMS',
+    MailTask.COMPLETED: 'COMPLETE',
+    MailTask.BLOCKED: 'RESOLVE_EXCEPTION',
+}
+
 ACTION_STATES = {
     MailTask.OPEN: ('PREPARE_WMS', 'BLOCK'),
     MailTask.AWAITING_SUNNY_APPROVAL: ('APPROVE_OUTBOUND', 'REJECT_OUTBOUND', 'BLOCK'),
@@ -111,6 +135,45 @@ def task_status_label(value):
 
 def handoff_status_label(value):
     return HANDOFF_STATUS_LABELS.get(str(value or '').upper(), str(value or '') or 'Not started')
+
+
+def task_next_action_display(status='', next_action=''):
+    """Return a stable MailTask next-action code and label.
+
+    Task status is authoritative because free-text instructions can vary by
+    mailbox message. The text remains available as ``detail`` for the UI and
+    audit trail; it is never used as the primary list label when status is
+    known.
+    """
+    status_code = str(status or '').strip().upper()
+    code = TASK_STATUS_NEXT_ACTIONS.get(status_code, '')
+    instruction = _text(next_action, 1000)
+    normalized = instruction.casefold()
+    if not code:
+        if 'approve' in normalized and 'outbound' in normalized:
+            code = 'APPROVE_OUTBOUND'
+        elif 'no further action' in normalized or normalized in {'complete', 'completed'}:
+            code = 'COMPLETE'
+        elif any(token in normalized for token in ('resolve exception', 'clarify', 'request clarification', 'reopen')):
+            code = 'RESOLVE_EXCEPTION'
+        elif 'complete' in normalized and ('site' in normalized or 'physical' in normalized):
+            code = 'COMPLETE_SITE'
+        elif 'prepare' in normalized and 'wms' in normalized:
+            code = 'PREPARE_WMS'
+        elif 'wms' in normalized and any(token in normalized for token in ('record', 'update', 'close', 'complete')):
+            code = 'COMPLETE_WMS'
+        elif any(token in normalized for token in ('physical receiving', 'site movement', 'site work', 'confirm physical receipt')):
+            code = 'START_SITE'
+        elif instruction:
+            code = 'REVIEW'
+
+    action = TASK_NEXT_ACTIONS.get(code, TASK_NEXT_ACTIONS['REVIEW'])
+    return {
+        'code': code or 'REVIEW',
+        'label': action['label'],
+        'owner_role': action['owner_role'],
+        'detail': instruction,
+    }
 
 
 def _role_for_operation(operation):
@@ -567,6 +630,7 @@ def task_actors(openid):
 
 def task_payload(task, request=None, detail=False):
     linked_records = list(task.intake_records.select_related('source').order_by('-updated_at', '-id'))
+    next_action = task_next_action_display(task.status, task.next_action)
     payload = {
         'id': task.id,
         'task_ref': task.task_ref,
@@ -586,6 +650,8 @@ def task_payload(task, request=None, detail=False):
         'wms_entity_ref': task.wms_entity_ref,
         'wms_handoff_note': task.wms_handoff_note,
         'task_next_action': task.next_action,
+        'task_next_action_code': next_action['code'],
+        'task_next_action_label': next_action['label'],
         'task_email_count': len(linked_records),
         'task_actions': available_task_actions(task, request=request),
         'created_at': task.created_at,

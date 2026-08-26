@@ -91,7 +91,7 @@ from .agent import (
     _record_entity_provenance,
 )
 from .intake import ensure_source_intake_record, source_next_action_display, update_source_intake
-from .mailtask import apply_mail_task_action, assign_mail_task
+from .mailtask import apply_mail_task_action, assign_mail_task, task_next_action_display
 from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
@@ -344,6 +344,8 @@ class MailTaskWorkflowTests(TestCase):
         self.assertEqual(len(response.data['items']), 1)
         self.assertEqual(response.data['items'][0]['task_ref'], 'IB-TRHU4217950')
         self.assertEqual(response.data['items'][0]['task_email_count'], 2)
+        self.assertEqual(response.data['items'][0]['task_next_action_code'], 'PREPARE_WMS')
+        self.assertEqual(response.data['items'][0]['task_next_action_label'], 'Prepare WMS')
 
 
 class SourceProvenanceWorkflowTests(TestCase):
@@ -573,6 +575,26 @@ class SourceProvenanceWorkflowTests(TestCase):
         self.assertEqual(
             source_next_action_display('', status=SourceIntakeRecord.READY_FOR_PREVIEW)['label'],
             'Create ASN preview',
+        )
+
+    def test_mail_task_next_action_uses_workflow_taxonomy(self):
+        expected = {
+            MailTask.OPEN: ('PREPARE_WMS', 'Prepare WMS'),
+            MailTask.AWAITING_SUNNY_APPROVAL: ('APPROVE_OUTBOUND', 'Approve outbound'),
+            MailTask.READY_FOR_MARK: ('START_SITE', 'Start site work'),
+            MailTask.SITE_IN_PROGRESS: ('COMPLETE_SITE', 'Complete site work'),
+            MailTask.WMS_FINALIZATION: ('COMPLETE_WMS', 'Update WMS'),
+            MailTask.COMPLETED: ('COMPLETE', 'Complete'),
+            MailTask.BLOCKED: ('RESOLVE_EXCEPTION', 'Resolve exception'),
+        }
+        for status, (code, label) in expected.items():
+            display = task_next_action_display(status, 'A deliberately different free-text instruction.')
+            self.assertEqual(display['code'], code)
+            self.assertEqual(display['label'], label)
+
+        self.assertEqual(
+            task_next_action_display('', 'Maggie: update WMS and record the reference.')['code'],
+            'COMPLETE_WMS',
         )
 
     def test_source_evidence_filters_preserve_mailbox_message_and_hash_case(self):

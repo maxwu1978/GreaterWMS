@@ -502,6 +502,8 @@ def _intake_payload(record, detail=False, request=None):
             'wms_entity_ref': task_data['wms_entity_ref'],
             'wms_handoff_note': task_data['wms_handoff_note'],
             'task_next_action': task_data['task_next_action'],
+            'task_next_action_code': task_data['task_next_action_code'],
+            'task_next_action_label': task_data['task_next_action_label'],
             'task_email_count': task_data['task_email_count'],
             'task_actions': task_data['task_actions'],
             'task_updated_at': task_data['updated_at'],
