@@ -1017,7 +1017,9 @@ export default {
       }
 
       const statusCode = String(item.task_status || '').trim().toUpperCase()
-      const statusAction = MAIL_TASK_STATUS_NEXT_ACTIONS[statusCode]
+      const statusAction = statusCode === 'OPEN' && String(item.assigned_role || '').toUpperCase() === 'SUPERVISOR'
+        ? 'REVIEW'
+        : MAIL_TASK_STATUS_NEXT_ACTIONS[statusCode]
       if (statusAction && MAIL_TASK_NEXT_ACTIONS[statusAction]) {
         return { code: statusAction, ...MAIL_TASK_NEXT_ACTIONS[statusAction] }
       }

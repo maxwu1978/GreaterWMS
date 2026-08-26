@@ -593,6 +593,11 @@ class SourceProvenanceWorkflowTests(TestCase):
             self.assertEqual(display['label'], label)
 
         self.assertEqual(
+            task_next_action_display(MailTask.OPEN, 'Sunny: review and assign the operational next step.', MailTask.SUPERVISOR)['code'],
+            'REVIEW',
+        )
+
+        self.assertEqual(
             task_next_action_display('', 'Maggie: update WMS and record the reference.')['code'],
             'COMPLETE_WMS',
         )

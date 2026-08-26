@@ -137,7 +137,7 @@ def handoff_status_label(value):
     return HANDOFF_STATUS_LABELS.get(str(value or '').upper(), str(value or '') or 'Not started')
 
 
-def task_next_action_display(status='', next_action=''):
+def task_next_action_display(status='', next_action='', assigned_role=''):
     """Return a stable MailTask next-action code and label.
 
     Task status is authoritative because free-text instructions can vary by
@@ -146,7 +146,8 @@ def task_next_action_display(status='', next_action=''):
     known.
     """
     status_code = str(status or '').strip().upper()
-    code = TASK_STATUS_NEXT_ACTIONS.get(status_code, '')
+    role_code = str(assigned_role or '').strip().upper()
+    code = 'REVIEW' if status_code == MailTask.OPEN and role_code == MailTask.SUPERVISOR else TASK_STATUS_NEXT_ACTIONS.get(status_code, '')
     instruction = _text(next_action, 1000)
     normalized = instruction.casefold()
     if not code:
@@ -630,7 +631,7 @@ def task_actors(openid):
 
 def task_payload(task, request=None, detail=False):
     linked_records = list(task.intake_records.select_related('source').order_by('-updated_at', '-id'))
-    next_action = task_next_action_display(task.status, task.next_action)
+    next_action = task_next_action_display(task.status, task.next_action, task.assigned_role)
     payload = {
         'id': task.id,
         'task_ref': task.task_ref,
