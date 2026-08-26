@@ -41,6 +41,9 @@ from .models import (
     EntityProvenance,
     MailboxSyncRun,
     MailboxSyncState,
+    MailTask,
+    MailTaskApproval,
+    MailTaskEvent,
     OperationAudit,
     PackListDocument,
     PackListImportBatch,
@@ -88,6 +91,7 @@ from .agent import (
     _record_entity_provenance,
 )
 from .intake import ensure_source_intake_record, source_next_action_display, update_source_intake
+from .mailtask import apply_mail_task_action, assign_mail_task
 from .permissions import AgentPreviewPermission, SourceIntakePermission
 
 
@@ -153,14 +157,193 @@ class SourceIntakePermissionTests(TestCase):
             ),
         )
 
-    def test_mail2task_board_is_limited_to_admin_manager_and_warehouse(self):
+    def test_mailtask_board_is_available_to_internal_staff_only(self):
         permission = SourceIntakePermission()
 
         self.assertTrue(permission.has_permission(self.request('Admin', True), None))
         self.assertTrue(permission.has_permission(self.request('Warehouse', False), None))
-        self.assertTrue(permission.has_permission(self.request('Manager', False), None))
-        self.assertFalse(permission.has_permission(self.request('QC', False), None))
-        self.assertFalse(permission.has_permission(self.request('Supervisor', False), None))
+        self.assertTrue(permission.has_permission(self.request('Supervisor', False), None))
+        self.assertTrue(permission.has_permission(self.request('Logistics', False), None))
+        self.assertFalse(permission.has_permission(self.request('Supplier', False), None))
+        self.assertFalse(permission.has_permission(self.request('Customer', False), None))
+
+
+class MailTaskWorkflowTests(TestCase):
+    def setUp(self):
+        self.sunny = Staff.objects.create(
+            staff_name='Sunny',
+            staff_type='Supervisor',
+            openid='tenant',
+        )
+        self.maggie = Staff.objects.create(
+            staff_name='Maggie',
+            staff_type='Warehouse',
+            openid='tenant',
+        )
+        self.mark = Staff.objects.create(
+            staff_name='Mark',
+            staff_type='Warehouse',
+            openid='tenant',
+        )
+        source = SourceEvidence.objects.create(
+            openid='tenant',
+            mailbox_account='psreceiving@peaksmartlogistics.com',
+            message_id='<mail-task-1@example.com>',
+            thread_id='thread-1',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash='d' * 64,
+            metadata={
+                'subject': 'Inbound notice TRHU4217950',
+                'sender_email': 'delta@example.com',
+                'business_operation': 'inbound',
+                'document_type': 'Inbound Notice',
+                'external_reference': 'TRHU4217950',
+            },
+        )
+        self.record, _ = ensure_source_intake_record(source)
+        self.task = self.record.task
+
+    def request(self, staff, data=None):
+        return SimpleNamespace(
+            user=SimpleNamespace(is_authenticated=True),
+            auth=SimpleNamespace(
+                openid='tenant',
+                staff_id=staff.id,
+                staff_name=staff.staff_name,
+                staff_type=staff.staff_type,
+                is_admin=str(staff.staff_type).casefold() == 'admin',
+            ),
+            META={
+                'HTTP_OPERATOR': str(staff.id),
+                'HTTP_X_AGENT_CLIENT': 'browser',
+            },
+            data=data or {},
+            query_params={},
+        )
+
+    def action(self, staff, action, **extra):
+        return apply_mail_task_action(
+            self.task.id,
+            self.request(staff, {'action': action, **extra}),
+            {'action': action, **extra},
+        )
+
+    def test_follow_up_email_reuses_one_canonical_task(self):
+        follow_up = SourceEvidence.objects.create(
+            openid='tenant',
+            mailbox_account='psreceiving@peaksmartlogistics.com',
+            message_id='<mail-task-2@example.com>',
+            thread_id='thread-2',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash='e' * 64,
+            metadata={
+                'subject': 'Updated inbound notice TRHU4217950',
+                'sender_email': 'delta@example.com',
+                'business_operation': 'inbound',
+                'document_type': 'Inbound Notice',
+                'external_reference': 'TRHU4217950',
+            },
+        )
+        follow_up_record, _ = ensure_source_intake_record(follow_up)
+
+        self.assertEqual(follow_up_record.task_id, self.task.id)
+        self.assertEqual(MailTask.objects.filter(openid='tenant').count(), 1)
+        self.assertEqual(self.task.intake_records.count(), 2)
+
+    def test_inbound_handoff_is_maggie_mark_maggie(self):
+        self.action(
+            self.maggie,
+            'PREPARE_WMS',
+            wms_entity_system='LEGACY_PROD',
+            wms_entity_type='ASN',
+            wms_entity_ref='ASN-001',
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, MailTask.READY_FOR_MARK)
+        self.assertEqual(self.task.assigned_role, MailTask.SITE_OPERATOR)
+        self.assertEqual(self.task.wms_handoff_status, MailTask.TO_MARK)
+
+        self.action(self.mark, 'START_SITE')
+        self.action(self.mark, 'COMPLETE_SITE', note='Received at Dock 24; quantity confirmed.')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, MailTask.WMS_FINALIZATION)
+        self.assertEqual(self.task.assigned_role, MailTask.WMS_OPERATOR)
+        self.assertEqual(self.task.wms_handoff_status, MailTask.RETURNED_TO_MAGGIE)
+
+        self.action(self.maggie, 'COMPLETE_WMS')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, MailTask.COMPLETED)
+        self.assertEqual(self.task.wms_handoff_status, MailTask.HANDOFF_COMPLETED)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, SourceIntakeRecord.COMPLETED)
+        self.assertGreaterEqual(MailTaskEvent.objects.filter(task=self.task).count(), 5)
+
+    def test_outbound_requires_sunny_approval_before_mark(self):
+        self.task.operation = MailTask.OUTBOUND
+        self.task.save(update_fields=['operation'])
+
+        self.action(self.maggie, 'PREPARE_WMS', wms_entity_ref='DN-001')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, MailTask.AWAITING_SUNNY_APPROVAL)
+        self.assertEqual(self.task.assigned_role, MailTask.SUPERVISOR)
+        self.assertTrue(MailTaskApproval.objects.filter(task=self.task, status=MailTaskApproval.PENDING).exists())
+
+        with self.assertRaises(PermissionDenied):
+            self.action(self.maggie, 'APPROVE_OUTBOUND')
+
+        self.action(self.sunny, 'APPROVE_OUTBOUND', note='Outbound instruction checked.')
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, MailTask.READY_FOR_MARK)
+        self.assertEqual(self.task.assigned_role, MailTask.SITE_OPERATOR)
+        self.assertEqual(MailTaskApproval.objects.get(task=self.task).status, MailTaskApproval.APPROVED)
+
+    def test_mark_cannot_prepare_or_close_wms(self):
+        with self.assertRaises(PermissionDenied):
+            self.action(self.mark, 'PREPARE_WMS')
+
+    def test_sunny_can_assign_maggie_but_mark_cannot_reassign(self):
+        assign_mail_task(
+            self.task.id,
+            self.request(self.sunny),
+            {'assigned_role': MailTask.WMS_OPERATOR, 'staff_id': self.maggie.id},
+        )
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.assigned_staff_id, self.maggie.id)
+        self.assertEqual(self.task.assigned_staff_name, 'Maggie')
+
+        with self.assertRaises(PermissionDenied):
+            assign_mail_task(
+                self.task.id,
+                self.request(self.mark),
+                {'assigned_role': MailTask.SITE_OPERATOR, 'staff_id': self.mark.id},
+            )
+
+    def test_mailtask_list_returns_one_row_for_follow_up_emails(self):
+        follow_up = SourceEvidence.objects.create(
+            openid='tenant',
+            mailbox_account='psreceiving@peaksmartlogistics.com',
+            message_id='<mail-task-3@example.com>',
+            thread_id='thread-3',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash='f' * 64,
+            metadata={
+                'subject': 'Appointment update TRHU4217950',
+                'sender_email': 'delta@example.com',
+                'business_operation': 'inbound',
+                'document_type': 'Appointment',
+                'external_reference': 'TRHU4217950',
+            },
+        )
+        ensure_source_intake_record(follow_up)
+        response = SourceIntakeListView().get(self.request(self.maggie))
+
+        self.assertEqual(response.data['total'], 1)
+        self.assertEqual(len(response.data['items']), 1)
+        self.assertEqual(response.data['items'][0]['task_ref'], 'IB-TRHU4217950')
+        self.assertEqual(response.data['items'][0]['task_email_count'], 2)
 
 
 class SourceProvenanceWorkflowTests(TestCase):

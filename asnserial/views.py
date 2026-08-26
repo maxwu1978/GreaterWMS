@@ -71,6 +71,12 @@ from .intake import (
     update_source_intake,
 )
 from .permissions import AgentPreviewPermission, SourceIntakePermission
+from .mailtask import (
+    apply_mail_task_action,
+    assign_mail_task,
+    task_actors,
+    task_payload as mail_task_payload,
+)
 
 
 EXCEPTION_STATUSES = {
@@ -366,6 +372,9 @@ class SourceCaptureView(APIView):
             },
             'intake_record': {
                 'id': intake.id,
+                'task_id': intake.task_id,
+                'task_ref': intake.task.task_ref if intake.task_id else '',
+                'task_status': intake.task.status if intake.task_id else '',
                 'status': intake.status,
                 'operation': intake.operation,
                 'document_type': intake.document_type,
@@ -431,7 +440,7 @@ def _email_provenance_payload(source, record):
     return original_payload, forwarded_payload
 
 
-def _intake_payload(record, detail=False):
+def _intake_payload(record, detail=False, request=None):
     source = record.source
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
     original_email, forwarded_email = _email_provenance_payload(source, record)
@@ -440,6 +449,8 @@ def _intake_payload(record, detail=False):
         record.exception_summary,
         record.status,
     )
+    task = record.task if record.task_id else None
+    task_data = mail_task_payload(task, request=request, detail=detail) if task else {}
     payload = {
         'id': record.id,
         'source_evidence_id': source.id,
@@ -474,6 +485,27 @@ def _intake_payload(record, detail=False):
         'content_hash': source.content_hash,
         'captured_at': source.captured_at,
     }
+    if task:
+        payload.update({
+            'task_id': task_data['id'],
+            'task_ref': task_data['task_ref'],
+            'task_status': task_data['task_status'],
+            'task_status_label': task_data['task_status_label'],
+            'assigned_role': task_data['assigned_role'],
+            'assigned_role_label': task_data['assigned_role_label'],
+            'assigned_staff_id': task_data['assigned_staff_id'],
+            'assigned_staff_name': task_data['assigned_staff_name'],
+            'wms_handoff_status': task_data['wms_handoff_status'],
+            'wms_handoff_label': task_data['wms_handoff_label'],
+            'wms_entity_system': task_data['wms_entity_system'],
+            'wms_entity_type': task_data['wms_entity_type'],
+            'wms_entity_ref': task_data['wms_entity_ref'],
+            'wms_handoff_note': task_data['wms_handoff_note'],
+            'task_next_action': task_data['task_next_action'],
+            'task_email_count': task_data['task_email_count'],
+            'task_actions': task_data['task_actions'],
+            'task_updated_at': task_data['updated_at'],
+        })
     if detail:
         payload.update({
             'metadata': _safe_source_metadata(record.metadata),
@@ -520,6 +552,8 @@ def _intake_payload(record, detail=False):
                 for item in record.events.all()[:100]
             ],
         })
+        if task:
+            payload['task'] = task_data
     return payload
 
 
@@ -531,11 +565,17 @@ class SourceIntakeListView(APIView):
     def get(self, request):
         queryset = SourceIntakeRecord.objects.filter(
             openid=request.auth.openid,
-        ).select_related('source', 'sync_run')
+        ).select_related('source', 'sync_run', 'task').prefetch_related('task__intake_records')
         for field in ('status', 'operation', 'document_type', 'mailbox_account'):
             value = str(request.query_params.get(field) or '').strip()
             if value:
                 queryset = queryset.filter(**{field: value.upper() if field != 'mailbox_account' else value})
+        for field in ('task__status', 'task__assigned_role', 'task__wms_handoff_status'):
+            value = str(request.query_params.get(field.replace('task__', '')) or '').strip()
+            if value:
+                queryset = queryset.filter(**{field: value.upper()})
+        if str(request.query_params.get('mine') or '').strip().lower() in {'1', 'true', 'yes'}:
+            queryset = queryset.filter(task__assigned_staff_id=getattr(request.auth, 'staff_id', None))
         search = str(request.query_params.get('q') or '').strip()
         if search:
             queryset = queryset.filter(
@@ -549,18 +589,39 @@ class SourceIntakeListView(APIView):
             offset = max(int(request.query_params.get('offset', 0)), 0)
         except (TypeError, ValueError):
             return Response({'detail': 'limit and offset must be integers'}, status=400)
-        total = queryset.count()
+        # Mail2Task is task-first: a follow-up email must update the same
+        # visible row instead of creating a second task row. The linked email
+        # records remain available from the detail response.
+        task_records = []
+        seen_task_ids = set()
+        for record in queryset:
+            task_key = record.task_id or 'source:%s' % record.id
+            if task_key in seen_task_ids:
+                continue
+            seen_task_ids.add(task_key)
+            task_records.append(record)
+        total = len(task_records)
         counts = {
             row['status']: row['count']
-            for row in queryset.values('status').annotate(count=Count('id'))
+            for row in SourceIntakeRecord.objects.filter(
+                id__in=[record.id for record in task_records],
+            ).values('status').annotate(count=Count('id'))
+        }
+        task_counts = {
+            row['task__status']: row['count']
+            for row in SourceIntakeRecord.objects.filter(
+                id__in=[record.id for record in task_records],
+            ).values('task__status').annotate(count=Count('task_id'))
+            if row['task__status']
         }
         return Response({
-            'items': [_intake_payload(record) for record in queryset[offset:offset + limit]],
+            'items': [_intake_payload(record, request=request) for record in task_records[offset:offset + limit]],
             'total': total,
             'offset': offset,
             'limit': limit,
             'has_more': offset + limit < total,
             'counts': counts,
+            'task_counts': task_counts,
         })
 
 
@@ -571,12 +632,42 @@ class SourceIntakeDetailView(APIView):
         record = SourceIntakeRecord.objects.filter(
             id=pk,
             openid=request.auth.openid,
-        ).select_related('source', 'sync_run').prefetch_related(
+        ).select_related('source', 'sync_run', 'task').prefetch_related(
             'source__extractions', 'source__attachments', 'events',
+            'task__approvals', 'task__task_events', 'task__intake_records',
         ).first()
         if record is None:
             return Response({'detail': 'Source intake record not found'}, status=404)
-        return Response(_intake_payload(record, detail=True))
+        return Response(_intake_payload(record, detail=True, request=request))
+
+
+class MailTaskActorsView(APIView):
+    """Return safe staff choices for Sunny's assignment control."""
+
+    permission_classes = [SourceIntakePermission]
+
+    def get(self, request):
+        return Response({'results': task_actors(request.auth.openid)})
+
+
+class MailTaskAssignView(APIView):
+    """Assign the current task to Sunny, Maggie or Mark by role and staff."""
+
+    permission_classes = [SourceIntakePermission]
+
+    def post(self, request, pk):
+        task = assign_mail_task(pk, request, request.data)
+        return Response({'task': mail_task_payload(task, request=request, detail=True)})
+
+
+class MailTaskActionView(APIView):
+    """Advance one role-owned task step without writing legacy WMS rows."""
+
+    permission_classes = [SourceIntakePermission]
+
+    def post(self, request, pk):
+        task = apply_mail_task_action(pk, request, request.data)
+        return Response({'task': mail_task_payload(task, request=request, detail=True)})
 
 
 class SourceIntakeUpdateView(APIView):
@@ -602,7 +693,7 @@ class SourceIntakeUpdateView(APIView):
             actor_type=actor_type,
             actor_name=actor_name,
         )
-        return Response(_intake_payload(updated))
+        return Response(_intake_payload(updated, request=request))
 
 
 class MailboxSyncRunCreateView(APIView):

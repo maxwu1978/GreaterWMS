@@ -1,16 +1,21 @@
 <template>
-  <q-page class="source-intake-page q-pa-md">
-    <q-card flat bordered class="source-intake-card">
+  <q-page class="source-intake-page q-pa-sm">
+    <q-card class="source-intake-card shadow-11">
       <q-card-section class="row items-center q-pb-sm">
         <div>
-          <div class="text-h6 text-weight-bold">Source Intake</div>
-          <div class="text-caption text-grey-7">External instructions and email evidence</div>
+          <div class="text-h6 text-weight-bold">Mail2Task</div>
+          <div class="text-caption text-grey-7">Email-derived tasks, ownership, evidence and WMS handoff</div>
         </div>
         <q-space />
         <q-btn flat round icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
       </q-card-section>
 
       <q-separator />
+
+      <q-banner v-if="previewMode" dense class="source-intake-preview-banner q-mx-md q-mt-sm">
+        <template v-slot:avatar><q-icon name="visibility" color="primary" /></template>
+        Local development preview · demonstration data only. No mailbox, WMS or task API writes are performed.
+      </q-banner>
 
       <q-card-section class="row items-center q-col-gutter-sm q-py-sm">
         <div class="col-12 col-sm-4 col-md-3">
@@ -19,7 +24,10 @@
         <div class="col-12 col-sm-4 col-md-3">
           <q-select v-model="operation" dense outlined clearable emit-value map-options :options="operationOptions" label="Operation" @input="load" />
         </div>
-        <div class="col-12 col-sm-4 col-md-4">
+        <div class="col-12 col-sm-4 col-md-2">
+          <q-select v-model="taskStatus" dense outlined clearable emit-value map-options :options="taskStatusOptions" label="Task status" @input="load" />
+        </div>
+        <div class="col-12 col-sm-4 col-md-3">
           <q-input v-model="search" dense outlined clearable label="Search" @keyup.enter="load" />
         </div>
         <div class="col-auto">
@@ -45,17 +53,27 @@
         :loading="loading"
         :pagination.sync="pagination"
         :rows-per-page-options="[0]"
-        no-data-label="No source records"
+        no-data-label="No mail tasks"
       >
+        <template v-slot:body-cell-task="props">
+          <q-td :props="props">
+            <div class="text-weight-medium ellipsis" :title="props.row.task_ref || props.row.subject">
+              {{ props.row.task_ref || ('MAIL-' + props.row.id) }}
+            </div>
+            <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
+              {{ props.row.task_email_count || 1 }} email{{ (props.row.task_email_count || 1) === 1 ? '' : 's' }} · {{ props.row.subject || 'No subject' }}
+            </div>
+          </q-td>
+        </template>
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ formatSourceTime(props.row.sent_at) }}</div>
-            <div class="text-caption text-grey-7">Received {{ formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
+            <div class="text-weight-medium">{{ compactSourceTime(props.row.sent_at) }}</div>
+            <div class="text-caption text-grey-7" :title="'Received ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">R {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-document="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ documentLabel(props.row.document_type) }}</div>
+            <div class="text-weight-medium" :title="documentLabel(props.row.document_type)">{{ documentShortLabel(props.row.document_type) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-source="props">
@@ -68,11 +86,25 @@
             </div>
           </q-td>
         </template>
+        <template v-slot:body-cell-operation="props">
+          <q-td :props="props">
+            <span class="text-weight-medium" :title="operationLabel(props.row.operation)">{{ operationShortLabel(props.row.operation) }}</span>
+          </q-td>
+        </template>
         <template v-slot:body-cell-status="props">
           <q-td :props="props">
-            <q-badge :color="statusColor(props.row.status)">{{ statusLabel(props.row.status) }}</q-badge>
+            <q-badge :color="taskStatusColor(props.row.task_status || props.row.status)" :title="taskStatusLabel(props.row.task_status || props.row.status)">{{ taskStatusShortLabel(props.row.task_status || props.row.status) }}</q-badge>
+            <div class="text-caption text-grey-7" :title="'Email: ' + statusLabel(props.row.status)">Mail: {{ statusShortLabel(props.row.status) }}</div>
             <div v-if="props.row.exception_summary" class="source-intake-exception-marker" :title="props.row.exception_summary">
               <q-icon name="warning" size="14px" /> Exception
+            </div>
+          </q-td>
+        </template>
+        <template v-slot:body-cell-owner="props">
+          <q-td :props="props">
+            <div class="text-weight-medium" :title="props.row.assigned_staff_name || props.row.assigned_role_label || ownerLabel(props.row.owner_role)">{{ ownerShortLabel(props.row) }}</div>
+            <div class="text-caption text-grey-7 ellipsis" :title="wmsHandoffTooltip(props.row)">
+              {{ wmsHandoffShortLabel(props.row) }}
             </div>
           </q-td>
         </template>
@@ -82,11 +114,10 @@
               {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
-              {{ props.row.subject || 'No subject' }}
+              {{ compactSubject(props.row.subject) }}
             </div>
-            <div class="text-caption text-grey-7">Evidence #{{ props.row.source_evidence_id || '-' }}</div>
-            <div v-if="props.row.matched_entity_ref" class="text-caption text-grey-7 ellipsis">
-              {{ props.row.matched_entity_type || 'Matched' }}: {{ props.row.matched_entity_ref }}
+            <div class="text-caption text-grey-7 ellipsis" :title="referenceTooltip(props.row)">
+              E#{{ props.row.source_evidence_id || '-' }}<span v-if="props.row.matched_entity_ref"> · {{ compactEntity(props.row) }}</span>
             </div>
           </q-td>
         </template>
@@ -94,8 +125,8 @@
           <q-td
             :props="props"
             class="source-intake-next"
-            :title="props.row.next_action || props.row.exception_summary || ''"
-          ><span class="source-intake-next-label">{{ props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</span></q-td>
+            :title="props.row.task_next_action || props.row.next_action || props.row.exception_summary || ''"
+          ><span class="source-intake-next-label">{{ shortNextAction(props.row.task_next_action || props.row.next_action || props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-')) }}</span></q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -111,20 +142,76 @@
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-h6">Source Record {{ detail ? detail.id : '' }}</div>
-            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }}</div>
+            <div class="text-h6">MailTask {{ detail ? (detail.task_ref || detail.task_id || detail.id) : '' }}</div>
+            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }} · {{ detail.task_email_count || 1 }} linked email{{ (detail.task_email_count || 1) === 1 ? '' : 's' }}</div>
           </div>
           <q-space />
           <q-btn flat round dense icon="close" v-close-popup aria-label="Close" />
         </q-card-section>
         <q-separator />
         <q-card-section v-if="detail">
-          <div class="source-intake-section-title">Source</div>
+          <div class="source-intake-section-title">Task</div>
           <div class="source-intake-detail-grid">
-            <div><span>Status</span><strong><q-badge :color="statusColor(detail.status)">{{ statusLabel(detail.status) }}</q-badge></strong></div>
+            <div><span>Task status</span><strong><q-badge :color="taskStatusColor(detail.task_status || detail.status)">{{ taskStatusLabel(detail.task_status || detail.status) }}</q-badge></strong></div>
+            <div><span>Email status</span><strong>{{ statusLabel(detail.status) }}</strong></div>
             <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
             <div><span>Document</span><strong>{{ documentLabel(detail.document_type) }}</strong></div>
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
+            <div><span>Owner</span><strong>{{ detail.assigned_staff_name || detail.assigned_role_label || ownerLabel(detail.owner_role) }}</strong></div>
+            <div><span>WMS handoff</span><strong>{{ detail.wms_handoff_label || wmsHandoffLabel(detail) }}</strong></div>
+            <div><span>WMS reference</span><strong>{{ detail.wms_entity_ref || 'Not recorded' }}</strong></div>
+          </div>
+          <div class="source-intake-workflow q-mt-md">
+            <div class="source-intake-field-label">Role handoff</div>
+            <div class="text-weight-medium">{{ detail.task_next_action || detail.next_action || 'No next action recorded.' }}</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-12 col-sm-5">
+                <q-select v-model="assignmentRole" dense outlined emit-value map-options :options="taskRoleOptions" label="Assign role" />
+              </div>
+              <div class="col-12 col-sm-5">
+                <q-select v-model="assignmentStaffId" dense outlined clearable emit-value map-options :options="actorOptions" label="Assign staff" />
+              </div>
+              <div class="col-12 col-sm-2 flex flex-center">
+                <q-btn outline color="primary" label="Assign" :loading="actionLoading" @click="assignTask" />
+              </div>
+            </div>
+            <div v-if="detail.task_actions && detail.task_actions.length" class="row q-gutter-sm q-mt-sm">
+              <q-btn
+                v-for="action in detail.task_actions"
+                :key="action.code"
+                dense
+                unelevated
+                :color="actionButtonColor(action.code)"
+                :label="action.label"
+                :loading="actionLoading"
+                @click="performTaskAction(action.code)"
+              />
+            </div>
+            <div v-else class="text-caption text-grey-7 q-mt-sm">No action is available for the current role and task status.</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-12 col-sm-5">
+                <q-select v-model="wmsEntitySystem" dense outlined clearable emit-value map-options :options="wmsSystemOptions" label="WMS system" />
+              </div>
+              <div class="col-12 col-sm-7">
+                <q-input v-model="wmsEntityRef" dense outlined clearable label="WMS reference (required to close)" />
+              </div>
+            </div>
+            <q-input v-model="wmsHandoffNote" class="q-mt-sm" dense outlined type="textarea" autogrow label="Handoff note / site result" />
+            <div v-if="detail.approvals && detail.approvals.length" class="source-intake-workflow-history q-mt-md">
+              <div class="source-intake-field-label">Sunny approval history</div>
+              <div v-for="approval in detail.approvals" :key="approval.id" class="text-caption text-grey-7 q-mt-xs">
+                {{ approval.status }} · {{ approval.decided_by_name || approval.requested_by_name || 'System' }} · {{ formatDate(approval.decided_at || approval.requested_at) }}
+                <span v-if="approval.note"> · {{ approval.note }}</span>
+              </div>
+            </div>
+            <div v-if="detail.task_events && detail.task_events.length" class="source-intake-workflow-history q-mt-md">
+              <div class="source-intake-field-label">Task handoff history</div>
+              <div v-for="event in detail.task_events" :key="event.id" class="source-intake-workflow-event q-mt-xs">
+                <strong>{{ event.action }}</strong>
+                <span class="text-grey-7"> · {{ event.actor_name || event.actor_role || 'System' }} · {{ formatDate(event.created_at) }}</span>
+                <div class="text-caption text-grey-7">{{ event.note || event.to_status }}</div>
+              </div>
+            </div>
           </div>
           <q-separator class="q-my-md" />
           <div class="source-intake-section-title">Original Email</div>
@@ -218,24 +305,35 @@
 </template>
 
 <script>
-import { getauth } from 'boot/axios_request.js'
+import { getauth, postauth } from 'boot/axios_request.js'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   name: 'SourceIntake',
   data () {
     return {
       loading: false,
+      previewMode: isMail2TaskPreview(),
       rows: [],
       detail: null,
       detailOpen: false,
       status: '',
       operation: '',
+      taskStatus: '',
       search: '',
       counts: {},
+      taskCounts: {},
       total: 0,
       hasMore: false,
       pagination: { rowsPerPage: 0 },
       offset: 0,
+      actors: [],
+      assignmentRole: 'WMS_OPERATOR',
+      assignmentStaffId: null,
+      wmsEntitySystem: '',
+      wmsEntityRef: '',
+      wmsHandoffNote: '',
+      actionLoading: false,
       statusOptions: [
         { label: 'Captured', value: 'CAPTURED' },
         { label: 'Analyzing', value: 'ANALYZING' },
@@ -254,41 +352,92 @@ export default {
         { label: 'Supporting', value: 'SUPPORTING' },
         { label: 'Unknown', value: 'UNKNOWN' }
       ],
+      taskStatusOptions: [
+        { label: 'Open · Maggie', value: 'OPEN' },
+        { label: 'Awaiting Sunny approval', value: 'AWAITING_SUNNY_APPROVAL' },
+        { label: 'Ready · Mark', value: 'READY_FOR_MARK' },
+        { label: 'Site work · Mark', value: 'SITE_IN_PROGRESS' },
+        { label: 'WMS update · Maggie', value: 'WMS_FINALIZATION' },
+        { label: 'Completed', value: 'COMPLETED' },
+        { label: 'Blocked · Sunny review', value: 'BLOCKED' }
+      ],
+      taskRoleOptions: [
+        { label: 'Sunny / Supervisor', value: 'SUPERVISOR' },
+        { label: 'Maggie / WMS operator', value: 'WMS_OPERATOR' },
+        { label: 'Mark / Site operator', value: 'SITE_OPERATOR' }
+      ],
+      wmsSystemOptions: [
+        { label: 'Legacy production', value: 'LEGACY_PROD' },
+        { label: 'Migrated GreaterWMS', value: 'MIGRATED' }
+      ],
       columns: [
-        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 11%' },
-        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 13%' },
-        { name: 'source', label: 'Original source', field: 'sender_email', align: 'left', style: 'width: 22%' },
-        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
-        { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
-        { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
-        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 16%' },
-        { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
+        { name: 'task', label: 'Task', field: 'task_ref', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
+        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 8%', headerStyle: 'width: 8%' },
+        { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'width: 9%', headerStyle: 'width: 9%' },
+        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
+        { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'width: 12%', headerStyle: 'width: 12%' },
+        { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'width: 6%', headerStyle: 'width: 6%' },
+        { name: 'status', label: 'Status', field: 'task_status', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
+        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'width: 10%', headerStyle: 'width: 10%' },
+        { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
+        { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px', headerStyle: 'width: 48px' }
       ]
     }
   },
   computed: {
     countItems () {
       const statuses = [
-        { key: 'CAPTURED', label: 'Captured' },
-        { key: 'ANALYZING', label: 'Analyzing' },
-        { key: 'REVIEW_REQUIRED', label: 'Review' },
-        { key: 'READY_FOR_PREVIEW', label: 'Ready' },
-        { key: 'APPROVAL_REQUIRED', label: 'Approval' },
-        { key: 'EXECUTING', label: 'Executing' },
+        { key: 'OPEN', label: 'Open' },
+        { key: 'AWAITING_SUNNY_APPROVAL', label: 'Sunny approval' },
+        { key: 'READY_FOR_MARK', label: 'Ready for Mark' },
+        { key: 'SITE_IN_PROGRESS', label: 'Mark in progress' },
+        { key: 'WMS_FINALIZATION', label: 'Maggie WMS' },
         { key: 'COMPLETED', label: 'Completed' },
-        { key: 'BLOCKED', label: 'Blocked' },
-        { key: 'DUPLICATE', label: 'Duplicate' },
-        { key: 'FAILED', label: 'Failed' }
+        { key: 'BLOCKED', label: 'Blocked' }
       ]
-      return [{ key: '__TOTAL__', label: 'Total', color: 'grey-8', value: this.total }].concat(
+      return [{ key: '__TOTAL__', label: 'Tasks', color: 'grey-8', value: this.taskTotal }].concat(
         statuses
-          .filter(item => Number(this.counts[item.key] || 0) > 0)
-          .map(item => ({ ...item, color: this.statusColor(item.key), value: this.counts[item.key] }))
+          .filter(item => Number(this.taskCounts[item.key] || 0) > 0)
+          .map(item => ({ ...item, color: this.taskStatusColor(item.key), value: this.taskCounts[item.key] }))
       )
+    },
+    taskTotal () {
+      return Object.values(this.taskCounts).reduce((total, value) => total + Number(value || 0), 0)
+    },
+    actorOptions () {
+      return this.actors
+        .filter(item => (item.task_roles || []).includes(this.assignmentRole))
+        .map(item => ({ label: `${item.name} · ${item.staff_type}`, value: item.id }))
+    },
+    extractionRows () {
+      if (!this.detail) return []
+      const items = (this.detail.extractions || []).map((item, index) => ({
+        key: `extraction-${index}-${item.field_name}`,
+        label: this.fieldLabel(item.field_name),
+        value: item.normalized_value || item.raw_value || '-',
+        source_location: item.source_location,
+        confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
+        flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
+      }))
+      if (items.length) return items
+      const metadata = this.detail.metadata || {}
+      const keys = ['container_no', 'eta', 'requested_delivery_date', 'customer', 'customer_address', 'receiving_address', 'warehouse', 'appointment_status', 'external_reference', 'business_operation']
+      return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
+        key: `metadata-${key}`,
+        label: this.fieldLabel(key),
+        value: this.formatValue(metadata[key]),
+        source_location: 'Email metadata',
+        confidence: '',
+        flags: ''
+      }))
     }
   },
   mounted () {
-    this.load()
+    if (this.previewMode) {
+      this.loadPreview()
+    } else {
+      this.load()
+    }
   },
   methods: {
     queryString (offset) {
@@ -297,16 +446,126 @@ export default {
       params.set('offset', String(offset))
       if (this.status) params.set('status', this.status)
       if (this.operation) params.set('operation', this.operation)
+      if (this.taskStatus) params.set('task_status', this.taskStatus)
       if (this.search) params.set('q', this.search)
       return `asn/serial/intake/?${params.toString()}`
     },
+    previewRows () {
+      return [
+        {
+          id: 9001,
+          task_id: 9001,
+          task_ref: 'IB-TRHU4217950',
+          subject: 'Inbound notice · TRHU4217950',
+          sent_at: '2026-08-25T09:15:00Z',
+          received_at_raw: '2026-08-25T09:16:00Z',
+          captured_at: '2026-08-25T09:17:00Z',
+          document_type: 'INBOUND_NOTICE',
+          sender_name: 'Delta Logistics',
+          sender_email: 'delta-logistics@example.com',
+          external_reference: 'TRHU4217950',
+          operation: 'INBOUND',
+          task_status: 'READY_FOR_MARK',
+          status: 'READY_FOR_PREVIEW',
+          assigned_role: 'SITE_OPERATOR',
+          assigned_role_label: 'Mark / Site operator',
+          assigned_staff_id: 3003,
+          assigned_staff_name: 'Mark',
+          wms_handoff_status: 'TO_MARK',
+          wms_handoff_label: 'To Mark · site execution',
+          task_next_action: 'Mark: confirm physical receipt',
+          next_action: 'Mark verifies cartons and records any variance.',
+          next_action_label: 'Mark: confirm physical receipt',
+          task_email_count: 2,
+          source_evidence_id: 7001,
+          matched_entity_type: 'ASN',
+          matched_entity_ref: 'ASN-20260825-0042',
+          email_body_preview: 'Please confirm receipt for container TRHU4217950.',
+          exception_summary: ''
+        },
+        {
+          id: 9002,
+          task_id: 9002,
+          task_ref: 'OB-TRLU9821043',
+          subject: 'Outbound delivery request · BOL attached',
+          sent_at: '2026-08-25T10:40:00Z',
+          received_at_raw: '2026-08-25T10:41:00Z',
+          captured_at: '2026-08-25T10:42:00Z',
+          document_type: 'DELIVERY_REQUEST',
+          sender_name: 'Delta Forwarder',
+          sender_email: 'forwarder@example.com',
+          external_reference: 'TRLU9821043',
+          operation: 'OUTBOUND',
+          task_status: 'AWAITING_SUNNY_APPROVAL',
+          status: 'APPROVAL_REQUIRED',
+          assigned_role: 'SUPERVISOR',
+          assigned_role_label: 'Sunny / Supervisor',
+          assigned_staff_id: 3001,
+          assigned_staff_name: 'Sunny',
+          wms_handoff_status: 'TO_SUNNY',
+          wms_handoff_label: 'To Sunny · outbound approval',
+          task_next_action: 'Sunny: approve outbound request',
+          next_action: 'Sunny confirms the outbound request before Mark starts site work.',
+          next_action_label: 'Sunny: approve outbound request',
+          task_email_count: 1,
+          source_evidence_id: 7002,
+          matched_entity_type: 'DN',
+          matched_entity_ref: 'DN-20260825-0017',
+          email_body_preview: 'Please approve the attached BOL and release the outbound order.',
+          exception_summary: ''
+        }
+      ]
+    },
+    previewActors () {
+      return [
+        { id: 3001, name: 'Sunny', staff_type: 'Supervisor', task_roles: ['SUPERVISOR'] },
+        { id: 3002, name: 'Maggie', staff_type: 'Warehouse', task_roles: ['WMS_OPERATOR'] },
+        { id: 3003, name: 'Mark', staff_type: 'Warehouse', task_roles: ['SITE_OPERATOR'] }
+      ]
+    },
+    previewTaskActions (status) {
+      return {
+        OPEN: [{ code: 'PREPARE_WMS', label: 'Prepare WMS handoff' }, { code: 'BLOCK', label: 'Block task' }],
+        AWAITING_SUNNY_APPROVAL: [{ code: 'APPROVE_OUTBOUND', label: 'Approve outbound' }, { code: 'REJECT_OUTBOUND', label: 'Reject outbound' }, { code: 'BLOCK', label: 'Block task' }],
+        READY_FOR_MARK: [{ code: 'START_SITE', label: 'Start site work' }, { code: 'BLOCK', label: 'Block task' }],
+        SITE_IN_PROGRESS: [{ code: 'COMPLETE_SITE', label: 'Complete site work' }, { code: 'BLOCK', label: 'Block task' }],
+        WMS_FINALIZATION: [{ code: 'COMPLETE_WMS', label: 'Complete WMS handoff' }, { code: 'BLOCK', label: 'Block task' }],
+        COMPLETED: [],
+        BLOCKED: [{ code: 'REOPEN', label: 'Reopen task' }]
+      }[status] || []
+    },
+    loadPreview () {
+      const sourceRows = this.previewRows()
+      const filteredRows = sourceRows.filter(row => {
+        const matchesStatus = !this.status || row.status === this.status
+        const matchesOperation = !this.operation || row.operation === this.operation
+        const matchesTaskStatus = !this.taskStatus || row.task_status === this.taskStatus
+        const haystack = [row.task_ref, row.subject, row.sender_name, row.sender_email, row.external_reference, row.task_next_action].join(' ').toLowerCase()
+        const matchesSearch = !this.search || haystack.includes(String(this.search).toLowerCase())
+        return matchesStatus && matchesOperation && matchesTaskStatus && matchesSearch
+      })
+      this.rows = filteredRows
+      this.counts = {}
+      this.taskCounts = filteredRows.reduce((counts, row) => {
+        counts[row.task_status] = (counts[row.task_status] || 0) + 1
+        return counts
+      }, {})
+      this.total = filteredRows.length
+      this.hasMore = false
+      this.offset = 0
+    },
     load () {
+      if (this.previewMode) {
+        this.loadPreview()
+        return
+      }
       this.loading = true
       this.offset = 0
       getauth(this.queryString(0))
         .then(res => {
           this.rows = res.items || []
           this.counts = res.counts || {}
+          this.taskCounts = res.task_counts || {}
           this.total = Number(res.total || 0)
           this.hasMore = Boolean(res.has_more)
         })
@@ -314,12 +573,14 @@ export default {
         .finally(() => { this.loading = false })
     },
     loadMore () {
+      if (this.previewMode) return
       this.loading = true
       const nextOffset = this.rows.length
       getauth(this.queryString(nextOffset))
         .then(res => {
           this.rows = this.rows.concat(res.items || [])
           this.counts = res.counts || this.counts
+          this.taskCounts = res.task_counts || this.taskCounts
           this.total = Number(res.total || this.total)
           this.hasMore = Boolean(res.has_more)
           this.offset = nextOffset
@@ -330,13 +591,192 @@ export default {
     showDetail (id) {
       this.detailOpen = true
       this.detail = null
-      getauth(`asn/serial/intake/${id}/`).then(res => { this.detail = res }).catch(() => {})
+      this.assignmentRole = 'WMS_OPERATOR'
+      this.assignmentStaffId = null
+      this.wmsEntitySystem = ''
+      this.wmsEntityRef = ''
+      this.wmsHandoffNote = ''
+      if (this.previewMode) {
+        this.loadActors()
+        this.detail = this.previewDetail(id)
+        if (this.detail) {
+          this.assignmentRole = this.detail.assigned_role || 'WMS_OPERATOR'
+          this.assignmentStaffId = this.detail.assigned_staff_id || null
+        }
+        return
+      }
+      this.loadActors()
+      getauth(`asn/serial/intake/${id}/`).then(res => {
+        this.detail = res
+        this.assignmentRole = res.assigned_role || 'WMS_OPERATOR'
+        this.assignmentStaffId = res.assigned_staff_id || null
+        this.wmsEntitySystem = res.wms_entity_system || ''
+        this.wmsEntityRef = res.wms_entity_ref || ''
+        this.wmsHandoffNote = ''
+      }).catch(() => {})
+    },
+    loadActors () {
+      if (this.previewMode) {
+        this.actors = this.previewActors()
+        return
+      }
+      getauth('asn/serial/intake/task-actors/')
+        .then(res => { this.actors = res.results || [] })
+        .catch(() => {})
+    },
+    previewDetail (id) {
+      const row = this.previewRows().find(item => item.id === id)
+      if (!row) return null
+      const isOutbound = row.operation === 'OUTBOUND'
+      return {
+        ...row,
+        task_actions: this.previewTaskActions(row.task_status),
+        approvals: isOutbound ? [{ id: 8002, status: 'PENDING', requested_by_name: 'Mail2Task', requested_at: '2026-08-25T10:42:00Z', note: 'Sunny final approval is required before site release.' }] : [],
+        task_events: [
+          { id: 8100 + id, action: 'CREATED', actor_name: 'Mail2Task', created_at: '2026-08-25T09:17:00Z', note: 'Created from source email and grouped by business reference.', to_status: 'OPEN' },
+          { id: 8200 + id, action: isOutbound ? 'PREPARE_WMS' : 'PREPARE_WMS', actor_name: 'Maggie', created_at: '2026-08-25T10:00:00Z', note: isOutbound ? 'WMS handoff prepared; waiting for Sunny approval.' : 'WMS handoff prepared; site work assigned to Mark.', to_status: row.task_status }
+        ],
+        source_type: 'EMAIL',
+        original_email: {
+          sender_name: row.sender_name,
+          sender_email: row.sender_email,
+          sent_at: row.sent_at,
+          sent_at_raw: row.sent_at,
+          message_id: `<preview-${row.id}@mail2task.local>`,
+          thread_id: `preview-thread-${row.id}`,
+          from_raw: `${row.sender_name} <${row.sender_email}>`,
+          to: ['sunny@peaksmartlogistics.com', 'maggie@peaksmartlogistics.com'],
+          cc: [],
+          subject: row.subject
+        },
+        email_body: row.email_body_preview,
+        metadata: { external_reference: row.external_reference, business_operation: row.operation, container_no: row.external_reference },
+        extractions: [
+          { field_name: 'external_reference', normalized_value: row.external_reference, confidence: 0.98, source_location: 'Subject / attachment', human_confirmed: true, used_for_write: false },
+          { field_name: 'business_operation', normalized_value: row.operation, confidence: 0.97, source_location: 'Email classification', human_confirmed: true, used_for_write: false }
+        ],
+        attachments: [{ id: 8300 + id, attachment_name: isOutbound ? 'BOL-TRLU9821043.pdf' : 'packing-list-TRHU4217950.pdf', content_type: 'application/pdf', security_status: 'SAFE', storage_size: 184320, source_location: 'Mail2Task preview fixture' }],
+        storage_uri: 'preview://mail2task/evidence',
+        storage_size: 184320,
+        content_hash: `previewhash${row.id}000000000000`,
+        owner_role: row.assigned_role,
+        classification_confidence: 0.97,
+        events: [{ id: 8400 + id, event_type: 'CAPTURED', created_at: '2026-08-25T09:17:00Z', message: 'Source email captured for local preview.', status: 'CAPTURED' }]
+      }
+    },
+    updatePreviewRow (detail) {
+      const index = this.rows.findIndex(row => row.id === detail.id)
+      if (index >= 0) this.$set(this.rows, index, { ...this.rows[index], ...detail })
+      this.taskCounts = this.rows.reduce((counts, row) => {
+        counts[row.task_status] = (counts[row.task_status] || 0) + 1
+        return counts
+      }, {})
+    },
+    previewAssignmentLabel (role) {
+      return { SUPERVISOR: 'Sunny / Supervisor', WMS_OPERATOR: 'Maggie / WMS operator', SITE_OPERATOR: 'Mark / Site operator' }[role] || role
+    },
+    applyPreviewAssignment () {
+      const actor = this.actors.find(item => String(item.id) === String(this.assignmentStaffId))
+      const role = this.assignmentRole
+      const roleName = actor ? actor.name : ''
+      this.detail.assigned_role = role
+      this.detail.assigned_role_label = this.previewAssignmentLabel(role)
+      this.detail.assigned_staff_id = actor ? actor.id : null
+      this.detail.assigned_staff_name = roleName
+      this.detail.owner_role = role
+      this.detail.task_events = (this.detail.task_events || []).concat([{ id: Date.now(), action: 'ASSIGN', actor_name: 'Preview user', created_at: new Date().toISOString(), note: `Assigned to ${roleName || this.previewAssignmentLabel(role)}.`, to_status: this.detail.task_status }])
+      this.updatePreviewRow(this.detail)
+      this.$q.notify({ message: 'Preview only: assignment changed locally', icon: 'visibility', color: 'info' })
+    },
+    applyPreviewAction (action) {
+      const transitions = {
+        PREPARE_WMS: { status: 'READY_FOR_MARK', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'TO_MARK', handoffLabel: 'To Mark · site execution', next: 'Mark: confirm physical receipt', emailStatus: 'READY_FOR_PREVIEW' },
+        APPROVE_OUTBOUND: { status: 'READY_FOR_MARK', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'TO_MARK', handoffLabel: 'To Mark · site execution', next: 'Mark: confirm physical receipt', emailStatus: 'READY_FOR_PREVIEW' },
+        START_SITE: { status: 'SITE_IN_PROGRESS', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'SITE_IN_PROGRESS', handoffLabel: 'Mark · site work in progress', next: 'Mark: complete site work', emailStatus: 'EXECUTING' },
+        COMPLETE_SITE: { status: 'WMS_FINALIZATION', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'RETURNED_TO_MAGGIE', handoffLabel: 'Returned to Maggie · WMS update', next: 'Maggie: update WMS and record reference', emailStatus: 'EXECUTING' },
+        COMPLETE_WMS: { status: 'COMPLETED', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'COMPLETED', handoffLabel: 'WMS handoff completed', next: 'No further action', emailStatus: 'COMPLETED' },
+        REJECT_OUTBOUND: { status: 'BLOCKED', role: 'SUPERVISOR', staff: 'Sunny', handoff: 'BLOCKED', handoffLabel: 'Blocked · Sunny review', next: 'Sunny: resolve exception and reopen', emailStatus: 'BLOCKED' },
+        BLOCK: { status: 'BLOCKED', role: 'SUPERVISOR', staff: 'Sunny', handoff: 'BLOCKED', handoffLabel: 'Blocked · Sunny review', next: 'Sunny: resolve exception and reopen', emailStatus: 'BLOCKED' },
+        REOPEN: { status: 'OPEN', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'TO_MAGGIE', handoffLabel: 'To Maggie · prepare WMS', next: 'Maggie: prepare WMS handoff', emailStatus: 'CAPTURED' }
+      }[action]
+      if (!transitions) return
+      const next = transitions
+      const actor = this.actors.find(item => item.name === next.staff)
+      this.detail.task_status = next.status
+      this.detail.status = next.emailStatus
+      this.detail.assigned_role = next.role
+      this.detail.assigned_role_label = this.previewAssignmentLabel(next.role)
+      this.detail.assigned_staff_id = actor ? actor.id : null
+      this.detail.assigned_staff_name = next.staff
+      this.detail.owner_role = next.role
+      this.detail.wms_handoff_status = next.handoff
+      this.detail.wms_handoff_label = next.handoffLabel
+      this.detail.task_next_action = next.next
+      this.detail.next_action_label = next.next
+      this.detail.next_action = next.next
+      this.detail.task_actions = this.previewTaskActions(next.status)
+      if (action === 'APPROVE_OUTBOUND' && this.detail.approvals && this.detail.approvals[0]) {
+        this.detail.approvals[0].status = 'APPROVED'
+        this.detail.approvals[0].decided_by_name = 'Sunny'
+        this.detail.approvals[0].decided_at = new Date().toISOString()
+      }
+      this.detail.task_events = (this.detail.task_events || []).concat([{ id: Date.now(), action, actor_name: next.staff, created_at: new Date().toISOString(), note: `Preview transition: ${next.next}.`, to_status: next.status }])
+      this.updatePreviewRow(this.detail)
+      this.assignmentRole = next.role
+      this.assignmentStaffId = actor ? actor.id : null
+      this.$q.notify({ message: `Preview only: ${action} applied locally`, icon: 'visibility', color: 'info' })
+    },
+    assignTask () {
+      if (!this.detail || !this.detail.task_id || !this.assignmentRole) return
+      if (this.previewMode) {
+        this.applyPreviewAssignment()
+        return
+      }
+      this.actionLoading = true
+      postauth(`asn/serial/intake/${this.detail.task_id}/assign/`, {
+        assigned_role: this.assignmentRole,
+        staff_id: this.assignmentStaffId || null
+      })
+        .then(() => {
+          this.$q.notify({ message: 'Task assignment updated', icon: 'check', color: 'positive' })
+          this.showDetail(this.detail.id)
+          this.load()
+        })
+        .catch(() => {})
+        .finally(() => { this.actionLoading = false })
+    },
+    performTaskAction (action) {
+      if (!this.detail || !this.detail.task_id) return
+      if (this.previewMode) {
+        this.applyPreviewAction(action)
+        return
+      }
+      this.actionLoading = true
+      postauth(`asn/serial/intake/${this.detail.task_id}/action/`, {
+        action,
+        wms_entity_system: this.wmsEntitySystem || '',
+        wms_entity_ref: this.wmsEntityRef || '',
+        note: this.wmsHandoffNote || ''
+      })
+        .then(() => {
+          this.$q.notify({ message: 'Task handoff recorded', icon: 'check', color: 'positive' })
+          this.showDetail(this.detail.id)
+          this.load()
+        })
+        .catch(() => {})
+        .finally(() => { this.actionLoading = false })
     },
     formatDate (value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
     },
     formatSourceTime (value) {
       return value ? this.formatDate(value) : 'Not provided'
+    },
+    compactSourceTime (value) {
+      if (!value) return '-'
+      const formatted = this.formatDate(value)
+      if (formatted.length < 16) return formatted
+      return `${formatted.slice(5, 10).replace(/-/g, '/')} ${formatted.slice(11, 16)}`
     },
     compactEmail (value) {
       const email = String(value || '')
@@ -352,6 +792,19 @@ export default {
       const reference = row.external_reference || row.matched_entity_ref || '-'
       const preview = String(row.email_body_preview || '').trim()
       return preview ? `Reference: ${reference}\nEmail: ${preview}` : `Reference: ${reference}`
+    },
+    compactSubject (value) {
+      const subject = String(value || 'No subject')
+      return subject.length <= 28 ? subject : `${subject.slice(0, 25)}…`
+    },
+    compactReference (value) {
+      const reference = String(value || '').trim()
+      if (!reference) return '-'
+      return reference.length <= 14 ? reference : `${reference.slice(0, 5)}…${reference.slice(-6)}`
+    },
+    compactEntity (row) {
+      if (!row || !row.matched_entity_ref) return 'Matched'
+      return `${row.matched_entity_type || 'WMS'} ${this.compactReference(row.matched_entity_ref)}`
     },
     originalEmail (detail) {
       return (detail && detail.original_email) || {}
@@ -380,8 +833,88 @@ export default {
         FAILED: 'Failed'
       }[value] || value || 'Unknown'
     },
+    statusShortLabel (value) {
+      return {
+        CAPTURED: 'Captured',
+        ANALYZING: 'Analyzing',
+        REVIEW_REQUIRED: 'Review',
+        READY_FOR_PREVIEW: 'Ready',
+        APPROVAL_REQUIRED: 'Approval',
+        EXECUTING: 'Executing',
+        COMPLETED: 'Done',
+        BLOCKED: 'Blocked',
+        DUPLICATE: 'Duplicate',
+        FAILED: 'Failed'
+      }[value] || value || 'Unknown'
+    },
     operationLabel (value) {
       return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', UNKNOWN: 'Unknown' }[value] || value || '-'
+    },
+    operationShortLabel (value) {
+      return { INBOUND: 'IB', OUTBOUND: 'OB', SUPPORTING: 'SUP', UNKNOWN: '-' }[value] || value || '-'
+    },
+    ownerLabel (value) {
+      return String(value || '').trim() || 'Unassigned'
+    },
+    taskStatusLabel (value) {
+      return {
+        OPEN: 'Open · Maggie',
+        AWAITING_SUNNY_APPROVAL: 'Awaiting Sunny approval',
+        READY_FOR_MARK: 'Ready · Mark',
+        SITE_IN_PROGRESS: 'Site work · Mark',
+        WMS_FINALIZATION: 'WMS update · Maggie',
+        COMPLETED: 'Completed',
+        BLOCKED: 'Blocked · Sunny review'
+      }[value] || value || 'Unknown'
+    },
+    taskStatusShortLabel (value) {
+      return {
+        OPEN: 'Open',
+        AWAITING_SUNNY_APPROVAL: 'Sunny OK',
+        READY_FOR_MARK: 'Ready / Mark',
+        SITE_IN_PROGRESS: 'Mark working',
+        WMS_FINALIZATION: 'Maggie WMS',
+        COMPLETED: 'Done',
+        BLOCKED: 'Blocked'
+      }[value] || value || 'Unknown'
+    },
+    taskStatusColor (value) {
+      return {
+        OPEN: 'blue-grey-7',
+        AWAITING_SUNNY_APPROVAL: 'orange-8',
+        READY_FOR_MARK: 'teal-7',
+        SITE_IN_PROGRESS: 'indigo-7',
+        WMS_FINALIZATION: 'blue-8',
+        COMPLETED: 'positive',
+        BLOCKED: 'negative'
+      }[value] || this.statusColor(value)
+    },
+    wmsHandoffLabel (row) {
+      if (row && row.wms_handoff_label) return row.wms_handoff_label
+      if (row && row.matched_entity_ref) {
+        return `${row.matched_entity_type || 'WMS'}: ${row.matched_entity_ref}`
+      }
+      return 'WMS handoff pending'
+    },
+    wmsHandoffShortLabel (row) {
+      const status = row && row.wms_handoff_status
+      return {
+        TO_SUNNY: 'To Sunny',
+        TO_MAGGIE: 'To Maggie',
+        TO_MARK: 'To Mark',
+        SITE_IN_PROGRESS: 'Mark working',
+        RETURNED_TO_MAGGIE: 'Back to Maggie',
+        COMPLETED: 'WMS done',
+        BLOCKED: 'Blocked'
+      }[status] || (row && row.matched_entity_ref ? 'WMS matched' : 'WMS pending')
+    },
+    wmsHandoffTooltip (row) {
+      if (row && row.wms_handoff_label) {
+        return `${row.wms_handoff_label}${row.wms_entity_ref ? ` · ${row.wms_entity_ref}` : ''}`
+      }
+      return row && row.matched_entity_ref
+        ? `Matched WMS entity: ${row.matched_entity_type || 'WMS'} ${row.matched_entity_ref}`
+        : 'No WMS entity has been matched yet.'
     },
     documentLabel (value) {
       return {
@@ -394,35 +927,41 @@ export default {
         OTHER: 'Other'
       }[value] || value || 'Other'
     },
+    documentShortLabel (value) {
+      return {
+        INBOUND_NOTICE: 'Inbound',
+        PACK_LIST: 'Pack',
+        PICK_TICKET: 'Pick',
+        DELIVERY_REQUEST: 'Delivery',
+        APPOINTMENT: 'Appt',
+        QC_SCAN: 'QC / scan',
+        OTHER: 'Other'
+      }[value] || value || 'Other'
+    },
     sourceTypeLabel (value) {
       return { EMAIL: 'Email', AI_AGENT: 'AI agent', WEB_FORM: 'Web form', CLI: 'CLI' }[value] || value || 'Source'
+    },
+    ownerShortLabel (row) {
+      if (row && row.assigned_staff_name) return row.assigned_staff_name
+      return { SUPERVISOR: 'Sunny', WMS_OPERATOR: 'Maggie', SITE_OPERATOR: 'Mark' }[row && row.assigned_role] || 'Unassigned'
+    },
+    shortNextAction (value) {
+      const action = String(value || '-').replace(/^(Sunny|Maggie|Mark):\s*/i, '')
+      const replacements = {
+        'confirm physical receipt': 'Confirm receipt',
+        'approve outbound request': 'Approve outbound',
+        'complete site work': 'Complete site work',
+        'update WMS and record reference': 'Update WMS',
+        'prepare WMS handoff': 'Prepare WMS',
+        'resolve exception and reopen': 'Resolve / reopen'
+      }
+      const compact = replacements[action] || action
+      return compact.length <= 24 ? compact : `${compact.slice(0, 21)}…`
     },
     confidenceLabel (value) {
       if (value === null || value === undefined || value === '') return 'Not recorded'
       const numeric = Number(value)
       return Number.isNaN(numeric) ? String(value) : `${Math.round(numeric * 100)}%`
-    },
-    extractionRows () {
-      if (!this.detail) return []
-      const items = (this.detail.extractions || []).map((item, index) => ({
-        key: `extraction-${index}-${item.field_name}`,
-        label: this.fieldLabel(item.field_name),
-        value: item.normalized_value || item.raw_value || '-',
-        source_location: item.source_location,
-        confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
-        flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
-      }))
-      if (items.length) return items
-      const metadata = this.detail.metadata || {}
-      const keys = ['container_no', 'eta', 'requested_delivery_date', 'customer', 'customer_address', 'receiving_address', 'warehouse', 'appointment_status', 'external_reference', 'business_operation']
-      return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
-        key: `metadata-${key}`,
-        label: this.fieldLabel(key),
-        value: this.formatValue(metadata[key]),
-        source_location: 'Email metadata',
-        confidence: '',
-        flags: ''
-      }))
     },
     fieldLabel (value) {
       return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || 'Field'
@@ -458,6 +997,9 @@ export default {
         COMPLETED: 'positive',
         DUPLICATE: 'grey-7'
       }[value] || 'grey-7'
+    },
+    actionButtonColor (value) {
+      return ['REJECT_OUTBOUND', 'BLOCK'].includes(value) ? 'negative' : 'primary'
     }
   }
 }
@@ -465,18 +1007,60 @@ export default {
 
 <style scoped>
 .source-intake-page {
-  background: #f5f5f5;
+  background: transparent;
 }
 
 .source-intake-card {
   width: 100%;
-  box-shadow: 0 2px 12px rgba(25, 49, 74, 0.08);
+}
+
+.source-intake-workflow {
+  background: #f8fafb;
+  border-left: 3px solid #1976d2;
+  padding: 10px 12px;
+}
+
+.source-intake-workflow-history {
+  border-top: 1px solid #dfe7eb;
+  padding-top: 10px;
+}
+
+.source-intake-workflow-event {
+  border-bottom: 1px solid #edf1f3;
+  padding-bottom: 5px;
 }
 
 .source-intake-table {
   margin-top: 12px;
   table-layout: fixed;
   width: 100%;
+}
+
+.source-intake-table .q-table__middle {
+  overflow-x: hidden;
+}
+
+.source-intake-table table {
+  min-width: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.source-intake-table th,
+.source-intake-table td {
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.source-intake-table th:last-child,
+.source-intake-table td:last-child {
+  width: 40px !important;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 .source-intake-next {

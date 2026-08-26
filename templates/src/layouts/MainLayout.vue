@@ -315,17 +315,17 @@
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
           <q-item
-            v-if="canViewMail2Task"
+            v-if="canUseMail2Task"
             clickable
-            :to="{ name: 'source-intake' }"
-            @click="linkChange('source-intake')"
+            :to="{ name: 'mail2task' }"
+            @click="linkChange('mail2task')"
             v-ripple
             exact
-            :active="link === 'source-intake' && link !== ''"
-            :class="{ 'my-menu-link': link === 'source-intake' && link !== '' }"
+            :active="link === 'mail2task' && link !== ''"
+            :class="{ 'my-menu-link': link === 'mail2task' && link !== '' }"
           >
             <q-item-section avatar><q-icon name="mail_outline" /></q-item-section>
-            <q-item-section>Source Intake</q-item-section>
+            <q-item-section>Mail2Task</q-item-section>
           </q-item>
           <q-separator />
           <q-item
@@ -761,6 +761,7 @@
 import { get, getauth, post, baseurl } from 'boot/axios_request'
 import { LocalStorage, SessionStorage, openURL } from 'quasar'
 import Bus from 'boot/bus.js'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   data () {
@@ -816,12 +817,17 @@ export default {
   },
   computed: {
     isPlatformAdmin () {
-      return String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
-        String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1'
+      return (
+        String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
+        (String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1')
+      )
     },
-    canViewMail2Task () {
+    canUseMail2Task () {
       const role = String(this.staff_type || '').trim().toLowerCase()
-      return this.authin === '1' && ['admin', 'manager', 'warehouse'].includes(role)
+      return isMail2TaskPreview() || (this.authin === '1' && (
+        this.isPlatformAdmin ||
+        ['manager', 'supervisor', 'inbound', 'outbound', 'stockcontrol', 'warehouse', 'qc', 'driver', 'logistics'].includes(role)
+      ))
     }
   },
   methods: {
@@ -1112,6 +1118,15 @@ export default {
   },
   created () {
     var _this = this
+    if (isMail2TaskPreview()) {
+      _this.authin = '1'
+      _this.login = false
+      _this.staff_type = 'Preview'
+      _this.activeTab = 'user'
+      _this.login_name = 'LOCAL PREVIEW'
+      _this.link = 'mail2task'
+      return
+    }
     if (LocalStorage.has('openid')) {
       _this.openid = LocalStorage.getItem('tenant_openid') || LocalStorage.getItem('openid')
       _this.activeTab = LocalStorage.getItem('login_mode') || 'admin'
@@ -1142,8 +1157,8 @@ export default {
   },
   mounted () {
     var _this = this
-    _this.warehouseOptionsGet()
-    _this.link = localStorage.getItem('menulink')
+    if (!isMail2TaskPreview()) _this.warehouseOptionsGet()
+    _this.link = isMail2TaskPreview() ? 'mail2task' : localStorage.getItem('menulink')
     Bus.$on('needLogin', (val) => {
       _this.isLoggedIn()
     })

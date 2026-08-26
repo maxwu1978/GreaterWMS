@@ -1,4 +1,26 @@
 import { LocalStorage } from 'quasar'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
+
+const MAIL2TASK_STAFF_TYPES = new Set([
+  'admin',
+  'manager',
+  'supervisor',
+  'inbound',
+  'outbound',
+  'stockcontrol',
+  'warehouse',
+  'qc',
+  'driver',
+  'logistics'
+])
+
+const canAccessMail2Task = () => {
+  if (isMail2TaskPreview()) return true
+  const auth = String(LocalStorage.getItem('auth') || '').trim()
+  const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
+  const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
+  return auth === '1' && (mode === 'admin' || MAIL2TASK_STAFF_TYPES.has(role))
+}
 
 const routes = [{
   path: '/',
@@ -36,19 +58,21 @@ const routes = [{
       ]
     },
     {
-      path: 'source-intake',
-      name: 'source-intake',
+      path: 'mail2task',
+      name: 'mail2task',
       component: () => import('pages/sourceIntake.vue'),
       beforeEnter: (to, from, next) => {
-        const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
-        const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()
-        const auth = String(LocalStorage.getItem('auth') || '').trim()
-        if (auth === '1' && ['admin', 'manager', 'warehouse'].includes(role) && (mode !== 'admin' || role === 'admin')) {
+        if (canAccessMail2Task()) {
           next()
         } else {
           next({ name: 'dashboard' })
         }
       }
+    },
+    {
+      path: 'source-intake',
+      name: 'source-intake',
+      redirect: { name: 'mail2task' }
     },
     {
       path: 'inbound',
