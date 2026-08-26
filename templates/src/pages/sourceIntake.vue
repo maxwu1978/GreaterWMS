@@ -68,7 +68,7 @@
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
             <div class="text-weight-medium">{{ compactSourceTime(props.row.sent_at) }}</div>
-            <div class="text-caption text-grey-7" :title="'Received ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">R {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
+            <div class="text-caption text-grey-7" :title="'Received in mailbox ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">Recv {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-document="props">
@@ -104,7 +104,7 @@
           <q-td :props="props">
             <div class="text-weight-medium" :title="props.row.assigned_staff_name || props.row.assigned_role_label || ownerLabel(props.row.owner_role)">{{ ownerShortLabel(props.row) }}</div>
             <div class="text-caption text-grey-7 ellipsis" :title="wmsHandoffTooltip(props.row)">
-              {{ wmsHandoffShortLabel(props.row) }}
+              Handoff: {{ wmsHandoffShortLabel(props.row) }}
             </div>
           </q-td>
         </template>
@@ -117,7 +117,7 @@
               {{ compactSubject(props.row.subject) }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="referenceTooltip(props.row)">
-              E#{{ props.row.source_evidence_id || '-' }}<span v-if="props.row.matched_entity_ref"> · {{ compactEntity(props.row) }}</span>
+              Evidence #{{ props.row.source_evidence_id || '-' }}<span v-if="props.row.matched_entity_ref"> · {{ compactEntity(props.row) }}</span>
             </div>
           </q-td>
         </template>
@@ -200,14 +200,14 @@
             <div v-if="detail.approvals && detail.approvals.length" class="source-intake-workflow-history q-mt-md">
               <div class="source-intake-field-label">Sunny approval history</div>
               <div v-for="approval in detail.approvals" :key="approval.id" class="text-caption text-grey-7 q-mt-xs">
-                {{ approval.status }} · {{ approval.decided_by_name || approval.requested_by_name || 'System' }} · {{ formatDate(approval.decided_at || approval.requested_at) }}
+                {{ approvalStatusLabel(approval.status) }} · {{ approval.decided_by_name || approval.requested_by_name || 'System' }} · {{ formatDate(approval.decided_at || approval.requested_at) }}
                 <span v-if="approval.note"> · {{ approval.note }}</span>
               </div>
             </div>
             <div v-if="detail.task_events && detail.task_events.length" class="source-intake-workflow-history q-mt-md">
               <div class="source-intake-field-label">Task handoff history</div>
               <div v-for="event in detail.task_events" :key="event.id" class="source-intake-workflow-event q-mt-xs">
-                <strong>{{ event.action }}</strong>
+                <strong>{{ eventLabel(event.action) }}</strong>
                 <span class="text-grey-7"> · {{ event.actor_name || event.actor_role || 'System' }} · {{ formatDate(event.created_at) }}</span>
                 <div class="text-caption text-grey-7">{{ event.note || event.to_status }}</div>
               </div>
@@ -220,9 +220,9 @@
               <div><span>Channel</span><strong>{{ sourceTypeLabel(detail.source_type) }}</strong></div>
               <div><span>From</span><strong>{{ originalEmail(detail).sender_name || detail.sender_name || '-' }}</strong></div>
               <div><span>Sender email</span><strong>{{ originalEmail(detail).sender_email || detail.sender_email || '-' }}</strong></div>
-              <div><span>Sent by customer</span><strong>{{ originalEmail(detail).sent_at_raw || formatSourceTime(originalEmail(detail).sent_at || detail.sent_at) }}</strong></div>
-              <div><span>Received by mailbox</span><strong>{{ formatDate(forwardedEmail(detail).received_at || detail.received_at) }}</strong></div>
-              <div><span>Evidence ID</span><strong>#{{ detail.source_evidence_id || '-' }}</strong></div>
+              <div><span>Original sent at</span><strong>{{ formatDate(originalEmail(detail).sent_at || originalEmail(detail).sent_at_raw || detail.sent_at) }}</strong></div>
+              <div><span>Received by mailbox</span><strong>{{ formatDate(mailReceivedAt(detail)) }}</strong></div>
+              <div><span>Evidence #</span><strong>#{{ detail.source_evidence_id || '-' }}</strong></div>
               <div><span>Captured</span><strong>{{ formatDate(detail.captured_at) }}</strong></div>
             </div>
             <div v-if="originalEmail(detail).from_raw" class="source-intake-field-label q-mt-md">Original From header</div>
@@ -246,17 +246,17 @@
                 <div><span>Forwarded subject</span><strong>{{ forwardedEmail(detail).subject || '-' }}</strong></div>
                 <div><span>Forwarded received</span><strong>{{ formatDate(forwardedEmail(detail).received_at) }}</strong></div>
               </div>
-              <div class="text-caption text-grey-7 q-mt-sm">The forwarded message is retained as evidence, but is not the customer source used for business extraction.</div>
+              <div class="text-caption text-grey-7 q-mt-sm">The forwarded message is retained as mailbox evidence; extraction uses the original business message.</div>
             </div>
           </div>
           <div class="source-intake-section-title">Business Link</div>
           <div class="source-intake-detail-grid">
             <div><span>Matched entity</span><strong>{{ detail.matched_entity_type || '-' }}</strong></div>
             <div><span>Entity reference</span><strong>{{ detail.matched_entity_ref || '-' }}</strong></div>
-            <div><span>Owner role</span><strong>{{ detail.owner_role || '-' }}</strong></div>
-            <div><span>Classification</span><strong>{{ confidenceLabel(detail.classification_confidence) }}</strong></div>
+            <div><span>Owner role</span><strong>{{ ownerRoleLabel(detail.owner_role) }}</strong></div>
+            <div><span>Classification confidence</span><strong>{{ confidenceLabel(detail.classification_confidence) }}</strong></div>
           </div>
-          <div class="source-intake-field-label q-mt-md">Next step</div>
+          <div class="source-intake-field-label q-mt-md">Next action</div>
           <div class="text-weight-medium q-mb-sm">{{ detail.next_action_label || '-' }}</div>
           <div class="source-intake-field-label">Instructions</div>
           <div class="q-mb-md source-intake-wrap">{{ detail.next_action || '-' }}</div>
@@ -264,7 +264,7 @@
             <div class="text-weight-medium q-mb-xs"><q-icon name="warning" /> Exception</div>
             <div>{{ detail.exception_summary }}</div>
           </div>
-          <div class="source-intake-section-title">Information From Email</div>
+          <div class="source-intake-section-title">Information from email</div>
           <div v-if="extractionRows.length" class="source-intake-extractions">
             <div v-for="item in extractionRows" :key="item.key" class="source-intake-extraction q-pa-sm q-mb-xs">
               <div class="row items-center q-col-gutter-sm">
@@ -372,12 +372,12 @@ export default {
       ],
       columns: [
         { name: 'task', label: 'Task', field: 'task_ref', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
-        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 8%', headerStyle: 'width: 8%' },
+        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'width: 8%', headerStyle: 'width: 8%' },
         { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'width: 9%', headerStyle: 'width: 9%' },
         { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
         { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'width: 12%', headerStyle: 'width: 12%' },
         { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'width: 6%', headerStyle: 'width: 6%' },
-        { name: 'status', label: 'Status', field: 'task_status', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
+        { name: 'status', label: 'Task / Mail', field: 'task_status', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
         { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'width: 10%', headerStyle: 'width: 10%' },
         { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px', headerStyle: 'width: 48px' }
@@ -414,7 +414,7 @@ export default {
       const items = (this.detail.extractions || []).map((item, index) => ({
         key: `extraction-${index}-${item.field_name}`,
         label: this.fieldLabel(item.field_name),
-        value: item.normalized_value || item.raw_value || '-',
+        value: this.displayFieldValue(item.field_name, item.normalized_value || item.raw_value || '-'),
         source_location: item.source_location,
         confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
         flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
@@ -425,7 +425,7 @@ export default {
       return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
         key: `metadata-${key}`,
         label: this.fieldLabel(key),
-        value: this.formatValue(metadata[key]),
+        value: this.displayFieldValue(key, metadata[key]),
         source_location: 'Email metadata',
         confidence: '',
         flags: ''
@@ -812,6 +812,12 @@ export default {
     forwardedEmail (detail) {
       return (detail && detail.forwarded_email) || {}
     },
+    mailReceivedAt (detail) {
+      if (!detail) return ''
+      const original = this.originalEmail(detail)
+      const forwarded = this.forwardedEmail(detail)
+      return original.received_at || detail.received_at || detail.received_at_raw || forwarded.received_at || ''
+    },
     hasForwardedEmail (detail) {
       const email = this.forwardedEmail(detail)
       return Boolean(email.sender_name || email.sender_email || email.subject || email.received_at)
@@ -824,8 +830,8 @@ export default {
         CAPTURED: 'Captured',
         ANALYZING: 'Analyzing',
         REVIEW_REQUIRED: 'Review required',
-        READY_FOR_PREVIEW: 'Ready',
-        APPROVAL_REQUIRED: 'Approval required',
+        READY_FOR_PREVIEW: 'Ready for review',
+        APPROVAL_REQUIRED: 'Approval needed',
         EXECUTING: 'Executing',
         COMPLETED: 'Completed',
         BLOCKED: 'Blocked',
@@ -838,8 +844,8 @@ export default {
         CAPTURED: 'Captured',
         ANALYZING: 'Analyzing',
         REVIEW_REQUIRED: 'Review',
-        READY_FOR_PREVIEW: 'Ready',
-        APPROVAL_REQUIRED: 'Approval',
+        READY_FOR_PREVIEW: 'Review ready',
+        APPROVAL_REQUIRED: 'Need approval',
         EXECUTING: 'Executing',
         COMPLETED: 'Done',
         BLOCKED: 'Blocked',
@@ -848,13 +854,20 @@ export default {
       }[value] || value || 'Unknown'
     },
     operationLabel (value) {
-      return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', UNKNOWN: 'Unknown' }[value] || value || '-'
+      return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', TRANSFER: 'Transfer', UNKNOWN: 'Unknown' }[value] || value || '-'
     },
     operationShortLabel (value) {
-      return { INBOUND: 'IB', OUTBOUND: 'OB', SUPPORTING: 'SUP', UNKNOWN: '-' }[value] || value || '-'
+      return { INBOUND: 'IB', OUTBOUND: 'OB', SUPPORTING: 'SUP', TRANSFER: 'TR', UNKNOWN: '-' }[value] || value || '-'
     },
     ownerLabel (value) {
       return String(value || '').trim() || 'Unassigned'
+    },
+    ownerRoleLabel (value) {
+      return {
+        SUPERVISOR: 'Sunny / Supervisor',
+        WMS_OPERATOR: 'Maggie / WMS operator',
+        SITE_OPERATOR: 'Mark / Site operator'
+      }[value] || String(value || '').trim() || 'Unassigned'
     },
     taskStatusLabel (value) {
       return {
@@ -870,7 +883,7 @@ export default {
     taskStatusShortLabel (value) {
       return {
         OPEN: 'Open',
-        AWAITING_SUNNY_APPROVAL: 'Sunny OK',
+        AWAITING_SUNNY_APPROVAL: 'Need Sunny',
         READY_FOR_MARK: 'Ready / Mark',
         SITE_IN_PROGRESS: 'Mark working',
         WMS_FINALIZATION: 'Maggie WMS',
@@ -929,12 +942,12 @@ export default {
     },
     documentShortLabel (value) {
       return {
-        INBOUND_NOTICE: 'Inbound',
-        PACK_LIST: 'Pack',
+        INBOUND_NOTICE: 'A/N',
+        PACK_LIST: 'PL',
         PICK_TICKET: 'Pick',
-        DELIVERY_REQUEST: 'Delivery',
+        DELIVERY_REQUEST: 'DO',
         APPOINTMENT: 'Appt',
-        QC_SCAN: 'QC / scan',
+        QC_SCAN: 'QC',
         OTHER: 'Other'
       }[value] || value || 'Other'
     },
@@ -963,8 +976,38 @@ export default {
       const numeric = Number(value)
       return Number.isNaN(numeric) ? String(value) : `${Math.round(numeric * 100)}%`
     },
+    approvalStatusLabel (value) {
+      return { PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected', CANCELLED: 'Cancelled' }[value] || this.statusLabel(value)
+    },
+    displayFieldValue (field, value) {
+      if (value === null || value === undefined || value === '') return '-'
+      const key = String(field || '').trim().toLowerCase()
+      if (key === 'business_operation' || key === 'operation') return this.operationLabel(value)
+      if (key === 'owner_role') return this.ownerRoleLabel(value)
+      return this.formatValue(value)
+    },
     fieldLabel (value) {
-      return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || 'Field'
+      const key = String(value || '').trim().toLowerCase()
+      const labels = {
+        external_reference: 'External reference',
+        business_operation: 'Operation',
+        container_no: 'Container',
+        eta: 'ETA',
+        mawb: 'MAWB',
+        hawb: 'HAWB',
+        bol: 'BOL',
+        bol_number: 'BOL number',
+        do: 'DO',
+        do_number: 'DO number',
+        po: 'PO',
+        dn: 'DN',
+        sku: 'SKU',
+        customer_address: 'Customer address',
+        receiving_address: 'Receiving address',
+        requested_delivery_date: 'Requested delivery date'
+      }
+      if (labels[key]) return labels[key]
+      return key.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || 'Field'
     },
     formatValue (value) {
       return typeof value === 'object' ? JSON.stringify(value) : String(value)
@@ -982,7 +1025,29 @@ export default {
       return hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash
     },
     eventLabel (value) {
-      return this.fieldLabel(value)
+      const key = String(value || '').trim().toUpperCase()
+      const labels = {
+        CREATED: 'Created',
+        ASSIGN: 'Assigned',
+        START_SITE: 'Site work started',
+        COMPLETE_SITE: 'Site work completed',
+        COMPLETE_WMS: 'WMS handoff completed',
+        APPROVE_OUTBOUND: 'Outbound approved',
+        REJECT_OUTBOUND: 'Outbound rejected',
+        PREPARE_WMS: 'WMS handoff prepared',
+        ORIGINAL_EMAIL_RECONCILED: 'Original email reconciled',
+        CAPTURED: 'Captured',
+        ANALYZING: 'Analyzing',
+        REVIEW_REQUIRED: 'Review required',
+        READY_FOR_PREVIEW: 'Ready for review',
+        APPROVAL_REQUIRED: 'Approval needed',
+        EXECUTING: 'Executing',
+        COMPLETED: 'Completed',
+        BLOCKED: 'Blocked',
+        DUPLICATE: 'Duplicate',
+        FAILED: 'Failed'
+      }
+      return labels[key] || this.fieldLabel(key.toLowerCase())
     },
     statusColor (value) {
       return {
