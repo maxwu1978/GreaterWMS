@@ -67,13 +67,13 @@
         </template>
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ formatSourceTime(props.row.sent_at) }}</div>
-            <div class="text-caption text-grey-7">Received {{ formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
+            <div class="text-weight-medium">{{ compactSourceTime(props.row.sent_at) }}</div>
+            <div class="text-caption text-grey-7" :title="'Received ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">R {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-document="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ documentLabel(props.row.document_type) }}</div>
+            <div class="text-weight-medium" :title="documentLabel(props.row.document_type)">{{ documentShortLabel(props.row.document_type) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-source="props">
@@ -86,10 +86,15 @@
             </div>
           </q-td>
         </template>
+        <template v-slot:body-cell-operation="props">
+          <q-td :props="props">
+            <span class="text-weight-medium" :title="operationLabel(props.row.operation)">{{ operationShortLabel(props.row.operation) }}</span>
+          </q-td>
+        </template>
         <template v-slot:body-cell-status="props">
           <q-td :props="props">
-            <q-badge :color="taskStatusColor(props.row.task_status || props.row.status)">{{ taskStatusLabel(props.row.task_status || props.row.status) }}</q-badge>
-            <div class="text-caption text-grey-7">Email: {{ statusLabel(props.row.status) }}</div>
+            <q-badge :color="taskStatusColor(props.row.task_status || props.row.status)" :title="taskStatusLabel(props.row.task_status || props.row.status)">{{ taskStatusShortLabel(props.row.task_status || props.row.status) }}</q-badge>
+            <div class="text-caption text-grey-7" :title="'Email: ' + statusLabel(props.row.status)">Mail: {{ statusShortLabel(props.row.status) }}</div>
             <div v-if="props.row.exception_summary" class="source-intake-exception-marker" :title="props.row.exception_summary">
               <q-icon name="warning" size="14px" /> Exception
             </div>
@@ -97,9 +102,9 @@
         </template>
         <template v-slot:body-cell-owner="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ props.row.assigned_staff_name || props.row.assigned_role_label || ownerLabel(props.row.owner_role) }}</div>
+            <div class="text-weight-medium" :title="props.row.assigned_staff_name || props.row.assigned_role_label || ownerLabel(props.row.owner_role)">{{ ownerShortLabel(props.row) }}</div>
             <div class="text-caption text-grey-7 ellipsis" :title="wmsHandoffTooltip(props.row)">
-              {{ wmsHandoffLabel(props.row) }}
+              {{ wmsHandoffShortLabel(props.row) }}
             </div>
           </q-td>
         </template>
@@ -109,11 +114,10 @@
               {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
-              {{ props.row.subject || 'No subject' }}
+              {{ compactSubject(props.row.subject) }}
             </div>
-            <div class="text-caption text-grey-7">Evidence #{{ props.row.source_evidence_id || '-' }}</div>
-            <div v-if="props.row.matched_entity_ref" class="text-caption text-grey-7 ellipsis">
-              {{ props.row.matched_entity_type || 'Matched' }}: {{ props.row.matched_entity_ref }}
+            <div class="text-caption text-grey-7 ellipsis" :title="referenceTooltip(props.row)">
+              E#{{ props.row.source_evidence_id || '-' }}<span v-if="props.row.matched_entity_ref"> · {{ compactEntity(props.row) }}</span>
             </div>
           </q-td>
         </template>
@@ -122,7 +126,7 @@
             :props="props"
             class="source-intake-next"
             :title="props.row.task_next_action || props.row.next_action || props.row.exception_summary || ''"
-          ><span class="source-intake-next-label">{{ props.row.task_next_action || props.row.next_action || props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</span></q-td>
+          ><span class="source-intake-next-label">{{ shortNextAction(props.row.task_next_action || props.row.next_action || props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-')) }}</span></q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -367,16 +371,16 @@ export default {
         { label: 'Migrated GreaterWMS', value: 'MIGRATED' }
       ],
       columns: [
-        { name: 'task', label: 'Task / Ref', field: 'task_ref', align: 'left', style: 'width: 18%' },
-        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 11%' },
-        { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 13%' },
-        { name: 'source', label: 'Original source', field: 'sender_email', align: 'left', style: 'width: 22%' },
-        { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
-        { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
-        { name: 'status', label: 'Task status', field: 'task_status', align: 'left', style: 'width: 13%' },
-        { name: 'owner', label: 'Owner / Handoff', field: 'assigned_role', align: 'left', style: 'width: 14%' },
-        { name: 'next_action', label: 'Next step', field: 'task_next_action', align: 'left', style: 'width: 16%' },
-        { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
+        { name: 'task', label: 'Task', field: 'task_ref', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
+        { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 8%', headerStyle: 'width: 8%' },
+        { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'width: 9%', headerStyle: 'width: 9%' },
+        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
+        { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'width: 12%', headerStyle: 'width: 12%' },
+        { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'width: 6%', headerStyle: 'width: 6%' },
+        { name: 'status', label: 'Status', field: 'task_status', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
+        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'width: 10%', headerStyle: 'width: 10%' },
+        { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
+        { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px', headerStyle: 'width: 48px' }
       ]
     }
   },
@@ -768,6 +772,12 @@ export default {
     formatSourceTime (value) {
       return value ? this.formatDate(value) : 'Not provided'
     },
+    compactSourceTime (value) {
+      if (!value) return '-'
+      const formatted = this.formatDate(value)
+      if (formatted.length < 16) return formatted
+      return `${formatted.slice(5, 10).replace(/-/g, '/')} ${formatted.slice(11, 16)}`
+    },
     compactEmail (value) {
       const email = String(value || '')
       if (email.length <= 30) return email
@@ -782,6 +792,19 @@ export default {
       const reference = row.external_reference || row.matched_entity_ref || '-'
       const preview = String(row.email_body_preview || '').trim()
       return preview ? `Reference: ${reference}\nEmail: ${preview}` : `Reference: ${reference}`
+    },
+    compactSubject (value) {
+      const subject = String(value || 'No subject')
+      return subject.length <= 28 ? subject : `${subject.slice(0, 25)}…`
+    },
+    compactReference (value) {
+      const reference = String(value || '').trim()
+      if (!reference) return '-'
+      return reference.length <= 14 ? reference : `${reference.slice(0, 5)}…${reference.slice(-6)}`
+    },
+    compactEntity (row) {
+      if (!row || !row.matched_entity_ref) return 'Matched'
+      return `${row.matched_entity_type || 'WMS'} ${this.compactReference(row.matched_entity_ref)}`
     },
     originalEmail (detail) {
       return (detail && detail.original_email) || {}
@@ -810,8 +833,25 @@ export default {
         FAILED: 'Failed'
       }[value] || value || 'Unknown'
     },
+    statusShortLabel (value) {
+      return {
+        CAPTURED: 'Captured',
+        ANALYZING: 'Analyzing',
+        REVIEW_REQUIRED: 'Review',
+        READY_FOR_PREVIEW: 'Ready',
+        APPROVAL_REQUIRED: 'Approval',
+        EXECUTING: 'Executing',
+        COMPLETED: 'Done',
+        BLOCKED: 'Blocked',
+        DUPLICATE: 'Duplicate',
+        FAILED: 'Failed'
+      }[value] || value || 'Unknown'
+    },
     operationLabel (value) {
       return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', UNKNOWN: 'Unknown' }[value] || value || '-'
+    },
+    operationShortLabel (value) {
+      return { INBOUND: 'IB', OUTBOUND: 'OB', SUPPORTING: 'SUP', UNKNOWN: '-' }[value] || value || '-'
     },
     ownerLabel (value) {
       return String(value || '').trim() || 'Unassigned'
@@ -825,6 +865,17 @@ export default {
         WMS_FINALIZATION: 'WMS update · Maggie',
         COMPLETED: 'Completed',
         BLOCKED: 'Blocked · Sunny review'
+      }[value] || value || 'Unknown'
+    },
+    taskStatusShortLabel (value) {
+      return {
+        OPEN: 'Open',
+        AWAITING_SUNNY_APPROVAL: 'Sunny OK',
+        READY_FOR_MARK: 'Ready / Mark',
+        SITE_IN_PROGRESS: 'Mark working',
+        WMS_FINALIZATION: 'Maggie WMS',
+        COMPLETED: 'Done',
+        BLOCKED: 'Blocked'
       }[value] || value || 'Unknown'
     },
     taskStatusColor (value) {
@@ -845,6 +896,18 @@ export default {
       }
       return 'WMS handoff pending'
     },
+    wmsHandoffShortLabel (row) {
+      const status = row && row.wms_handoff_status
+      return {
+        TO_SUNNY: 'To Sunny',
+        TO_MAGGIE: 'To Maggie',
+        TO_MARK: 'To Mark',
+        SITE_IN_PROGRESS: 'Mark working',
+        RETURNED_TO_MAGGIE: 'Back to Maggie',
+        COMPLETED: 'WMS done',
+        BLOCKED: 'Blocked'
+      }[status] || (row && row.matched_entity_ref ? 'WMS matched' : 'WMS pending')
+    },
     wmsHandoffTooltip (row) {
       if (row && row.wms_handoff_label) {
         return `${row.wms_handoff_label}${row.wms_entity_ref ? ` · ${row.wms_entity_ref}` : ''}`
@@ -864,8 +927,36 @@ export default {
         OTHER: 'Other'
       }[value] || value || 'Other'
     },
+    documentShortLabel (value) {
+      return {
+        INBOUND_NOTICE: 'Inbound',
+        PACK_LIST: 'Pack',
+        PICK_TICKET: 'Pick',
+        DELIVERY_REQUEST: 'Delivery',
+        APPOINTMENT: 'Appt',
+        QC_SCAN: 'QC / scan',
+        OTHER: 'Other'
+      }[value] || value || 'Other'
+    },
     sourceTypeLabel (value) {
       return { EMAIL: 'Email', AI_AGENT: 'AI agent', WEB_FORM: 'Web form', CLI: 'CLI' }[value] || value || 'Source'
+    },
+    ownerShortLabel (row) {
+      if (row && row.assigned_staff_name) return row.assigned_staff_name
+      return { SUPERVISOR: 'Sunny', WMS_OPERATOR: 'Maggie', SITE_OPERATOR: 'Mark' }[row && row.assigned_role] || 'Unassigned'
+    },
+    shortNextAction (value) {
+      const action = String(value || '-').replace(/^(Sunny|Maggie|Mark):\s*/i, '')
+      const replacements = {
+        'confirm physical receipt': 'Confirm receipt',
+        'approve outbound request': 'Approve outbound',
+        'complete site work': 'Complete site work',
+        'update WMS and record reference': 'Update WMS',
+        'prepare WMS handoff': 'Prepare WMS',
+        'resolve exception and reopen': 'Resolve / reopen'
+      }
+      const compact = replacements[action] || action
+      return compact.length <= 24 ? compact : `${compact.slice(0, 21)}…`
     },
     confidenceLabel (value) {
       if (value === null || value === undefined || value === '') return 'Not recorded'
@@ -943,6 +1034,33 @@ export default {
   margin-top: 12px;
   table-layout: fixed;
   width: 100%;
+}
+
+.source-intake-table .q-table__middle {
+  overflow-x: hidden;
+}
+
+.source-intake-table table {
+  min-width: 0;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.source-intake-table th,
+.source-intake-table td {
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.source-intake-table th:last-child,
+.source-intake-table td:last-child {
+  width: 40px !important;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 .source-intake-next {
