@@ -69,11 +69,6 @@
             <div class="text-caption text-grey-7 source-intake-time" :title="'Received in mailbox ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">R {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
-        <template v-slot:body-cell-document="props">
-          <q-td :props="props">
-            <div class="text-weight-medium" :title="documentLabel(props.row.document_type)">{{ documentShortLabel(props.row.document_type) }}</div>
-          </q-td>
-        </template>
         <template v-slot:body-cell-source="props">
           <q-td :props="props">
             <div class="text-weight-medium ellipsis" :title="props.row.sender_name || 'Unknown sender'">
@@ -82,11 +77,6 @@
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.sender_email || props.row.sender_name">
               From: {{ compactEmail(props.row.sender_email) || props.row.sender_name || '-' }}
             </div>
-          </q-td>
-        </template>
-        <template v-slot:body-cell-operation="props">
-          <q-td :props="props">
-            <span class="text-weight-medium" :title="operationLabel(props.row.operation)">{{ operationShortLabel(props.row.operation) }}</span>
           </q-td>
         </template>
         <template v-slot:body-cell-status="props">
@@ -110,6 +100,9 @@
           <q-td :props="props">
             <div class="text-weight-medium ellipsis" :title="props.row.external_reference || 'No external reference'">
               {{ compactReference(props.row.external_reference) }}
+            </div>
+            <div class="text-caption text-grey-7 source-intake-reference-type" :title="referenceTypeTooltip(props.row)">
+              {{ operationShortLabel(props.row.operation) }} · {{ documentShortLabel(props.row.document_type) }}
             </div>
           </q-td>
         </template>
@@ -387,15 +380,13 @@ export default {
         { label: 'Migrated GreaterWMS', value: 'MIGRATED' }
       ],
       columns: [
-        { name: 'task', label: 'Task ID', field: 'task_id', align: 'left', style: 'min-width: 130px; width: 150px; max-width: 170px;', headerStyle: 'min-width: 130px; width: 150px; max-width: 170px;' },
-        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'min-width: 95px; width: 105px; max-width: 120px;', headerStyle: 'min-width: 95px; width: 105px; max-width: 120px;' },
-        { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'min-width: 50px; width: 60px; max-width: 70px;', headerStyle: 'min-width: 50px; width: 60px; max-width: 70px;' },
-        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'min-width: 110px; width: 125px; max-width: 150px;', headerStyle: 'min-width: 110px; width: 125px; max-width: 150px;' },
-        { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'min-width: 95px; width: 110px; max-width: 135px;', headerStyle: 'min-width: 95px; width: 110px; max-width: 135px;' },
-        { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'min-width: 42px; width: 50px; max-width: 58px;', headerStyle: 'min-width: 42px; width: 50px; max-width: 58px;' },
         { name: 'status', label: 'Task / Mail', field: 'task_status', align: 'left', style: 'min-width: 120px; width: 135px; max-width: 160px;', headerStyle: 'min-width: 120px; width: 135px; max-width: 160px;' },
-        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'min-width: 75px; width: 90px; max-width: 110px;', headerStyle: 'min-width: 75px; width: 90px; max-width: 110px;' },
+        { name: 'task', label: 'Task', field: 'task_id', align: 'left', style: 'min-width: 130px; width: 150px; max-width: 170px;', headerStyle: 'min-width: 130px; width: 150px; max-width: 170px;' },
+        { name: 'reference', label: 'Ref / Type', field: 'external_reference', align: 'left', style: 'min-width: 105px; width: 120px; max-width: 140px;', headerStyle: 'min-width: 105px; width: 120px; max-width: 140px;' },
         { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'min-width: 110px; width: 130px; max-width: 160px;', headerStyle: 'min-width: 110px; width: 130px; max-width: 160px;' },
+        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'min-width: 75px; width: 90px; max-width: 110px;', headerStyle: 'min-width: 75px; width: 90px; max-width: 110px;' },
+        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'min-width: 110px; width: 125px; max-width: 150px;', headerStyle: 'min-width: 110px; width: 125px; max-width: 150px;' },
+        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'min-width: 95px; width: 105px; max-width: 120px;', headerStyle: 'min-width: 95px; width: 105px; max-width: 120px;' },
         { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
@@ -830,6 +821,14 @@ export default {
       const preview = String(row.email_body_preview || '').trim()
       return preview ? `Reference: ${reference}\nEmail: ${preview}` : `Reference: ${reference}`
     },
+    referenceTypeTooltip (row) {
+      if (!row) return 'No reference or type recorded'
+      return [
+        `Operation: ${this.operationLabel(row.operation)}`,
+        `Document: ${this.documentLabel(row.document_type)}`,
+        this.referenceTooltip(row)
+      ].join('\n')
+    },
     compactSubject (value) {
       const subject = String(value || 'No subject')
       return subject.length <= 28 ? subject : `${subject.slice(0, 25)}…`
@@ -1186,6 +1185,10 @@ export default {
 }
 
 .source-intake-time {
+  white-space: nowrap;
+}
+
+.source-intake-reference-type {
   white-space: nowrap;
 }
 
