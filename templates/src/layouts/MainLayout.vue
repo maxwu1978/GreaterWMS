@@ -761,6 +761,7 @@
 import { get, getauth, post, baseurl } from 'boot/axios_request'
 import { LocalStorage, SessionStorage, openURL } from 'quasar'
 import Bus from 'boot/bus.js'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   data () {
@@ -823,10 +824,10 @@ export default {
     },
     canUseMail2Task () {
       const role = String(this.staff_type || '').trim().toLowerCase()
-      return this.authin === '1' && (
+      return isMail2TaskPreview() || (this.authin === '1' && (
         this.isPlatformAdmin ||
         ['manager', 'supervisor', 'inbound', 'outbound', 'stockcontrol', 'warehouse', 'qc', 'driver', 'logistics'].includes(role)
-      )
+      ))
     }
   },
   methods: {
@@ -1117,6 +1118,15 @@ export default {
   },
   created () {
     var _this = this
+    if (isMail2TaskPreview()) {
+      _this.authin = '1'
+      _this.login = false
+      _this.staff_type = 'Preview'
+      _this.activeTab = 'user'
+      _this.login_name = 'LOCAL PREVIEW'
+      _this.link = 'mail2task'
+      return
+    }
     if (LocalStorage.has('openid')) {
       _this.openid = LocalStorage.getItem('tenant_openid') || LocalStorage.getItem('openid')
       _this.activeTab = LocalStorage.getItem('login_mode') || 'admin'
@@ -1147,8 +1157,8 @@ export default {
   },
   mounted () {
     var _this = this
-    _this.warehouseOptionsGet()
-    _this.link = localStorage.getItem('menulink')
+    if (!isMail2TaskPreview()) _this.warehouseOptionsGet()
+    _this.link = isMail2TaskPreview() ? 'mail2task' : localStorage.getItem('menulink')
     Bus.$on('needLogin', (val) => {
       _this.isLoggedIn()
     })

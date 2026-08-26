@@ -61,6 +61,13 @@ The Mail2Task page keeps the original GreaterWMS Vue 2 + Quasar shell and adds
 only the task/ref, task status, owner/handoff, assignment, approval, and WMS
 reference controls. The Dashboard remains the warehouse execution board.
 
+For local visual review only, start the frontend in Quasar development mode and
+open `/#/mail2task?preview=mail2task`. This route is enabled only when the
+build is in development mode and the hostname is local (`localhost`,
+`127.0.0.1`, or `::1`). It uses in-memory demonstration rows and never calls
+mailbox, WMS, assignment, or task-write APIs. Production builds and normal
+authenticated routes cannot enable this preview flag.
+
 ## Required verification
 
 From `templates/`:

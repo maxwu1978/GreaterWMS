@@ -1,4 +1,5 @@
 import { LocalStorage } from 'quasar'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 const MAIL2TASK_STAFF_TYPES = new Set([
   'admin',
@@ -14,6 +15,7 @@ const MAIL2TASK_STAFF_TYPES = new Set([
 ])
 
 const canAccessMail2Task = () => {
+  if (isMail2TaskPreview()) return true
   const auth = String(LocalStorage.getItem('auth') || '').trim()
   const role = String(LocalStorage.getItem('staff_type') || '').trim().toLowerCase()
   const mode = String(LocalStorage.getItem('login_mode') || '').trim().toLowerCase()

@@ -1,6 +1,6 @@
 <template>
-  <q-page class="source-intake-page q-pa-md">
-    <q-card flat bordered class="source-intake-card">
+  <q-page class="source-intake-page q-pa-sm">
+    <q-card class="source-intake-card shadow-11">
       <q-card-section class="row items-center q-pb-sm">
         <div>
           <div class="text-h6 text-weight-bold">Mail2Task</div>
@@ -11,6 +11,11 @@
       </q-card-section>
 
       <q-separator />
+
+      <q-banner v-if="previewMode" dense class="source-intake-preview-banner q-mx-md q-mt-sm">
+        <template v-slot:avatar><q-icon name="visibility" color="primary" /></template>
+        Local development preview · demonstration data only. No mailbox, WMS or task API writes are performed.
+      </q-banner>
 
       <q-card-section class="row items-center q-col-gutter-sm q-py-sm">
         <div class="col-12 col-sm-4 col-md-3">
@@ -297,12 +302,14 @@
 
 <script>
 import { getauth, postauth } from 'boot/axios_request.js'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   name: 'SourceIntake',
   data () {
     return {
       loading: false,
+      previewMode: isMail2TaskPreview(),
       rows: [],
       detail: null,
       detailOpen: false,
@@ -397,10 +404,36 @@ export default {
       return this.actors
         .filter(item => (item.task_roles || []).includes(this.assignmentRole))
         .map(item => ({ label: `${item.name} · ${item.staff_type}`, value: item.id }))
+    },
+    extractionRows () {
+      if (!this.detail) return []
+      const items = (this.detail.extractions || []).map((item, index) => ({
+        key: `extraction-${index}-${item.field_name}`,
+        label: this.fieldLabel(item.field_name),
+        value: item.normalized_value || item.raw_value || '-',
+        source_location: item.source_location,
+        confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
+        flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
+      }))
+      if (items.length) return items
+      const metadata = this.detail.metadata || {}
+      const keys = ['container_no', 'eta', 'requested_delivery_date', 'customer', 'customer_address', 'receiving_address', 'warehouse', 'appointment_status', 'external_reference', 'business_operation']
+      return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
+        key: `metadata-${key}`,
+        label: this.fieldLabel(key),
+        value: this.formatValue(metadata[key]),
+        source_location: 'Email metadata',
+        confidence: '',
+        flags: ''
+      }))
     }
   },
   mounted () {
-    this.load()
+    if (this.previewMode) {
+      this.loadPreview()
+    } else {
+      this.load()
+    }
   },
   methods: {
     queryString (offset) {
@@ -413,7 +446,115 @@ export default {
       if (this.search) params.set('q', this.search)
       return `asn/serial/intake/?${params.toString()}`
     },
+    previewRows () {
+      return [
+        {
+          id: 9001,
+          task_id: 9001,
+          task_ref: 'IB-TRHU4217950',
+          subject: 'Inbound notice · TRHU4217950',
+          sent_at: '2026-08-25T09:15:00Z',
+          received_at_raw: '2026-08-25T09:16:00Z',
+          captured_at: '2026-08-25T09:17:00Z',
+          document_type: 'INBOUND_NOTICE',
+          sender_name: 'Delta Logistics',
+          sender_email: 'delta-logistics@example.com',
+          external_reference: 'TRHU4217950',
+          operation: 'INBOUND',
+          task_status: 'READY_FOR_MARK',
+          status: 'READY_FOR_PREVIEW',
+          assigned_role: 'SITE_OPERATOR',
+          assigned_role_label: 'Mark / Site operator',
+          assigned_staff_id: 3003,
+          assigned_staff_name: 'Mark',
+          wms_handoff_status: 'TO_MARK',
+          wms_handoff_label: 'To Mark · site execution',
+          task_next_action: 'Mark: confirm physical receipt',
+          next_action: 'Mark verifies cartons and records any variance.',
+          next_action_label: 'Mark: confirm physical receipt',
+          task_email_count: 2,
+          source_evidence_id: 7001,
+          matched_entity_type: 'ASN',
+          matched_entity_ref: 'ASN-20260825-0042',
+          email_body_preview: 'Please confirm receipt for container TRHU4217950.',
+          exception_summary: ''
+        },
+        {
+          id: 9002,
+          task_id: 9002,
+          task_ref: 'OB-TRLU9821043',
+          subject: 'Outbound delivery request · BOL attached',
+          sent_at: '2026-08-25T10:40:00Z',
+          received_at_raw: '2026-08-25T10:41:00Z',
+          captured_at: '2026-08-25T10:42:00Z',
+          document_type: 'DELIVERY_REQUEST',
+          sender_name: 'Delta Forwarder',
+          sender_email: 'forwarder@example.com',
+          external_reference: 'TRLU9821043',
+          operation: 'OUTBOUND',
+          task_status: 'AWAITING_SUNNY_APPROVAL',
+          status: 'APPROVAL_REQUIRED',
+          assigned_role: 'SUPERVISOR',
+          assigned_role_label: 'Sunny / Supervisor',
+          assigned_staff_id: 3001,
+          assigned_staff_name: 'Sunny',
+          wms_handoff_status: 'TO_SUNNY',
+          wms_handoff_label: 'To Sunny · outbound approval',
+          task_next_action: 'Sunny: approve outbound request',
+          next_action: 'Sunny confirms the outbound request before Mark starts site work.',
+          next_action_label: 'Sunny: approve outbound request',
+          task_email_count: 1,
+          source_evidence_id: 7002,
+          matched_entity_type: 'DN',
+          matched_entity_ref: 'DN-20260825-0017',
+          email_body_preview: 'Please approve the attached BOL and release the outbound order.',
+          exception_summary: ''
+        }
+      ]
+    },
+    previewActors () {
+      return [
+        { id: 3001, name: 'Sunny', staff_type: 'Supervisor', task_roles: ['SUPERVISOR'] },
+        { id: 3002, name: 'Maggie', staff_type: 'Warehouse', task_roles: ['WMS_OPERATOR'] },
+        { id: 3003, name: 'Mark', staff_type: 'Warehouse', task_roles: ['SITE_OPERATOR'] }
+      ]
+    },
+    previewTaskActions (status) {
+      return {
+        OPEN: [{ code: 'PREPARE_WMS', label: 'Prepare WMS handoff' }, { code: 'BLOCK', label: 'Block task' }],
+        AWAITING_SUNNY_APPROVAL: [{ code: 'APPROVE_OUTBOUND', label: 'Approve outbound' }, { code: 'REJECT_OUTBOUND', label: 'Reject outbound' }, { code: 'BLOCK', label: 'Block task' }],
+        READY_FOR_MARK: [{ code: 'START_SITE', label: 'Start site work' }, { code: 'BLOCK', label: 'Block task' }],
+        SITE_IN_PROGRESS: [{ code: 'COMPLETE_SITE', label: 'Complete site work' }, { code: 'BLOCK', label: 'Block task' }],
+        WMS_FINALIZATION: [{ code: 'COMPLETE_WMS', label: 'Complete WMS handoff' }, { code: 'BLOCK', label: 'Block task' }],
+        COMPLETED: [],
+        BLOCKED: [{ code: 'REOPEN', label: 'Reopen task' }]
+      }[status] || []
+    },
+    loadPreview () {
+      const sourceRows = this.previewRows()
+      const filteredRows = sourceRows.filter(row => {
+        const matchesStatus = !this.status || row.status === this.status
+        const matchesOperation = !this.operation || row.operation === this.operation
+        const matchesTaskStatus = !this.taskStatus || row.task_status === this.taskStatus
+        const haystack = [row.task_ref, row.subject, row.sender_name, row.sender_email, row.external_reference, row.task_next_action].join(' ').toLowerCase()
+        const matchesSearch = !this.search || haystack.includes(String(this.search).toLowerCase())
+        return matchesStatus && matchesOperation && matchesTaskStatus && matchesSearch
+      })
+      this.rows = filteredRows
+      this.counts = {}
+      this.taskCounts = filteredRows.reduce((counts, row) => {
+        counts[row.task_status] = (counts[row.task_status] || 0) + 1
+        return counts
+      }, {})
+      this.total = filteredRows.length
+      this.hasMore = false
+      this.offset = 0
+    },
     load () {
+      if (this.previewMode) {
+        this.loadPreview()
+        return
+      }
       this.loading = true
       this.offset = 0
       getauth(this.queryString(0))
@@ -428,6 +569,7 @@ export default {
         .finally(() => { this.loading = false })
     },
     loadMore () {
+      if (this.previewMode) return
       this.loading = true
       const nextOffset = this.rows.length
       getauth(this.queryString(nextOffset))
@@ -450,6 +592,15 @@ export default {
       this.wmsEntitySystem = ''
       this.wmsEntityRef = ''
       this.wmsHandoffNote = ''
+      if (this.previewMode) {
+        this.loadActors()
+        this.detail = this.previewDetail(id)
+        if (this.detail) {
+          this.assignmentRole = this.detail.assigned_role || 'WMS_OPERATOR'
+          this.assignmentStaffId = this.detail.assigned_staff_id || null
+        }
+        return
+      }
       this.loadActors()
       getauth(`asn/serial/intake/${id}/`).then(res => {
         this.detail = res
@@ -461,12 +612,122 @@ export default {
       }).catch(() => {})
     },
     loadActors () {
+      if (this.previewMode) {
+        this.actors = this.previewActors()
+        return
+      }
       getauth('asn/serial/intake/task-actors/')
         .then(res => { this.actors = res.results || [] })
         .catch(() => {})
     },
+    previewDetail (id) {
+      const row = this.previewRows().find(item => item.id === id)
+      if (!row) return null
+      const isOutbound = row.operation === 'OUTBOUND'
+      return {
+        ...row,
+        task_actions: this.previewTaskActions(row.task_status),
+        approvals: isOutbound ? [{ id: 8002, status: 'PENDING', requested_by_name: 'Mail2Task', requested_at: '2026-08-25T10:42:00Z', note: 'Sunny final approval is required before site release.' }] : [],
+        task_events: [
+          { id: 8100 + id, action: 'CREATED', actor_name: 'Mail2Task', created_at: '2026-08-25T09:17:00Z', note: 'Created from source email and grouped by business reference.', to_status: 'OPEN' },
+          { id: 8200 + id, action: isOutbound ? 'PREPARE_WMS' : 'PREPARE_WMS', actor_name: 'Maggie', created_at: '2026-08-25T10:00:00Z', note: isOutbound ? 'WMS handoff prepared; waiting for Sunny approval.' : 'WMS handoff prepared; site work assigned to Mark.', to_status: row.task_status }
+        ],
+        source_type: 'EMAIL',
+        original_email: {
+          sender_name: row.sender_name,
+          sender_email: row.sender_email,
+          sent_at: row.sent_at,
+          sent_at_raw: row.sent_at,
+          message_id: `<preview-${row.id}@mail2task.local>`,
+          thread_id: `preview-thread-${row.id}`,
+          from_raw: `${row.sender_name} <${row.sender_email}>`,
+          to: ['sunny@peaksmartlogistics.com', 'maggie@peaksmartlogistics.com'],
+          cc: [],
+          subject: row.subject
+        },
+        email_body: row.email_body_preview,
+        metadata: { external_reference: row.external_reference, business_operation: row.operation, container_no: row.external_reference },
+        extractions: [
+          { field_name: 'external_reference', normalized_value: row.external_reference, confidence: 0.98, source_location: 'Subject / attachment', human_confirmed: true, used_for_write: false },
+          { field_name: 'business_operation', normalized_value: row.operation, confidence: 0.97, source_location: 'Email classification', human_confirmed: true, used_for_write: false }
+        ],
+        attachments: [{ id: 8300 + id, attachment_name: isOutbound ? 'BOL-TRLU9821043.pdf' : 'packing-list-TRHU4217950.pdf', content_type: 'application/pdf', security_status: 'SAFE', storage_size: 184320, source_location: 'Mail2Task preview fixture' }],
+        storage_uri: 'preview://mail2task/evidence',
+        storage_size: 184320,
+        content_hash: `previewhash${row.id}000000000000`,
+        owner_role: row.assigned_role,
+        classification_confidence: 0.97,
+        events: [{ id: 8400 + id, event_type: 'CAPTURED', created_at: '2026-08-25T09:17:00Z', message: 'Source email captured for local preview.', status: 'CAPTURED' }]
+      }
+    },
+    updatePreviewRow (detail) {
+      const index = this.rows.findIndex(row => row.id === detail.id)
+      if (index >= 0) this.$set(this.rows, index, { ...this.rows[index], ...detail })
+      this.taskCounts = this.rows.reduce((counts, row) => {
+        counts[row.task_status] = (counts[row.task_status] || 0) + 1
+        return counts
+      }, {})
+    },
+    previewAssignmentLabel (role) {
+      return { SUPERVISOR: 'Sunny / Supervisor', WMS_OPERATOR: 'Maggie / WMS operator', SITE_OPERATOR: 'Mark / Site operator' }[role] || role
+    },
+    applyPreviewAssignment () {
+      const actor = this.actors.find(item => String(item.id) === String(this.assignmentStaffId))
+      const role = this.assignmentRole
+      const roleName = actor ? actor.name : ''
+      this.detail.assigned_role = role
+      this.detail.assigned_role_label = this.previewAssignmentLabel(role)
+      this.detail.assigned_staff_id = actor ? actor.id : null
+      this.detail.assigned_staff_name = roleName
+      this.detail.owner_role = role
+      this.detail.task_events = (this.detail.task_events || []).concat([{ id: Date.now(), action: 'ASSIGN', actor_name: 'Preview user', created_at: new Date().toISOString(), note: `Assigned to ${roleName || this.previewAssignmentLabel(role)}.`, to_status: this.detail.task_status }])
+      this.updatePreviewRow(this.detail)
+      this.$q.notify({ message: 'Preview only: assignment changed locally', icon: 'visibility', color: 'info' })
+    },
+    applyPreviewAction (action) {
+      const transitions = {
+        PREPARE_WMS: { status: 'READY_FOR_MARK', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'TO_MARK', handoffLabel: 'To Mark · site execution', next: 'Mark: confirm physical receipt', emailStatus: 'READY_FOR_PREVIEW' },
+        APPROVE_OUTBOUND: { status: 'READY_FOR_MARK', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'TO_MARK', handoffLabel: 'To Mark · site execution', next: 'Mark: confirm physical receipt', emailStatus: 'READY_FOR_PREVIEW' },
+        START_SITE: { status: 'SITE_IN_PROGRESS', role: 'SITE_OPERATOR', staff: 'Mark', handoff: 'SITE_IN_PROGRESS', handoffLabel: 'Mark · site work in progress', next: 'Mark: complete site work', emailStatus: 'EXECUTING' },
+        COMPLETE_SITE: { status: 'WMS_FINALIZATION', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'RETURNED_TO_MAGGIE', handoffLabel: 'Returned to Maggie · WMS update', next: 'Maggie: update WMS and record reference', emailStatus: 'EXECUTING' },
+        COMPLETE_WMS: { status: 'COMPLETED', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'COMPLETED', handoffLabel: 'WMS handoff completed', next: 'No further action', emailStatus: 'COMPLETED' },
+        REJECT_OUTBOUND: { status: 'BLOCKED', role: 'SUPERVISOR', staff: 'Sunny', handoff: 'BLOCKED', handoffLabel: 'Blocked · Sunny review', next: 'Sunny: resolve exception and reopen', emailStatus: 'BLOCKED' },
+        BLOCK: { status: 'BLOCKED', role: 'SUPERVISOR', staff: 'Sunny', handoff: 'BLOCKED', handoffLabel: 'Blocked · Sunny review', next: 'Sunny: resolve exception and reopen', emailStatus: 'BLOCKED' },
+        REOPEN: { status: 'OPEN', role: 'WMS_OPERATOR', staff: 'Maggie', handoff: 'TO_MAGGIE', handoffLabel: 'To Maggie · prepare WMS', next: 'Maggie: prepare WMS handoff', emailStatus: 'CAPTURED' }
+      }[action]
+      if (!transitions) return
+      const next = transitions
+      const actor = this.actors.find(item => item.name === next.staff)
+      this.detail.task_status = next.status
+      this.detail.status = next.emailStatus
+      this.detail.assigned_role = next.role
+      this.detail.assigned_role_label = this.previewAssignmentLabel(next.role)
+      this.detail.assigned_staff_id = actor ? actor.id : null
+      this.detail.assigned_staff_name = next.staff
+      this.detail.owner_role = next.role
+      this.detail.wms_handoff_status = next.handoff
+      this.detail.wms_handoff_label = next.handoffLabel
+      this.detail.task_next_action = next.next
+      this.detail.next_action_label = next.next
+      this.detail.next_action = next.next
+      this.detail.task_actions = this.previewTaskActions(next.status)
+      if (action === 'APPROVE_OUTBOUND' && this.detail.approvals && this.detail.approvals[0]) {
+        this.detail.approvals[0].status = 'APPROVED'
+        this.detail.approvals[0].decided_by_name = 'Sunny'
+        this.detail.approvals[0].decided_at = new Date().toISOString()
+      }
+      this.detail.task_events = (this.detail.task_events || []).concat([{ id: Date.now(), action, actor_name: next.staff, created_at: new Date().toISOString(), note: `Preview transition: ${next.next}.`, to_status: next.status }])
+      this.updatePreviewRow(this.detail)
+      this.assignmentRole = next.role
+      this.assignmentStaffId = actor ? actor.id : null
+      this.$q.notify({ message: `Preview only: ${action} applied locally`, icon: 'visibility', color: 'info' })
+    },
     assignTask () {
       if (!this.detail || !this.detail.task_id || !this.assignmentRole) return
+      if (this.previewMode) {
+        this.applyPreviewAssignment()
+        return
+      }
       this.actionLoading = true
       postauth(`asn/serial/intake/${this.detail.task_id}/assign/`, {
         assigned_role: this.assignmentRole,
@@ -482,6 +743,10 @@ export default {
     },
     performTaskAction (action) {
       if (!this.detail || !this.detail.task_id) return
+      if (this.previewMode) {
+        this.applyPreviewAction(action)
+        return
+      }
       this.actionLoading = true
       postauth(`asn/serial/intake/${this.detail.task_id}/action/`, {
         action,
@@ -607,28 +872,6 @@ export default {
       const numeric = Number(value)
       return Number.isNaN(numeric) ? String(value) : `${Math.round(numeric * 100)}%`
     },
-    extractionRows () {
-      if (!this.detail) return []
-      const items = (this.detail.extractions || []).map((item, index) => ({
-        key: `extraction-${index}-${item.field_name}`,
-        label: this.fieldLabel(item.field_name),
-        value: item.normalized_value || item.raw_value || '-',
-        source_location: item.source_location,
-        confidence: item.confidence === null || item.confidence === undefined ? '' : `${Math.round(Number(item.confidence) * 100)}% confidence`,
-        flags: [item.human_confirmed ? 'Human confirmed' : '', item.used_for_write ? 'Used for write' : ''].filter(Boolean).join(' · ')
-      }))
-      if (items.length) return items
-      const metadata = this.detail.metadata || {}
-      const keys = ['container_no', 'eta', 'requested_delivery_date', 'customer', 'customer_address', 'receiving_address', 'warehouse', 'appointment_status', 'external_reference', 'business_operation']
-      return keys.filter(key => metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '').map(key => ({
-        key: `metadata-${key}`,
-        label: this.fieldLabel(key),
-        value: this.formatValue(metadata[key]),
-        source_location: 'Email metadata',
-        confidence: '',
-        flags: ''
-      }))
-    },
     fieldLabel (value) {
       return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) || 'Field'
     },
@@ -673,12 +916,11 @@ export default {
 
 <style scoped>
 .source-intake-page {
-  background: #f5f5f5;
+  background: transparent;
 }
 
 .source-intake-card {
   width: 100%;
-  box-shadow: 0 2px 12px rgba(25, 49, 74, 0.08);
 }
 
 .source-intake-workflow {
