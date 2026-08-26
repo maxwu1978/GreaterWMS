@@ -3,8 +3,8 @@
     <q-card flat bordered class="source-intake-card">
       <q-card-section class="row items-center q-pb-sm">
         <div>
-          <div class="text-h6 text-weight-bold">Source Intake</div>
-          <div class="text-caption text-grey-7">External instructions and email evidence</div>
+          <div class="text-h6 text-weight-bold">Mail2Task</div>
+          <div class="text-caption text-grey-7">Email-derived tasks, ownership, evidence and WMS handoff</div>
         </div>
         <q-space />
         <q-btn flat round icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
@@ -45,7 +45,7 @@
         :loading="loading"
         :pagination.sync="pagination"
         :rows-per-page-options="[0]"
-        no-data-label="No source records"
+        no-data-label="No mail tasks"
       >
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
@@ -73,6 +73,14 @@
             <q-badge :color="statusColor(props.row.status)">{{ statusLabel(props.row.status) }}</q-badge>
             <div v-if="props.row.exception_summary" class="source-intake-exception-marker" :title="props.row.exception_summary">
               <q-icon name="warning" size="14px" /> Exception
+            </div>
+          </q-td>
+        </template>
+        <template v-slot:body-cell-owner="props">
+          <q-td :props="props">
+            <div class="text-weight-medium">{{ ownerLabel(props.row.owner_role) }}</div>
+            <div class="text-caption text-grey-7 ellipsis" :title="wmsHandoffTooltip(props.row)">
+              {{ wmsHandoffLabel(props.row) }}
             </div>
           </q-td>
         </template>
@@ -111,7 +119,7 @@
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-h6">Source Record {{ detail ? detail.id : '' }}</div>
+            <div class="text-h6">MailTask {{ detail ? detail.id : '' }}</div>
             <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }}</div>
           </div>
           <q-space />
@@ -119,12 +127,14 @@
         </q-card-section>
         <q-separator />
         <q-card-section v-if="detail">
-          <div class="source-intake-section-title">Source</div>
+          <div class="source-intake-section-title">Task</div>
           <div class="source-intake-detail-grid">
             <div><span>Status</span><strong><q-badge :color="statusColor(detail.status)">{{ statusLabel(detail.status) }}</q-badge></strong></div>
             <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
             <div><span>Document</span><strong>{{ documentLabel(detail.document_type) }}</strong></div>
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
+            <div><span>Owner</span><strong>{{ ownerLabel(detail.owner_role) }}</strong></div>
+            <div><span>WMS handoff</span><strong>{{ wmsHandoffLabel(detail) }}</strong></div>
           </div>
           <q-separator class="q-my-md" />
           <div class="source-intake-section-title">Original Email</div>
@@ -261,6 +271,7 @@ export default {
         { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
         { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
         { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
+        { name: 'owner', label: 'Owner / WMS', field: 'owner_role', align: 'left', style: 'width: 14%' },
         { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 16%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
       ]
@@ -382,6 +393,20 @@ export default {
     },
     operationLabel (value) {
       return { INBOUND: 'Inbound', OUTBOUND: 'Outbound', SUPPORTING: 'Supporting', UNKNOWN: 'Unknown' }[value] || value || '-'
+    },
+    ownerLabel (value) {
+      return String(value || '').trim() || 'Unassigned'
+    },
+    wmsHandoffLabel (row) {
+      if (row && row.matched_entity_ref) {
+        return `${row.matched_entity_type || 'WMS'}: ${row.matched_entity_ref}`
+      }
+      return 'WMS handoff pending'
+    },
+    wmsHandoffTooltip (row) {
+      return row && row.matched_entity_ref
+        ? `Matched WMS entity: ${row.matched_entity_type || 'WMS'} ${row.matched_entity_ref}`
+        : 'No WMS entity has been matched yet.'
     },
     documentLabel (value) {
       return {

@@ -315,17 +315,17 @@
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
           <q-item
-            v-if="isPlatformAdmin"
+            v-if="canUseMail2Task"
             clickable
-            :to="{ name: 'source-intake' }"
-            @click="linkChange('source-intake')"
+            :to="{ name: 'mail2task' }"
+            @click="linkChange('mail2task')"
             v-ripple
             exact
-            :active="link === 'source-intake' && link !== ''"
-            :class="{ 'my-menu-link': link === 'source-intake' && link !== '' }"
+            :active="link === 'mail2task' && link !== ''"
+            :class="{ 'my-menu-link': link === 'mail2task' && link !== '' }"
           >
             <q-item-section avatar><q-icon name="mail_outline" /></q-item-section>
-            <q-item-section>Source Intake</q-item-section>
+            <q-item-section>Mail2Task</q-item-section>
           </q-item>
           <q-separator />
           <q-item
@@ -816,8 +816,17 @@ export default {
   },
   computed: {
     isPlatformAdmin () {
-      return String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
-        String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1'
+      return (
+        String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
+        (String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1')
+      )
+    },
+    canUseMail2Task () {
+      const role = String(this.staff_type || '').trim().toLowerCase()
+      return this.authin === '1' && (
+        this.isPlatformAdmin ||
+        ['manager', 'supervisor', 'inbound', 'outbound', 'stockcontrol', 'warehouse', 'qc', 'driver', 'logistics'].includes(role)
+      )
     }
   },
   methods: {

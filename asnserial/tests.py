@@ -153,12 +153,15 @@ class SourceIntakePermissionTests(TestCase):
             ),
         )
 
-    def test_source_intake_board_is_admin_only(self):
+    def test_mailtask_board_is_available_to_internal_staff_only(self):
         permission = SourceIntakePermission()
 
         self.assertTrue(permission.has_permission(self.request('Admin', True), None))
-        self.assertFalse(permission.has_permission(self.request('Warehouse', False), None))
-        self.assertFalse(permission.has_permission(self.request('Manager', False), None))
+        self.assertTrue(permission.has_permission(self.request('Warehouse', False), None))
+        self.assertTrue(permission.has_permission(self.request('Supervisor', False), None))
+        self.assertTrue(permission.has_permission(self.request('Logistics', False), None))
+        self.assertFalse(permission.has_permission(self.request('Supplier', False), None))
+        self.assertFalse(permission.has_permission(self.request('Customer', False), None))
 
 
 class SourceProvenanceWorkflowTests(TestCase):
