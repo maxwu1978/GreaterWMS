@@ -56,17 +56,22 @@ login flow.
 - The migrated shell keeps the production GreaterWMS geometry: 56px top bar,
   200px drawer, compact grey work surface, and horizontally scrollable legacy
   tables.
+- `Warehouse Operations` keeps its existing GreaterWMS table implementation;
+  this page is the canonical visual reference and should not be refactored to
+  accommodate a new component.
 - Operational tables use
   `frontend/src/shared/components/GreaterWmsTable.tsx`. Its
   `GREATER_WMS_TABLE_SPEC` records the production table contract: dark navy
   header, 38px header rhythm, 48px minimum rows, zebra/hover states, and
-  horizontal overflow. Feature pages supply business columns and content but
-  must not copy the table chrome into separate Tailwind class sets.
+  horizontal overflow. New feature pages supply business columns and content
+  through this component; they must not copy the table chrome into separate
+  Tailwind class sets.
 - `DataTable.tsx` remains available for non-operational admin and portal data
-  grids; the execution board and Mail2Task workbench use `GreaterWmsTable`.
+  grids; Mail2Task uses `GreaterWmsTable`, while the execution board retains
+  its original canonical implementation.
 - `npm run check:greaterwms-shell` fails if Dashboard and Mail2Task are merged
   again, the shell markers are removed, or either operational table stops using
-  the shared table primitives.
+  the canonical/shared contract appropriate to its role.
 
 ## Release boundary
 

@@ -34,8 +34,9 @@ if (!app.includes('path="/mail2task"')) failures.push("Mail2Task route is missin
 if (dashboard.includes("MailTaskBoard")) failures.push("Dashboard must not render MailTaskBoard");
 if (!mail2task.includes("MailTaskBoard")) failures.push("Mail2Task page must render MailTaskBoard");
 if (!tablePrimitive.includes("GREATER_WMS_TABLE_SPEC")) failures.push("shared GreaterWmsTable visual contract is missing");
-if (!operationsBoard.includes("GreaterWmsTableHeader") || !operationsBoard.includes("GreaterWmsTableRow")) {
-  failures.push("Warehouse Operations must use the shared GreaterWmsTable primitives");
+if (operationsBoard.includes("GreaterWmsTable")) failures.push("Warehouse Operations canonical table must not be replaced by the new shared primitive");
+if (!operationsBoard.includes("bg-[#3f4b69]") || !operationsBoard.includes("grid-cols-[218px_190px_220px_minmax(190px,1fr)_165px_200px_100px_170px_48px]")) {
+  failures.push("Warehouse Operations canonical GreaterWMS table markers are missing");
 }
 if (!mailTaskBoard.includes("GreaterWmsTableHeader") || !mailTaskBoard.includes("GreaterWmsTableRow")) {
   failures.push("Mail2Task must use the shared GreaterWmsTable primitives");
@@ -47,4 +48,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("GreaterWMS shell/table contract passed: one legacy-style shell, separate Dashboard and Mail2Task routes, shared operational table primitives.");
+console.log("GreaterWMS shell/table contract passed: canonical Warehouse Operations table preserved, Mail2Task uses the shared contract.");

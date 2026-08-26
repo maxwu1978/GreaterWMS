@@ -4,9 +4,9 @@ import type { CSSProperties, ReactNode } from "react";
  * Shared visual contract for GreaterWMS operational tables.
  *
  * The colors, row rhythm, horizontal scrolling, and zebra/hover states mirror
- * the production Quasar operations board. Feature tables may choose their own
- * semantic columns, but must use these primitives instead of copying table
- * chrome into each page.
+ * the production Quasar operations board. The existing Warehouse Operations
+ * page remains the canonical reference; new operational tables should use
+ * these primitives instead of copying its table chrome into each page.
  */
 export const GREATER_WMS_TABLE_SPEC = {
   headerBackground: "#3f4b69",
@@ -56,8 +56,8 @@ export function GreaterWmsTableHeader({ children, columns, minWidth, className =
   return (
     <div
       role="row"
-          className={`hidden items-center bg-[var(--greater-wms-table-header-bg)] text-[12px] font-bold uppercase tracking-[0.04em] text-white sm:grid ${className}`}
-          style={{ ...gridStyle(columns, minWidth), minHeight: `${GREATER_WMS_TABLE_SPEC.headerHeight}px` }}
+      className={`hidden items-center bg-[var(--greater-wms-table-header-bg)] text-[12px] font-bold uppercase tracking-[0.04em] text-white sm:grid ${className}`}
+      style={{ ...gridStyle(columns, minWidth), minHeight: `${GREATER_WMS_TABLE_SPEC.headerHeight}px` }}
     >
       {children}
     </div>
@@ -88,8 +88,8 @@ export function GreaterWmsTableMobileHeader({ children, columns, minWidth, class
   return (
     <div
       role="row"
-          className={`grid items-center bg-[#eef0f4] text-[9px] font-bold uppercase tracking-[0.1em] text-[#626a77] sm:hidden ${className}`}
-          style={{ ...gridStyle(columns, minWidth), minHeight: `${GREATER_WMS_TABLE_SPEC.headerHeight}px` }}
+      className={`grid items-center bg-[#eef0f4] text-[9px] font-bold uppercase tracking-[0.1em] text-[#626a77] sm:hidden ${className}`}
+      style={{ ...gridStyle(columns, minWidth), minHeight: `${GREATER_WMS_TABLE_SPEC.headerHeight}px` }}
     >
       {children}
     </div>
