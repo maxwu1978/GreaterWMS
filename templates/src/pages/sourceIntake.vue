@@ -19,7 +19,10 @@
         <div class="col-12 col-sm-4 col-md-3">
           <q-select v-model="operation" dense outlined clearable emit-value map-options :options="operationOptions" label="Operation" @input="load" />
         </div>
-        <div class="col-12 col-sm-4 col-md-4">
+        <div class="col-12 col-sm-4 col-md-2">
+          <q-select v-model="taskStatus" dense outlined clearable emit-value map-options :options="taskStatusOptions" label="Task status" @input="load" />
+        </div>
+        <div class="col-12 col-sm-4 col-md-3">
           <q-input v-model="search" dense outlined clearable label="Search" @keyup.enter="load" />
         </div>
         <div class="col-auto">
@@ -47,6 +50,16 @@
         :rows-per-page-options="[0]"
         no-data-label="No mail tasks"
       >
+        <template v-slot:body-cell-task="props">
+          <q-td :props="props">
+            <div class="text-weight-medium ellipsis" :title="props.row.task_ref || props.row.subject">
+              {{ props.row.task_ref || ('MAIL-' + props.row.id) }}
+            </div>
+            <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
+              {{ props.row.task_email_count || 1 }} email{{ (props.row.task_email_count || 1) === 1 ? '' : 's' }} · {{ props.row.subject || 'No subject' }}
+            </div>
+          </q-td>
+        </template>
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
             <div class="text-weight-medium">{{ formatSourceTime(props.row.sent_at) }}</div>
@@ -70,7 +83,8 @@
         </template>
         <template v-slot:body-cell-status="props">
           <q-td :props="props">
-            <q-badge :color="statusColor(props.row.status)">{{ statusLabel(props.row.status) }}</q-badge>
+            <q-badge :color="taskStatusColor(props.row.task_status || props.row.status)">{{ taskStatusLabel(props.row.task_status || props.row.status) }}</q-badge>
+            <div class="text-caption text-grey-7">Email: {{ statusLabel(props.row.status) }}</div>
             <div v-if="props.row.exception_summary" class="source-intake-exception-marker" :title="props.row.exception_summary">
               <q-icon name="warning" size="14px" /> Exception
             </div>
@@ -78,7 +92,7 @@
         </template>
         <template v-slot:body-cell-owner="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ ownerLabel(props.row.owner_role) }}</div>
+            <div class="text-weight-medium">{{ props.row.assigned_staff_name || props.row.assigned_role_label || ownerLabel(props.row.owner_role) }}</div>
             <div class="text-caption text-grey-7 ellipsis" :title="wmsHandoffTooltip(props.row)">
               {{ wmsHandoffLabel(props.row) }}
             </div>
@@ -102,8 +116,8 @@
           <q-td
             :props="props"
             class="source-intake-next"
-            :title="props.row.next_action || props.row.exception_summary || ''"
-          ><span class="source-intake-next-label">{{ props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</span></q-td>
+            :title="props.row.task_next_action || props.row.next_action || props.row.exception_summary || ''"
+          ><span class="source-intake-next-label">{{ props.row.task_next_action || props.row.next_action || props.row.next_action_label || (props.row.exception_summary ? 'Review exception' : '-') }}</span></q-td>
         </template>
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
@@ -119,8 +133,8 @@
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-h6">MailTask {{ detail ? detail.id : '' }}</div>
-            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }}</div>
+            <div class="text-h6">MailTask {{ detail ? (detail.task_ref || detail.task_id || detail.id) : '' }}</div>
+            <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }} · {{ detail.task_email_count || 1 }} linked email{{ (detail.task_email_count || 1) === 1 ? '' : 's' }}</div>
           </div>
           <q-space />
           <q-btn flat round dense icon="close" v-close-popup aria-label="Close" />
@@ -129,12 +143,66 @@
         <q-card-section v-if="detail">
           <div class="source-intake-section-title">Task</div>
           <div class="source-intake-detail-grid">
-            <div><span>Status</span><strong><q-badge :color="statusColor(detail.status)">{{ statusLabel(detail.status) }}</q-badge></strong></div>
+            <div><span>Task status</span><strong><q-badge :color="taskStatusColor(detail.task_status || detail.status)">{{ taskStatusLabel(detail.task_status || detail.status) }}</q-badge></strong></div>
+            <div><span>Email status</span><strong>{{ statusLabel(detail.status) }}</strong></div>
             <div><span>Operation</span><strong>{{ operationLabel(detail.operation) }}</strong></div>
             <div><span>Document</span><strong>{{ documentLabel(detail.document_type) }}</strong></div>
             <div><span>Reference</span><strong>{{ detail.external_reference || '-' }}</strong></div>
-            <div><span>Owner</span><strong>{{ ownerLabel(detail.owner_role) }}</strong></div>
-            <div><span>WMS handoff</span><strong>{{ wmsHandoffLabel(detail) }}</strong></div>
+            <div><span>Owner</span><strong>{{ detail.assigned_staff_name || detail.assigned_role_label || ownerLabel(detail.owner_role) }}</strong></div>
+            <div><span>WMS handoff</span><strong>{{ detail.wms_handoff_label || wmsHandoffLabel(detail) }}</strong></div>
+            <div><span>WMS reference</span><strong>{{ detail.wms_entity_ref || 'Not recorded' }}</strong></div>
+          </div>
+          <div class="source-intake-workflow q-mt-md">
+            <div class="source-intake-field-label">Role handoff</div>
+            <div class="text-weight-medium">{{ detail.task_next_action || detail.next_action || 'No next action recorded.' }}</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-12 col-sm-5">
+                <q-select v-model="assignmentRole" dense outlined emit-value map-options :options="taskRoleOptions" label="Assign role" />
+              </div>
+              <div class="col-12 col-sm-5">
+                <q-select v-model="assignmentStaffId" dense outlined clearable emit-value map-options :options="actorOptions" label="Assign staff" />
+              </div>
+              <div class="col-12 col-sm-2 flex flex-center">
+                <q-btn outline color="primary" label="Assign" :loading="actionLoading" @click="assignTask" />
+              </div>
+            </div>
+            <div v-if="detail.task_actions && detail.task_actions.length" class="row q-gutter-sm q-mt-sm">
+              <q-btn
+                v-for="action in detail.task_actions"
+                :key="action.code"
+                dense
+                unelevated
+                :color="actionButtonColor(action.code)"
+                :label="action.label"
+                :loading="actionLoading"
+                @click="performTaskAction(action.code)"
+              />
+            </div>
+            <div v-else class="text-caption text-grey-7 q-mt-sm">No action is available for the current role and task status.</div>
+            <div class="row q-col-gutter-sm q-mt-sm">
+              <div class="col-12 col-sm-5">
+                <q-select v-model="wmsEntitySystem" dense outlined clearable emit-value map-options :options="wmsSystemOptions" label="WMS system" />
+              </div>
+              <div class="col-12 col-sm-7">
+                <q-input v-model="wmsEntityRef" dense outlined clearable label="WMS reference (required to close)" />
+              </div>
+            </div>
+            <q-input v-model="wmsHandoffNote" class="q-mt-sm" dense outlined type="textarea" autogrow label="Handoff note / site result" />
+            <div v-if="detail.approvals && detail.approvals.length" class="source-intake-workflow-history q-mt-md">
+              <div class="source-intake-field-label">Sunny approval history</div>
+              <div v-for="approval in detail.approvals" :key="approval.id" class="text-caption text-grey-7 q-mt-xs">
+                {{ approval.status }} · {{ approval.decided_by_name || approval.requested_by_name || 'System' }} · {{ formatDate(approval.decided_at || approval.requested_at) }}
+                <span v-if="approval.note"> · {{ approval.note }}</span>
+              </div>
+            </div>
+            <div v-if="detail.task_events && detail.task_events.length" class="source-intake-workflow-history q-mt-md">
+              <div class="source-intake-field-label">Task handoff history</div>
+              <div v-for="event in detail.task_events" :key="event.id" class="source-intake-workflow-event q-mt-xs">
+                <strong>{{ event.action }}</strong>
+                <span class="text-grey-7"> · {{ event.actor_name || event.actor_role || 'System' }} · {{ formatDate(event.created_at) }}</span>
+                <div class="text-caption text-grey-7">{{ event.note || event.to_status }}</div>
+              </div>
+            </div>
           </div>
           <q-separator class="q-my-md" />
           <div class="source-intake-section-title">Original Email</div>
@@ -228,7 +296,7 @@
 </template>
 
 <script>
-import { getauth } from 'boot/axios_request.js'
+import { getauth, postauth } from 'boot/axios_request.js'
 
 export default {
   name: 'SourceIntake',
@@ -240,12 +308,21 @@ export default {
       detailOpen: false,
       status: '',
       operation: '',
+      taskStatus: '',
       search: '',
       counts: {},
+      taskCounts: {},
       total: 0,
       hasMore: false,
       pagination: { rowsPerPage: 0 },
       offset: 0,
+      actors: [],
+      assignmentRole: 'WMS_OPERATOR',
+      assignmentStaffId: null,
+      wmsEntitySystem: '',
+      wmsEntityRef: '',
+      wmsHandoffNote: '',
+      actionLoading: false,
       statusOptions: [
         { label: 'Captured', value: 'CAPTURED' },
         { label: 'Analyzing', value: 'ANALYZING' },
@@ -264,15 +341,34 @@ export default {
         { label: 'Supporting', value: 'SUPPORTING' },
         { label: 'Unknown', value: 'UNKNOWN' }
       ],
+      taskStatusOptions: [
+        { label: 'Open · Maggie', value: 'OPEN' },
+        { label: 'Awaiting Sunny approval', value: 'AWAITING_SUNNY_APPROVAL' },
+        { label: 'Ready · Mark', value: 'READY_FOR_MARK' },
+        { label: 'Site work · Mark', value: 'SITE_IN_PROGRESS' },
+        { label: 'WMS update · Maggie', value: 'WMS_FINALIZATION' },
+        { label: 'Completed', value: 'COMPLETED' },
+        { label: 'Blocked · Sunny review', value: 'BLOCKED' }
+      ],
+      taskRoleOptions: [
+        { label: 'Sunny / Supervisor', value: 'SUPERVISOR' },
+        { label: 'Maggie / WMS operator', value: 'WMS_OPERATOR' },
+        { label: 'Mark / Site operator', value: 'SITE_OPERATOR' }
+      ],
+      wmsSystemOptions: [
+        { label: 'Legacy production', value: 'LEGACY_PROD' },
+        { label: 'Migrated GreaterWMS', value: 'MIGRATED' }
+      ],
       columns: [
+        { name: 'task', label: 'Task / Ref', field: 'task_ref', align: 'left', style: 'width: 18%' },
         { name: 'received_at', label: 'Sent', field: 'sent_at', align: 'left', style: 'width: 11%' },
         { name: 'document', label: 'Document', field: 'document_type', align: 'left', style: 'width: 13%' },
         { name: 'source', label: 'Original source', field: 'sender_email', align: 'left', style: 'width: 22%' },
         { name: 'reference', label: 'Reference', field: 'external_reference', align: 'left', style: 'width: 15%' },
         { name: 'operation', label: 'Operation', field: 'operation', align: 'left', style: 'width: 9%' },
-        { name: 'status', label: 'Status', field: 'status', align: 'left', style: 'width: 13%' },
-        { name: 'owner', label: 'Owner / WMS', field: 'owner_role', align: 'left', style: 'width: 14%' },
-        { name: 'next_action', label: 'Next step', field: 'next_action', align: 'left', style: 'width: 16%' },
+        { name: 'status', label: 'Task status', field: 'task_status', align: 'left', style: 'width: 13%' },
+        { name: 'owner', label: 'Owner / Handoff', field: 'assigned_role', align: 'left', style: 'width: 14%' },
+        { name: 'next_action', label: 'Next step', field: 'task_next_action', align: 'left', style: 'width: 16%' },
         { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px' }
       ]
     }
@@ -280,22 +376,27 @@ export default {
   computed: {
     countItems () {
       const statuses = [
-        { key: 'CAPTURED', label: 'Captured' },
-        { key: 'ANALYZING', label: 'Analyzing' },
-        { key: 'REVIEW_REQUIRED', label: 'Review' },
-        { key: 'READY_FOR_PREVIEW', label: 'Ready' },
-        { key: 'APPROVAL_REQUIRED', label: 'Approval' },
-        { key: 'EXECUTING', label: 'Executing' },
+        { key: 'OPEN', label: 'Open' },
+        { key: 'AWAITING_SUNNY_APPROVAL', label: 'Sunny approval' },
+        { key: 'READY_FOR_MARK', label: 'Ready for Mark' },
+        { key: 'SITE_IN_PROGRESS', label: 'Mark in progress' },
+        { key: 'WMS_FINALIZATION', label: 'Maggie WMS' },
         { key: 'COMPLETED', label: 'Completed' },
-        { key: 'BLOCKED', label: 'Blocked' },
-        { key: 'DUPLICATE', label: 'Duplicate' },
-        { key: 'FAILED', label: 'Failed' }
+        { key: 'BLOCKED', label: 'Blocked' }
       ]
-      return [{ key: '__TOTAL__', label: 'Total', color: 'grey-8', value: this.total }].concat(
+      return [{ key: '__TOTAL__', label: 'Tasks', color: 'grey-8', value: this.taskTotal }].concat(
         statuses
-          .filter(item => Number(this.counts[item.key] || 0) > 0)
-          .map(item => ({ ...item, color: this.statusColor(item.key), value: this.counts[item.key] }))
+          .filter(item => Number(this.taskCounts[item.key] || 0) > 0)
+          .map(item => ({ ...item, color: this.taskStatusColor(item.key), value: this.taskCounts[item.key] }))
       )
+    },
+    taskTotal () {
+      return Object.values(this.taskCounts).reduce((total, value) => total + Number(value || 0), 0)
+    },
+    actorOptions () {
+      return this.actors
+        .filter(item => (item.task_roles || []).includes(this.assignmentRole))
+        .map(item => ({ label: `${item.name} · ${item.staff_type}`, value: item.id }))
     }
   },
   mounted () {
@@ -308,6 +409,7 @@ export default {
       params.set('offset', String(offset))
       if (this.status) params.set('status', this.status)
       if (this.operation) params.set('operation', this.operation)
+      if (this.taskStatus) params.set('task_status', this.taskStatus)
       if (this.search) params.set('q', this.search)
       return `asn/serial/intake/?${params.toString()}`
     },
@@ -318,6 +420,7 @@ export default {
         .then(res => {
           this.rows = res.items || []
           this.counts = res.counts || {}
+          this.taskCounts = res.task_counts || {}
           this.total = Number(res.total || 0)
           this.hasMore = Boolean(res.has_more)
         })
@@ -331,6 +434,7 @@ export default {
         .then(res => {
           this.rows = this.rows.concat(res.items || [])
           this.counts = res.counts || this.counts
+          this.taskCounts = res.task_counts || this.taskCounts
           this.total = Number(res.total || this.total)
           this.hasMore = Boolean(res.has_more)
           this.offset = nextOffset
@@ -341,7 +445,57 @@ export default {
     showDetail (id) {
       this.detailOpen = true
       this.detail = null
-      getauth(`asn/serial/intake/${id}/`).then(res => { this.detail = res }).catch(() => {})
+      this.assignmentRole = 'WMS_OPERATOR'
+      this.assignmentStaffId = null
+      this.wmsEntitySystem = ''
+      this.wmsEntityRef = ''
+      this.wmsHandoffNote = ''
+      this.loadActors()
+      getauth(`asn/serial/intake/${id}/`).then(res => {
+        this.detail = res
+        this.assignmentRole = res.assigned_role || 'WMS_OPERATOR'
+        this.assignmentStaffId = res.assigned_staff_id || null
+        this.wmsEntitySystem = res.wms_entity_system || ''
+        this.wmsEntityRef = res.wms_entity_ref || ''
+        this.wmsHandoffNote = ''
+      }).catch(() => {})
+    },
+    loadActors () {
+      getauth('asn/serial/intake/task-actors/')
+        .then(res => { this.actors = res.results || [] })
+        .catch(() => {})
+    },
+    assignTask () {
+      if (!this.detail || !this.detail.task_id || !this.assignmentRole) return
+      this.actionLoading = true
+      postauth(`asn/serial/intake/${this.detail.task_id}/assign/`, {
+        assigned_role: this.assignmentRole,
+        staff_id: this.assignmentStaffId || null
+      })
+        .then(() => {
+          this.$q.notify({ message: 'Task assignment updated', icon: 'check', color: 'positive' })
+          this.showDetail(this.detail.id)
+          this.load()
+        })
+        .catch(() => {})
+        .finally(() => { this.actionLoading = false })
+    },
+    performTaskAction (action) {
+      if (!this.detail || !this.detail.task_id) return
+      this.actionLoading = true
+      postauth(`asn/serial/intake/${this.detail.task_id}/action/`, {
+        action,
+        wms_entity_system: this.wmsEntitySystem || '',
+        wms_entity_ref: this.wmsEntityRef || '',
+        note: this.wmsHandoffNote || ''
+      })
+        .then(() => {
+          this.$q.notify({ message: 'Task handoff recorded', icon: 'check', color: 'positive' })
+          this.showDetail(this.detail.id)
+          this.load()
+        })
+        .catch(() => {})
+        .finally(() => { this.actionLoading = false })
     },
     formatDate (value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
@@ -397,13 +551,39 @@ export default {
     ownerLabel (value) {
       return String(value || '').trim() || 'Unassigned'
     },
+    taskStatusLabel (value) {
+      return {
+        OPEN: 'Open · Maggie',
+        AWAITING_SUNNY_APPROVAL: 'Awaiting Sunny approval',
+        READY_FOR_MARK: 'Ready · Mark',
+        SITE_IN_PROGRESS: 'Site work · Mark',
+        WMS_FINALIZATION: 'WMS update · Maggie',
+        COMPLETED: 'Completed',
+        BLOCKED: 'Blocked · Sunny review'
+      }[value] || value || 'Unknown'
+    },
+    taskStatusColor (value) {
+      return {
+        OPEN: 'blue-grey-7',
+        AWAITING_SUNNY_APPROVAL: 'orange-8',
+        READY_FOR_MARK: 'teal-7',
+        SITE_IN_PROGRESS: 'indigo-7',
+        WMS_FINALIZATION: 'blue-8',
+        COMPLETED: 'positive',
+        BLOCKED: 'negative'
+      }[value] || this.statusColor(value)
+    },
     wmsHandoffLabel (row) {
+      if (row && row.wms_handoff_label) return row.wms_handoff_label
       if (row && row.matched_entity_ref) {
         return `${row.matched_entity_type || 'WMS'}: ${row.matched_entity_ref}`
       }
       return 'WMS handoff pending'
     },
     wmsHandoffTooltip (row) {
+      if (row && row.wms_handoff_label) {
+        return `${row.wms_handoff_label}${row.wms_entity_ref ? ` · ${row.wms_entity_ref}` : ''}`
+      }
       return row && row.matched_entity_ref
         ? `Matched WMS entity: ${row.matched_entity_type || 'WMS'} ${row.matched_entity_ref}`
         : 'No WMS entity has been matched yet.'
@@ -483,6 +663,9 @@ export default {
         COMPLETED: 'positive',
         DUPLICATE: 'grey-7'
       }[value] || 'grey-7'
+    },
+    actionButtonColor (value) {
+      return ['REJECT_OUTBOUND', 'BLOCK'].includes(value) ? 'negative' : 'primary'
     }
   }
 }
@@ -496,6 +679,22 @@ export default {
 .source-intake-card {
   width: 100%;
   box-shadow: 0 2px 12px rgba(25, 49, 74, 0.08);
+}
+
+.source-intake-workflow {
+  background: #f8fafb;
+  border-left: 3px solid #1976d2;
+  padding: 10px 12px;
+}
+
+.source-intake-workflow-history {
+  border-top: 1px solid #dfe7eb;
+  padding-top: 10px;
+}
+
+.source-intake-workflow-event {
+  border-bottom: 1px solid #edf1f3;
+  padding-bottom: 5px;
 }
 
 .source-intake-table {

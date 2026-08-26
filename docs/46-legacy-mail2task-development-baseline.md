@@ -37,6 +37,30 @@ The first slice therefore:
 No mailbox credentials are stored in the web application, and no production
 deployment is implied by this development baseline.
 
+## Sunny / Maggie / Mark workflow slice
+
+`SourceIntakeRecord` is the email projection. `MailTask` is the canonical
+operational row, so multiple messages with the same inbound/outbound reference
+share one task status. The first role-aware slice uses the following handoff:
+
+```text
+Mail Skill -> Maggie prepares WMS
+Inbound:   Maggie -> Mark site work -> Maggie closes WMS
+Outbound:  Maggie -> Sunny final approval -> Mark site work -> Maggie closes WMS
+Exception: current owner -> Sunny review -> Reopen
+```
+
+The task API records the WMS system/reference and handoff evidence but does not
+silently create or change ASN, Outbound, Receiving, Putaway, or Inventory rows.
+The named legacy staff accounts `sunny`, `maggie`, and `mark` are used as the
+current rollout role hints; generic warehouse accounts continue to use the
+broader compatibility role matrix until CIO configures a formal staff-role
+registry.
+
+The Mail2Task page keeps the original GreaterWMS Vue 2 + Quasar shell and adds
+only the task/ref, task status, owner/handoff, assignment, approval, and WMS
+reference controls. The Dashboard remains the warehouse execution board.
+
 ## Required verification
 
 From `templates/`:

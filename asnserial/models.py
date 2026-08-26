@@ -258,6 +258,13 @@ class SourceIntakeRecord(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
+    task = models.ForeignKey(
+        'MailTask',
+        related_name='intake_records',
+        blank=True,
+        null=True,
+        on_delete=models.PROTECT,
+    )
     openid = models.CharField(max_length=255)
     mailbox_account = models.CharField(max_length=255, blank=True, default='')
     operation = models.CharField(max_length=16, choices=OPERATION_CHOICES, default=UNKNOWN)
@@ -289,6 +296,182 @@ class SourceIntakeRecord(models.Model):
             models.Index(fields=['openid', 'operation', 'updated_at']),
             models.Index(fields=['openid', 'mailbox_account', 'received_at']),
             models.Index(fields=['openid', 'matched_entity_type', 'matched_entity_ref']),
+        ]
+
+
+class MailTask(models.Model):
+    """Canonical work item shared by one or more email intake records.
+
+    SourceIntakeRecord remains the immutable-ish email/evidence projection. A
+    MailTask is the operational record that can receive follow-up messages
+    without resetting the same warehouse job to a new status.
+    """
+
+    INBOUND = 'INBOUND'
+    OUTBOUND = 'OUTBOUND'
+    SUPPORTING = 'SUPPORTING'
+    UNKNOWN = 'UNKNOWN'
+    OPERATION_CHOICES = (
+        (INBOUND, 'Inbound'),
+        (OUTBOUND, 'Outbound'),
+        (SUPPORTING, 'Supporting'),
+        (UNKNOWN, 'Unknown'),
+    )
+
+    OPEN = 'OPEN'
+    AWAITING_SUNNY_APPROVAL = 'AWAITING_SUNNY_APPROVAL'
+    READY_FOR_MARK = 'READY_FOR_MARK'
+    SITE_IN_PROGRESS = 'SITE_IN_PROGRESS'
+    WMS_FINALIZATION = 'WMS_FINALIZATION'
+    COMPLETED = 'COMPLETED'
+    BLOCKED = 'BLOCKED'
+    STATUS_CHOICES = (
+        (OPEN, 'Open'),
+        (AWAITING_SUNNY_APPROVAL, 'Awaiting Sunny approval'),
+        (READY_FOR_MARK, 'Ready for Mark'),
+        (SITE_IN_PROGRESS, 'Site work in progress'),
+        (WMS_FINALIZATION, 'Awaiting Maggie WMS update'),
+        (COMPLETED, 'Completed'),
+        (BLOCKED, 'Blocked'),
+    )
+
+    SUPERVISOR = 'SUPERVISOR'
+    WMS_OPERATOR = 'WMS_OPERATOR'
+    SITE_OPERATOR = 'SITE_OPERATOR'
+    TASK_ROLE_CHOICES = (
+        (SUPERVISOR, 'Sunny / Supervisor'),
+        (WMS_OPERATOR, 'Maggie / WMS operator'),
+        (SITE_OPERATOR, 'Mark / Site operator'),
+    )
+
+    TO_MAGGIE = 'TO_MAGGIE'
+    TO_SUNNY = 'TO_SUNNY'
+    TO_MARK = 'TO_MARK'
+    SITE_IN_PROGRESS_HANDOFF = 'SITE_IN_PROGRESS'
+    RETURNED_TO_MAGGIE = 'RETURNED_TO_MAGGIE'
+    HANDOFF_COMPLETED = 'COMPLETED'
+    HANDOFF_BLOCKED = 'BLOCKED'
+    HANDOFF_STATUS_CHOICES = (
+        (TO_MAGGIE, 'To Maggie'),
+        (TO_SUNNY, 'To Sunny'),
+        (TO_MARK, 'To Mark'),
+        (SITE_IN_PROGRESS_HANDOFF, 'Mark is working'),
+        (RETURNED_TO_MAGGIE, 'Returned to Maggie'),
+        (HANDOFF_COMPLETED, 'Completed'),
+        (HANDOFF_BLOCKED, 'Blocked'),
+    )
+
+    LEGACY_PROD = 'LEGACY_PROD'
+    MIGRATED = 'MIGRATED'
+    WMS_SYSTEM_CHOICES = (
+        (LEGACY_PROD, 'Legacy production'),
+        (MIGRATED, 'Migrated GreaterWMS'),
+    )
+
+    openid = models.CharField(max_length=255)
+    task_ref = models.CharField(max_length=255)
+    operation = models.CharField(max_length=16, choices=OPERATION_CHOICES, default=UNKNOWN)
+    subject = models.CharField(max_length=1000, blank=True, default='')
+    external_reference = models.CharField(max_length=255, blank=True, default='')
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=OPEN)
+    assigned_role = models.CharField(max_length=32, choices=TASK_ROLE_CHOICES, default=WMS_OPERATOR)
+    assigned_staff_id = models.PositiveBigIntegerField(blank=True, null=True)
+    assigned_staff_name = models.CharField(max_length=255, blank=True, default='')
+    next_action = models.CharField(max_length=1000, blank=True, default='')
+    wms_handoff_status = models.CharField(max_length=32, choices=HANDOFF_STATUS_CHOICES, default=TO_MAGGIE)
+    wms_entity_system = models.CharField(max_length=32, choices=WMS_SYSTEM_CHOICES, blank=True, default='')
+    wms_entity_type = models.CharField(max_length=64, blank=True, default='')
+    wms_entity_ref = models.CharField(max_length=255, blank=True, default='')
+    wms_handoff_note = models.TextField(blank=True, default='')
+    completed_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'mailtask'
+        ordering = ['-updated_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['openid', 'task_ref'],
+                name='mailtask_tenant_task_ref_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['openid', 'status', 'updated_at']),
+            models.Index(fields=['openid', 'assigned_role', 'status']),
+            models.Index(fields=['openid', 'wms_handoff_status', 'updated_at']),
+        ]
+
+
+class MailTaskApproval(models.Model):
+    """Separate approval record for Sunny's outbound final decision."""
+
+    OUTBOUND_FINAL = 'OUTBOUND_FINAL'
+    APPROVAL_TYPE_CHOICES = ((OUTBOUND_FINAL, 'Outbound final approval'),)
+    PENDING = 'PENDING'
+    APPROVED = 'APPROVED'
+    REJECTED = 'REJECTED'
+    STATUS_CHOICES = (
+        (PENDING, 'Pending'),
+        (APPROVED, 'Approved'),
+        (REJECTED, 'Rejected'),
+    )
+
+    task = models.ForeignKey(MailTask, related_name='approvals', on_delete=models.PROTECT)
+    openid = models.CharField(max_length=255)
+    approval_type = models.CharField(max_length=32, choices=APPROVAL_TYPE_CHOICES, default=OUTBOUND_FINAL)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    requested_by_id = models.PositiveBigIntegerField(blank=True, null=True)
+    requested_by_name = models.CharField(max_length=255, blank=True, default='')
+    decided_by_id = models.PositiveBigIntegerField(blank=True, null=True)
+    decided_by_name = models.CharField(max_length=255, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'mailtaskapproval'
+        ordering = ['-requested_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['task', 'status'],
+                condition=Q(status='PENDING'),
+                name='mailtask_one_pending_approval',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['openid', 'status', 'requested_at']),
+            models.Index(fields=['task', 'approval_type', 'requested_at']),
+        ]
+
+
+class MailTaskEvent(models.Model):
+    """Append-only task workflow history, independent of individual emails."""
+
+    task = models.ForeignKey(MailTask, related_name='task_events', on_delete=models.PROTECT)
+    source_evidence = models.ForeignKey(
+        SourceEvidence,
+        related_name='mailtask_events',
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    openid = models.CharField(max_length=255)
+    action = models.CharField(max_length=64)
+    from_status = models.CharField(max_length=32, blank=True, default='')
+    to_status = models.CharField(max_length=32, blank=True, default='')
+    actor_role = models.CharField(max_length=32, blank=True, default='')
+    actor_id = models.PositiveBigIntegerField(blank=True, null=True)
+    actor_name = models.CharField(max_length=255, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'mailtaskevent'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['openid', 'task', 'created_at']),
+            models.Index(fields=['openid', 'action', 'created_at']),
         ]
 
 

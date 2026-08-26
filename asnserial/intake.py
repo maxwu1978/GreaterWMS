@@ -15,6 +15,7 @@ from .models import (
     SourceIntakeEvent,
     SourceIntakeRecord,
 )
+from .mailtask import ensure_mail_task
 
 
 INTAKE_ROLES = frozenset({
@@ -418,6 +419,8 @@ def ensure_source_intake_record(source, sync_run=None, duplicate=False):
             actor_type='CODEX_AUTOMATION',
             event_type='DUPLICATE',
         )
+    if record.task_id is None:
+        ensure_mail_task(source, record)
     _create_attachments(source, source.openid, metadata)
     return record, created
 
