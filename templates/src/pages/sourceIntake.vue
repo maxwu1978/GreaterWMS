@@ -1,23 +1,32 @@
 <template>
-  <q-page class="source-intake-page q-pa-sm">
-    <q-card class="source-intake-card shadow-11">
-      <q-card-section class="row items-center q-pb-sm">
-        <div>
-          <div class="text-h6 text-weight-bold">Mail2Task</div>
-          <div class="text-caption text-grey-7">Email-derived tasks, ownership, evidence and WMS handoff</div>
-        </div>
+  <q-page class="source-intake-page operations-board-shell q-pa-sm">
+    <q-card class="source-intake-card operations-board shadow-11">
+      <q-card-section class="operations-board__header row items-center q-px-md q-py-sm">
+        <div class="operations-board__title">Mail2Task</div>
         <q-space />
-        <q-btn flat round icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
+        <div class="operations-board__live">LIVE</div>
+        <q-btn flat round dense icon="refresh" :loading="loading" aria-label="Refresh" @click="load" />
       </q-card-section>
 
-      <q-separator />
+      <q-card-section class="operations-board__summary source-intake-summary row items-center q-px-md q-py-xs">
+        <div class="operations-board__subtitle">Email-derived tasks · evidence · ownership · WMS handoff</div>
+        <q-space />
+        <div class="operations-board__counts source-intake-counts">
+          <span
+            v-for="item in countItems"
+            :key="item.key"
+            class="operations-board__count"
+            :class="{ 'operations-board__count--urgent': item.key === 'AWAITING_SUNNY_APPROVAL', 'operations-board__count--blocked': item.key === 'BLOCKED' }"
+          >{{ item.label }} {{ item.value }}</span>
+        </div>
+      </q-card-section>
 
       <q-banner v-if="previewMode" dense class="source-intake-preview-banner q-mx-md q-mt-sm">
         <template v-slot:avatar><q-icon name="visibility" color="primary" /></template>
         Local development preview · demonstration data only. No mailbox, WMS or task API writes are performed.
       </q-banner>
 
-      <q-card-section class="row items-center q-col-gutter-sm q-py-sm">
+      <q-card-section class="operations-board__controls source-intake-filters row items-center q-col-gutter-sm q-px-md q-py-sm">
         <div class="col-12 col-sm-4 col-md-3">
           <q-select v-model="status" dense outlined clearable emit-value map-options :options="statusOptions" label="Status" @input="load" />
         </div>
@@ -35,21 +44,10 @@
         </div>
       </q-card-section>
 
-      <q-card-section class="source-intake-counts row q-gutter-sm q-py-none">
-        <q-chip v-for="item in countItems" :key="item.key" dense square :color="item.color" text-color="white">
-          {{ item.label }} {{ item.value }}
-        </q-chip>
-      </q-card-section>
-
-      <q-table
+      <greater-wms-operations-table
         class="source-intake-table"
-        :data="rows"
+        :rows="rows"
         :columns="columns"
-        row-key="id"
-        dense
-        flat
-        bordered
-        separator="horizontal"
         :loading="loading"
         :pagination.sync="pagination"
         :rows-per-page-options="[0]"
@@ -57,8 +55,8 @@
       >
         <template v-slot:body-cell-task="props">
           <q-td :props="props">
-            <div class="text-weight-medium ellipsis" :title="props.row.task_ref || props.row.subject">
-              {{ props.row.task_ref || ('MAIL-' + props.row.id) }}
+            <div class="text-weight-medium ellipsis" :title="taskDisplayRef(props.row)">
+              {{ taskDisplayRef(props.row) }}
             </div>
             <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
               {{ props.row.task_email_count || 1 }} email{{ (props.row.task_email_count || 1) === 1 ? '' : 's' }} · {{ props.row.subject || 'No subject' }}
@@ -110,14 +108,8 @@
         </template>
         <template v-slot:body-cell-reference="props">
           <q-td :props="props">
-            <div class="text-weight-medium ellipsis" :title="referenceTooltip(props.row)">
-              {{ props.row.external_reference || props.row.matched_entity_ref || '-' }}
-            </div>
-            <div class="text-caption text-grey-7 ellipsis" :title="props.row.subject">
-              {{ compactSubject(props.row.subject) }}
-            </div>
-            <div class="text-caption text-grey-7 ellipsis" :title="referenceTooltip(props.row)">
-              Evidence #{{ props.row.source_evidence_id || '-' }}<span v-if="props.row.matched_entity_ref"> · {{ compactEntity(props.row) }}</span>
+            <div class="text-weight-medium ellipsis" :title="props.row.external_reference || 'No external reference'">
+              {{ props.row.external_reference || '-' }}
             </div>
           </q-td>
         </template>
@@ -131,7 +123,7 @@
         <template v-slot:body-cell-action="props">
           <q-td :props="props"><q-btn flat dense color="primary" icon="open_in_new" aria-label="Open" @click="showDetail(props.row.id)" /></q-td>
         </template>
-      </q-table>
+      </greater-wms-operations-table>
 
       <q-card-actions align="right" v-if="hasMore" class="q-pa-sm">
         <q-btn flat color="primary" label="Load more" :loading="loading" @click="loadMore" />
@@ -142,7 +134,7 @@
       <q-card class="source-intake-detail">
         <q-card-section class="row items-center q-pb-sm">
           <div>
-            <div class="text-h6">MailTask {{ detail ? (detail.task_ref || detail.task_id || detail.id) : '' }}</div>
+            <div class="text-h6">MailTask {{ detail ? taskDisplayRef(detail) : '' }}</div>
             <div v-if="detail" class="text-caption text-grey-7">Evidence {{ detail.source_evidence_id }} · {{ detail.task_email_count || 1 }} linked email{{ (detail.task_email_count || 1) === 1 ? '' : 's' }}</div>
           </div>
           <q-space />
@@ -306,10 +298,12 @@
 
 <script>
 import { getauth, postauth } from 'boot/axios_request.js'
+import GreaterWmsOperationsTable from 'components/GreaterWmsOperationsTable.vue'
 import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   name: 'SourceIntake',
+  components: { GreaterWmsOperationsTable },
   data () {
     return {
       loading: false,
@@ -371,16 +365,16 @@ export default {
         { label: 'Migrated GreaterWMS', value: 'MIGRATED' }
       ],
       columns: [
-        { name: 'task', label: 'Task', field: 'task_ref', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
-        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'width: 8%', headerStyle: 'width: 8%' },
-        { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'width: 9%', headerStyle: 'width: 9%' },
-        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'width: 14%', headerStyle: 'width: 14%' },
-        { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'width: 12%', headerStyle: 'width: 12%' },
-        { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'width: 6%', headerStyle: 'width: 6%' },
-        { name: 'status', label: 'Task / Mail', field: 'task_status', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
-        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'width: 10%', headerStyle: 'width: 10%' },
-        { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'width: 11%', headerStyle: 'width: 11%' },
-        { name: 'action', label: '', field: 'action', align: 'right', style: 'width: 48px', headerStyle: 'width: 48px' }
+        { name: 'task', label: 'Task ID', field: 'task_id', align: 'left', style: 'min-width: 130px; width: 150px; max-width: 170px;', headerStyle: 'min-width: 130px; width: 150px; max-width: 170px;' },
+        { name: 'received_at', label: 'Sent / Recv', field: 'sent_at', align: 'left', style: 'min-width: 95px; width: 105px; max-width: 120px;', headerStyle: 'min-width: 95px; width: 105px; max-width: 120px;' },
+        { name: 'document', label: 'Doc', field: 'document_type', align: 'left', style: 'min-width: 50px; width: 60px; max-width: 70px;', headerStyle: 'min-width: 50px; width: 60px; max-width: 70px;' },
+        { name: 'source', label: 'Source', field: 'sender_email', align: 'left', style: 'min-width: 110px; width: 125px; max-width: 150px;', headerStyle: 'min-width: 110px; width: 125px; max-width: 150px;' },
+        { name: 'reference', label: 'Ref', field: 'external_reference', align: 'left', style: 'min-width: 95px; width: 110px; max-width: 135px;', headerStyle: 'min-width: 95px; width: 110px; max-width: 135px;' },
+        { name: 'operation', label: 'Op', field: 'operation', align: 'left', style: 'min-width: 42px; width: 50px; max-width: 58px;', headerStyle: 'min-width: 42px; width: 50px; max-width: 58px;' },
+        { name: 'status', label: 'Task / Mail', field: 'task_status', align: 'left', style: 'min-width: 120px; width: 135px; max-width: 160px;', headerStyle: 'min-width: 120px; width: 135px; max-width: 160px;' },
+        { name: 'owner', label: 'Owner', field: 'assigned_role', align: 'left', style: 'min-width: 75px; width: 90px; max-width: 110px;', headerStyle: 'min-width: 75px; width: 90px; max-width: 110px;' },
+        { name: 'next_action', label: 'Next', field: 'task_next_action', align: 'left', style: 'min-width: 110px; width: 130px; max-width: 160px;', headerStyle: 'min-width: 110px; width: 130px; max-width: 160px;' },
+        { name: 'action', label: '', field: 'action', align: 'right' }
       ]
     }
   },
@@ -540,7 +534,7 @@ export default {
         const matchesStatus = !this.status || row.status === this.status
         const matchesOperation = !this.operation || row.operation === this.operation
         const matchesTaskStatus = !this.taskStatus || row.task_status === this.taskStatus
-        const haystack = [row.task_ref, row.subject, row.sender_name, row.sender_email, row.external_reference, row.task_next_action].join(' ').toLowerCase()
+        const haystack = [row.task_id, row.task_ref, row.subject, row.sender_name, row.sender_email, row.external_reference, row.task_next_action].join(' ').toLowerCase()
         const matchesSearch = !this.search || haystack.includes(String(this.search).toLowerCase())
         return matchesStatus && matchesOperation && matchesTaskStatus && matchesSearch
       })
@@ -768,6 +762,14 @@ export default {
     },
     formatDate (value) {
       return value ? String(value).replace('T', ' ').slice(0, 16) : '-'
+    },
+    taskDisplayRef (row) {
+      if (!row) return '-'
+      const taskId = row.task_id
+      if (taskId !== null && taskId !== undefined && taskId !== '') {
+        return `MT-${String(taskId).padStart(4, '0')}`
+      }
+      return row.id ? `MAIL-${row.id}` : 'MAIL-—'
     },
     formatSourceTime (value) {
       return value ? this.formatDate(value) : 'Not provided'
@@ -1096,36 +1098,7 @@ export default {
 }
 
 .source-intake-table {
-  margin-top: 12px;
-  table-layout: fixed;
   width: 100%;
-}
-
-.source-intake-table .q-table__middle {
-  overflow-x: hidden;
-}
-
-.source-intake-table table {
-  min-width: 0;
-  table-layout: fixed;
-  width: 100%;
-}
-
-.source-intake-table th,
-.source-intake-table td {
-  min-width: 0;
-  max-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-left: 8px;
-  padding-right: 8px;
-}
-
-.source-intake-table th:last-child,
-.source-intake-table td:last-child {
-  width: 40px !important;
-  padding-left: 4px;
-  padding-right: 4px;
 }
 
 .source-intake-next {

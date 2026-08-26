@@ -6,7 +6,8 @@
   "author": "Elvis.Shi(elvis.shi@56yhz.com)",
   "private": true,
   "scripts": {
-    "build": "NODE_OPTIONS=--openssl-legacy-provider quasar build",
+    "check:greaterwms-table": "python3 ../scripts/verify_legacy_table_contract.py",
+    "build": "npm run check:greaterwms-table && NODE_OPTIONS=--openssl-legacy-provider quasar build",
     "lint": "eslint --ext .js,.vue ./",
     "test": "echo \"No test specified\" && exit 0"
   },

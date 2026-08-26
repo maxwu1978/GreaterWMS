@@ -1,6 +1,6 @@
 # Legacy GreaterWMS Mail2Task Development Baseline
 
-Effective date: 2026-08-25
+Effective date: 2026-08-26
 
 ## Source of truth
 
@@ -17,6 +17,16 @@ commit `7592afe8` on `codex/cli-install-info`:
 
 The FastAPI/React tree is retained as a separate migration experiment. It is
 not allowed to replace or silently reduce the legacy GreaterWMS feature set.
+
+The shared operational table implementation is
+`templates/src/components/GreaterWmsOperationsTable.vue`. It is the original
+GreaterWMS `q-table` contract extracted from `operationsBoard.vue`; both
+`operationsBoard.vue` and `sourceIntake.vue` use this component and only supply
+their own columns and body-cell slots. The shared visual contract is
+`templates/src/css/greaterwms-pattern.sass`, which owns the GreaterWMS card and
+table geometry: 50px header alignment, 200px drawer alignment, navy 38px table
+headers, 48px minimum rows, zebra/hover states, and horizontal overflow. A
+page-specific Tailwind or React recreation is not an equivalent implementation.
 
 ## First vertical slice
 
@@ -61,6 +71,12 @@ The Mail2Task page keeps the original GreaterWMS Vue 2 + Quasar shell and adds
 only the task/ref, task status, owner/handoff, assignment, approval, and WMS
 reference controls. The Dashboard remains the warehouse execution board.
 
+The list has a strict identifier separation: `Task ID` displays the stable
+MailTask database identifier as `MT-####`, while `Ref` displays only the
+external business reference extracted from the email. The legacy
+reference-derived `task_ref` remains an internal compatibility key and is not
+used as the visible Task ID.
+
 For local visual review only, start the frontend in Quasar development mode and
 open `/#/mail2task?preview=mail2task`. This route is enabled only when the
 build is in development mode and the hostname is local (`localhost`,
@@ -73,9 +89,16 @@ authenticated routes cannot enable this preview flag.
 From `templates/`:
 
 ```bash
-yarn lint
-yarn build
+npm run check:greaterwms-table
+npm run lint
+npm run build
 ```
+
+`check:greaterwms-table` is a mandatory guardrail. It fails if either
+`operationsBoard.vue` or `sourceIntake.vue` introduces a second inline
+`q-table` or private table-layout rules. `npm run build` runs this check first,
+so a visual implementation cannot silently diverge from the canonical
+GreaterWMS table contract.
 
 From the repository root, the Django source tests covering source evidence,
 deduplication, provenance, state transitions, and role access must also pass.

@@ -53,17 +53,9 @@
           <q-btn v-if="hasMore" flat dense color="primary" class="q-mr-sm" :label="label('operations_board.load_more', 'Load More')" @click="loadMore" />
         </q-card-section>
 
-        <q-table
-          class="operations-board__table"
-          table-class="operations-board__grid"
-          :data="filteredItems"
+        <greater-wms-operations-table
+          :rows="filteredItems"
           :columns="columns"
-          row-key="id"
-          dense
-          flat
-          bordered
-          separator="horizontal"
-          hide-bottom
           :row-class="rowClass"
           :loading="loading"
           :pagination.sync="pagination"
@@ -113,7 +105,7 @@
               <q-btn flat dense color="primary" icon="open_in_new" :aria-label="label('operations_board.open', 'Open')" @click="showDetails(props.row)" />
             </q-td>
           </template>
-        </q-table>
+        </greater-wms-operations-table>
       </q-card>
     </div>
 
@@ -176,9 +168,11 @@
 
 <script>
 import { getauth } from 'boot/axios_request.js'
+import GreaterWmsOperationsTable from 'components/GreaterWmsOperationsTable.vue'
 
 export default {
   name: 'OperationsBoard',
+  components: { GreaterWmsOperationsTable },
   data () {
     return {
       viewMode: 'active',
@@ -488,30 +482,6 @@ export default {
 </script>
 
 <style scoped>
-.operations-board-shell { width: 100%; }
-.operations-board__surface { width: 100%; }
-.operations-board-shell--fullscreen { box-sizing: border-box; width: 100vw; height: 100vh; padding: 12px; overflow: auto; background: #edf1f5; }
-.operations-board-shell--fullscreen .operations-board__surface { width: calc(100% / var(--board-scale, 1)); transform: scale(var(--board-scale, 1)); transform-origin: top left; }
-.operations-board-shell--fullscreen .operations-board { min-height: calc(100vh - 24px); border-radius: 0; }
-.operations-board { width: 100%; background: #ffffff; border-radius: 2px; }
-.operations-board__header { min-height: 48px; background: #596782; color: #ffffff; }
-.operations-board__title { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-.operations-board__live { margin-right: 8px; color: #8ee3a7; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
-.operations-board__zoom-value { min-width: 42px; padding: 0; border: 0; background: transparent; color: #ffffff; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
-.operations-board__viewer { margin-right: 16px; color: #e8edf7; font-size: 11px; letter-spacing: 0.04em; }
-.operations-board__summary { min-height: 40px; border-bottom: 1px solid #dfe3ea; }
-.operations-board__view-tabs, .operations-board__filters { min-height: 38px; }
-.operations-board__counts { display: flex; gap: 12px; color: #667085; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-.operations-board__count--urgent { color: #b54708; }
-.operations-board__count--blocked { color: #b42318; }
-.operations-board__controls { min-height: 38px; background: #f5f6f8; border-bottom: 1px solid #dfe3ea; }
-.operations-board__table >>> .q-table thead tr th { height: 38px; background: #3f4b69; color: #ffffff; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
-.operations-board__table >>> .q-table__middle { width: 100%; overflow-x: auto; }
-.operations-board__table >>> .q-table { min-width: 980px; }
-.operations-board__table >>> .q-table th, .operations-board__table >>> .q-table td { white-space: nowrap; }
-.operations-board__table >>> .q-table tbody tr { min-height: 48px; }
-.operations-board__table >>> .q-table tbody tr:nth-child(even) { background: #f7f8fb; }
-.operations-board__table >>> .q-table tbody tr:hover { background: #eaf0f8; }
 .operations-board__eta-value { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .operations-board__eta-status { font-size: 10px; line-height: 1.2; }
 .operations-board__eta-countdown { margin-top: 2px; color: #6b7280; font-size: 11px; font-weight: 600; }
@@ -530,8 +500,4 @@ export default {
 .operations-board__detail-label { color: #667085; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .operations-board__detail-section { margin-top: 20px; padding-top: 14px; border-top: 1px solid #eaecf0; }
 .operations-board__detail-line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 13px; }
-@media (max-width: 599px) {
-  .operations-board__table >>> .q-table { min-width: 980px; }
-  .operations-board__counts { gap: 6px; font-size: 10px; }
-}
 </style>
