@@ -65,8 +65,8 @@
         </template>
         <template v-slot:body-cell-received_at="props">
           <q-td :props="props">
-            <div class="text-weight-medium">{{ compactSourceTime(props.row.sent_at) }}</div>
-            <div class="text-caption text-grey-7" :title="'Received in mailbox ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">Recv {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
+            <div class="text-weight-medium source-intake-time" :title="'Sent ' + formatDate(props.row.sent_at)">S {{ compactSourceTime(props.row.sent_at) }}</div>
+            <div class="text-caption text-grey-7 source-intake-time" :title="'Received in mailbox ' + formatDate(props.row.received_at_raw || props.row.received_at || props.row.captured_at)">R {{ compactSourceTime(props.row.received_at_raw || props.row.received_at || props.row.captured_at) }}</div>
           </q-td>
         </template>
         <template v-slot:body-cell-document="props">
@@ -109,7 +109,7 @@
         <template v-slot:body-cell-reference="props">
           <q-td :props="props">
             <div class="text-weight-medium ellipsis" :title="props.row.external_reference || 'No external reference'">
-              {{ props.row.external_reference || '-' }}
+              {{ compactReference(props.row.external_reference) }}
             </div>
           </q-td>
         </template>
@@ -776,9 +776,22 @@ export default {
     },
     compactSourceTime (value) {
       if (!value) return '-'
-      const formatted = this.formatDate(value)
-      if (formatted.length < 16) return formatted
-      return `${formatted.slice(5, 10).replace(/-/g, '/')} ${formatted.slice(11, 16)}`
+      const raw = String(value).trim()
+      const isoLike = raw.match(/^(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})[ T](\d{1,2}):(\d{2})/)
+      const chineseLike = raw.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日(?:[ T]?(\d{1,2}):(\d{2}))?/)
+      const monthFirst = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2}))?/)
+      const match = isoLike || chineseLike
+      if (match) {
+        const month = match === isoLike ? match[2] : String(match[2]).padStart(2, '0')
+        const day = match === isoLike ? match[3] : String(match[3]).padStart(2, '0')
+        const hour = String(match[4] || '00').padStart(2, '0')
+        const minute = match[5] || '00'
+        return `${month}/${day} ${hour}:${minute}`
+      }
+      if (monthFirst) {
+        return `${String(monthFirst[1]).padStart(2, '0')}/${String(monthFirst[2]).padStart(2, '0')} ${String(monthFirst[4] || '00').padStart(2, '0')}:${monthFirst[5] || '00'}`
+      }
+      return '-'
     },
     compactEmail (value) {
       const email = String(value || '')
@@ -802,7 +815,17 @@ export default {
     compactReference (value) {
       const reference = String(value || '').trim()
       if (!reference) return '-'
-      return reference.length <= 14 ? reference : `${reference.slice(0, 5)}…${reference.slice(-6)}`
+      if (reference.length <= 14) return reference
+      const po = reference.match(/^PO#?\s*(\d+)$/i)
+      if (po) return `PO…${po[1].slice(-4)}`
+      const mawb = reference.match(/^\d{3}[- ]?(\d{8})$/)
+      if (mawb) return `MAWB…${mawb[1].slice(-4)}`
+      const prefixed = reference.match(/^([A-Za-z]{2,8})[- ]?(.+)$/)
+      if (prefixed) {
+        const suffix = prefixed[2].replace(/[^A-Za-z0-9]/g, '')
+        return `${prefixed[1].toUpperCase()}…${suffix.slice(-4)}`
+      }
+      return `${reference.slice(0, 5)}…${reference.slice(-4)}`
     },
     compactEntity (row) {
       if (!row || !row.matched_entity_ref) return 'Matched'
@@ -1099,6 +1122,10 @@ export default {
 
 .source-intake-table {
   width: 100%;
+}
+
+.source-intake-time {
+  white-space: nowrap;
 }
 
 .source-intake-next {
