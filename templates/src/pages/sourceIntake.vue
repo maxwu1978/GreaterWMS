@@ -105,21 +105,52 @@
         <div class="col-12 source-intake-management-grid">
           <section class="source-intake-management-block">
             <div class="source-intake-management-title">Management view</div>
-            <div v-for="person in managementPeople" :key="person.key" class="source-intake-management-row">
-              <span class="source-intake-management-name">{{ person.name }}</span>
-              <span class="source-intake-management-count">{{ managementPersonCount(person) }}</span>
-              <span class="source-intake-management-description">{{ person.responsibility }}</span>
+            <div class="source-intake-role-network">
+              <div v-for="person in managementPeople" :key="person.key" class="source-intake-role-card">
+                <div class="source-intake-role-card__head">
+                  <span class="source-intake-role-card__avatar">{{ roleInitials(person.name) }}</span>
+                  <span class="source-intake-role-card__name">{{ person.name }}</span>
+                  <span class="source-intake-role-card__count">{{ managementPersonCount(person) }}</span>
+                </div>
+                <div class="source-intake-role-card__description">{{ person.responsibility }}</div>
+              </div>
+            </div>
+            <div class="source-intake-role-links" aria-label="Role relationships">
+              <div class="source-intake-role-link source-intake-role-link--backup">
+                <span class="source-intake-role-link__person">Kelly</span>
+                <q-icon name="sync_alt" size="16px" />
+                <span class="source-intake-role-link__person">Xuejie</span>
+                <q-badge color="blue-grey-7">Backup</q-badge>
+              </div>
+              <div class="source-intake-role-link source-intake-role-link--handoff">
+                <span class="source-intake-role-link__person">Sunny</span>
+                <q-icon name="arrow_forward" size="16px" />
+                <span class="source-intake-role-link__person">Maggie</span>
+                <q-icon name="arrow_forward" size="16px" />
+                <span class="source-intake-role-link__person">Mark</span>
+                <span class="source-intake-role-link__caption">appointment → paperwork / WMS → site</span>
+              </div>
             </div>
           </section>
           <section class="source-intake-management-block">
             <div class="source-intake-management-title">Mail flow</div>
-            <div v-for="item in managementSenderGroups" :key="item.key" class="source-intake-management-row source-intake-management-row--group">
-              <span class="source-intake-management-name">{{ item.label }}</span>
-              <span class="source-intake-management-count">{{ item.count }} emails</span>
+            <div class="source-intake-flow-groups">
+              <div v-for="item in managementSenderGroups" :key="item.key" class="source-intake-flow-group">
+                <span class="source-intake-flow-group__label">{{ item.label }}</span>
+                <strong class="source-intake-flow-group__count">{{ item.count }}</strong>
+                <span class="source-intake-flow-group__unit">emails</span>
+              </div>
             </div>
-            <div v-for="item in managementDirections" :key="item.key" class="source-intake-management-row source-intake-management-row--direction">
-              <span class="source-intake-management-name">{{ item.label }}</span>
-              <span class="source-intake-management-count">{{ item.count }} emails</span>
+            <div class="source-intake-flow-routes">
+              <div v-for="item in managementDirections" :key="item.key" class="source-intake-flow-route">
+                <template v-if="flowRoute(item).to">
+                  <span class="source-intake-flow-route__node">{{ flowRoute(item).from }}</span>
+                  <q-icon class="source-intake-flow-route__arrow" name="arrow_forward" size="15px" />
+                  <span class="source-intake-flow-route__node">{{ flowRoute(item).to }}</span>
+                </template>
+                <span v-else class="source-intake-flow-route__node source-intake-flow-route__node--internal">{{ flowRoute(item).from }}</span>
+                <strong class="source-intake-flow-route__count">{{ item.count }}</strong>
+              </div>
             </div>
           </section>
         </div>
@@ -1253,6 +1284,31 @@ export default {
       if (person.metric === 'site_tasks') return Number(person.count || 0) ? `${Number(person.count)} site tasks` : 'No active site tasks'
       return `${Number(person.count || 0)} emails`
     },
+    roleInitials (name) {
+      return String(name || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(item => item.charAt(0))
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    },
+    flowRoute (item) {
+      const routes = {
+        EXTERNAL_TO_LOGISTICS: { from: 'External service', to: 'Peak Logistics' },
+        CLIENT_TO_LOGISTICS: { from: 'Delta customer', to: 'Peak Logistics' },
+        LOGISTICS_TO_EXTERNAL: { from: 'Peak Logistics', to: 'External service' },
+        LOGISTICS_TO_WAREHOUSE: { from: 'Peak Logistics', to: 'Warehouse' },
+        WAREHOUSE_TO_LOGISTICS: { from: 'Warehouse', to: 'Peak Logistics' },
+        WAREHOUSE_TO_EXTERNAL: { from: 'Warehouse', to: 'External service' },
+        INTERNAL: { from: 'Internal coordination', to: '' }
+      }
+      const key = String((item && item.key) || '').toUpperCase()
+      if (routes[key]) return routes[key]
+      const parts = String((item && item.label) || '').split('→').map(value => value.trim()).filter(Boolean)
+      return { from: parts[0] || 'Review', to: parts[1] || '' }
+    },
     flowCountLabel (flows) {
       const labels = {
         CLIENT_TO_LOGISTICS: 'CLIENT→LOG',
@@ -1936,6 +1992,188 @@ export default {
   margin-bottom: 4px;
 }
 
+.source-intake-role-network {
+  display: grid;
+  gap: 5px 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.source-intake-role-card {
+  background: #f8fafb;
+  border: 1px solid #dfe7eb;
+  border-left: 3px solid #90a4ae;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.source-intake-role-card__head {
+  align-items: center;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+}
+
+.source-intake-role-card__avatar {
+  align-items: center;
+  background: #607d8b;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 700;
+  height: 20px;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  width: 20px;
+}
+
+.source-intake-role-card__name {
+  color: #263238;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-intake-role-card__count {
+  color: #1976d2;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.source-intake-role-card__description {
+  color: #607d8b;
+  font-size: 10px;
+  line-height: 1.3;
+  margin-left: 27px;
+  margin-top: 2px;
+  min-height: 26px;
+  overflow-wrap: anywhere;
+}
+
+.source-intake-role-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  margin-top: 7px;
+}
+
+.source-intake-role-link {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dfe7eb;
+  color: #607d8b;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 10px;
+  gap: 4px;
+  line-height: 1.3;
+  min-height: 25px;
+  padding: 3px 6px;
+}
+
+.source-intake-role-link--backup {
+  border-left: 3px solid #607d8b;
+}
+
+.source-intake-role-link--handoff {
+  border-left: 3px solid #1976d2;
+}
+
+.source-intake-role-link__person {
+  color: #263238;
+  font-weight: 700;
+}
+
+.source-intake-role-link__caption {
+  color: #78909c;
+  margin-left: 2px;
+}
+
+.source-intake-flow-groups {
+  border-bottom: 1px solid #edf1f3;
+  display: grid;
+  gap: 5px 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+}
+
+.source-intake-flow-group {
+  align-items: baseline;
+  background: #f8fafb;
+  border: 1px solid #dfe7eb;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px 7px;
+}
+
+.source-intake-flow-group__label {
+  color: #455a64;
+  flex: 1 1 auto;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-intake-flow-group__count,
+.source-intake-flow-route__count {
+  color: #1976d2;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.source-intake-flow-group__unit {
+  color: #78909c;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.source-intake-flow-routes {
+  display: grid;
+  gap: 4px;
+}
+
+.source-intake-flow-route {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.source-intake-flow-route__node {
+  background: #fff;
+  border: 1px solid #cfd8dc;
+  color: #37474f;
+  flex: 1 1 0;
+  font-size: 10px;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 3px 5px;
+  text-align: center;
+}
+
+.source-intake-flow-route__node--internal {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.source-intake-flow-route__arrow {
+  color: #90a4ae;
+  flex: 0 0 auto;
+}
+
+.source-intake-flow-route__count {
+  flex: 0 0 46px;
+  text-align: right;
+}
+
 .source-intake-management-row {
   align-items: baseline;
   display: grid;
@@ -1983,6 +2221,13 @@ export default {
   }
 
   .source-intake-management-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .source-intake-role-network,
+  .source-intake-flow-groups {
     grid-template-columns: 1fr;
   }
 }
