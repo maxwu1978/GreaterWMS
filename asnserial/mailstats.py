@@ -457,25 +457,36 @@ def build_mailtask_statistics(
         start_date = end_date = current.date()
     scoped = start_date is not None or end_date is not None
     scoped_source_records = _records_in_date_scope(source_records, start_date, end_date)
+    # Duplicate source projections are retained as audit evidence, but they
+    # are not another operational email. Keep them available to mailbox-level
+    # audit metrics while excluding them from the source/task/management
+    # grains so a smoke-test retry cannot inflate today's business counts.
+    operational_source_records = [
+        record for record in scoped_source_records
+        if getattr(record, 'status', '') != SourceIntakeRecord.DUPLICATE
+    ]
     if scoped:
         # A follow-up email in the selected range still contributes to its
         # one canonical task, but must not make an unrelated task appear.
-        task_records = _unique_task_records(scoped_source_records)
+        task_records = _unique_task_records(operational_source_records)
     elif task_records is None:
-        task_records = _unique_task_records(source_records)
+        task_records = _unique_task_records(
+            record for record in source_records
+            if getattr(record, 'status', '') != SourceIntakeRecord.DUPLICATE
+        )
     else:
         task_records = list(task_records)
     latest_run = MailboxSyncRun.objects.filter(openid=openid).order_by('-started_at', '-id').first()
 
     email_counts = Counter()
-    for record in scoped_source_records:
+    for record in operational_source_records:
         key = ('task', record.task_id) if getattr(record, 'task_id', None) else ('source', record.id)
         email_counts[key] += 1
 
     task_status_counts = _task_status_counts(task_records)
     task_stats = {
         'total': len(task_records),
-        'linked_emails': len(scoped_source_records),
+        'linked_emails': len(operational_source_records),
         'multi_email_tasks': sum(1 for count in email_counts.values() if count > 1),
         'email_distribution': dict(sorted(Counter(str(count) for count in email_counts.values()).items(), key=lambda item: int(item[0]))),
         'status_counts': task_status_counts,
@@ -486,11 +497,11 @@ def build_mailtask_statistics(
         'executive_summary': executive_summary_for_records(task_records, now=now),
     }
     source_stats = {
-        'total': len(scoped_source_records),
-        'operation_counts': _counts(scoped_source_records, 'operation'),
-        'flow_counts': _counts(scoped_source_records, 'flow'),
-        'document_counts': _counts(scoped_source_records, 'document_type'),
-        'status_counts': _counts(scoped_source_records, 'status'),
+        'total': len(operational_source_records),
+        'operation_counts': _counts(operational_source_records, 'operation'),
+        'flow_counts': _counts(operational_source_records, 'flow'),
+        'document_counts': _counts(operational_source_records, 'document_type'),
+        'status_counts': _counts(operational_source_records, 'status'),
     }
     scope = {
         'mode': date_scope if scoped else 'ALL',
@@ -509,7 +520,7 @@ def build_mailtask_statistics(
         'mailbox': _mailbox_stats(openid, scoped_source_records, latest_run, date_scoped=scoped),
         'source': source_stats,
         'task': task_stats,
-        'management': _management_summary(scoped_source_records, task_records),
+        'management': _management_summary(operational_source_records, task_records),
         'executive_summary': task_stats['executive_summary'],
         'reconciliation': {
             'status': 'NOT_RUN',

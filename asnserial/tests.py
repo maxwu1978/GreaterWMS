@@ -309,6 +309,48 @@ class MailTaskFlowAndScheduleTests(TestCase):
         with self.assertRaises(ValueError):
             parse_statistics_scope({'statistics_scope': 'CUSTOM', 'start_date': '2026-08-26'})
 
+    def test_duplicate_source_projection_does_not_inflate_operational_statistics(self):
+        canonical, _ = ensure_source_intake_record(self.source(
+            '<duplicate-canonical@example.com>',
+            {
+                'subject': 'Delivery request OI-050002',
+                'external_reference': 'OI-050002',
+                'business_operation': 'OUTBOUND',
+                'mail_flow': 'LOGISTICS_TO_EXTERNAL',
+                'sender_name': 'Kelly Wang',
+                'sender_email': 'op1@peaksmartlogistics.com',
+                'received_at': '2026-08-26T09:00:00-05:00',
+            },
+            '1' * 64,
+        ))
+        duplicate, _ = ensure_source_intake_record(self.source(
+            '<duplicate-retry@example.com>',
+            {
+                'subject': 'Delivery request OI-050002',
+                'external_reference': 'OI-050002',
+                'business_operation': 'OUTBOUND',
+                'mail_flow': 'LOGISTICS_TO_EXTERNAL',
+                'sender_name': 'Kelly Wang',
+                'sender_email': 'op1@peaksmartlogistics.com',
+                'received_at': '2026-08-26T09:01:00-05:00',
+            },
+            '2' * 64,
+        ))
+        update_source_intake(duplicate, {'status': SourceIntakeRecord.DUPLICATE})
+
+        stats = build_mailtask_statistics(
+            'tenant',
+            date_scope='TODAY',
+            start_date=date(2026, 8, 26),
+            end_date=date(2026, 8, 26),
+        )
+
+        self.assertEqual(canonical.task_id, duplicate.task_id)
+        self.assertEqual(stats['source']['total'], 1)
+        self.assertEqual(stats['task']['total'], 1)
+        self.assertEqual(stats['task']['linked_emails'], 1)
+        self.assertEqual(stats['management']['people'][0]['count'], 1)
+
 
 class AgentPreviewPermissionTests(TestCase):
     def request(self, staff_id=7, is_admin=False, operator='7', agent=True):
