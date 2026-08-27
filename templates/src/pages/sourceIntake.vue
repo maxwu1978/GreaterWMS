@@ -37,7 +37,7 @@
         </div>
         <div class="col-12 source-intake-stat-toolbar row items-center q-col-gutter-sm q-pb-xs">
           <div class="col-auto source-intake-stat-toolbar__label">Statistics date</div>
-          <div class="col-12 col-sm-3 col-md-2">
+          <div class="col-auto source-intake-stat-toolbar__scope">
             <q-select
               v-model="statisticsScope"
               dense
@@ -49,16 +49,56 @@
               @input="statisticsScopeChanged"
             />
           </div>
-          <div v-if="statisticsScope === 'CUSTOM'" class="col-12 col-sm-3 col-md-2">
-            <q-input v-model="statisticsStartDate" dense outlined type="date" label="Start date" />
+          <div v-if="statisticsScope === 'CUSTOM'" class="col-auto source-intake-date-field">
+            <q-input
+              v-model="statisticsStartDate"
+              dense
+              outlined
+              readonly
+              stack-label
+              label="Start date"
+              placeholder="YYYY-MM-DD"
+            >
+              <template v-slot:append>
+                <q-icon name="event" class="cursor-pointer" aria-label="Choose start date">
+                  <q-popup-proxy ref="statisticsStartDatePopup" transition-show="scale" transition-hide="scale">
+                    <q-date v-model="statisticsStartDate" mask="YYYY-MM-DD">
+                      <div class="row items-center justify-end">
+                        <q-btn v-close-popup label="Close" color="primary" flat />
+                      </div>
+                    </q-date>
+                  </q-popup-proxy>
+                </q-icon>
+              </template>
+            </q-input>
           </div>
-          <div v-if="statisticsScope === 'CUSTOM'" class="col-12 col-sm-3 col-md-2">
-            <q-input v-model="statisticsEndDate" dense outlined type="date" label="End date" />
+          <div v-if="statisticsScope === 'CUSTOM'" class="col-auto source-intake-date-field">
+            <q-input
+              v-model="statisticsEndDate"
+              dense
+              outlined
+              readonly
+              stack-label
+              label="End date"
+              placeholder="YYYY-MM-DD"
+            >
+              <template v-slot:append>
+                <q-icon name="event" class="cursor-pointer" aria-label="Choose end date">
+                  <q-popup-proxy ref="statisticsEndDatePopup" transition-show="scale" transition-hide="scale">
+                    <q-date v-model="statisticsEndDate" mask="YYYY-MM-DD">
+                      <div class="row items-center justify-end">
+                        <q-btn v-close-popup label="Close" color="primary" flat />
+                      </div>
+                    </q-date>
+                  </q-popup-proxy>
+                </q-icon>
+              </template>
+            </q-input>
           </div>
-          <div v-if="statisticsScope === 'CUSTOM'" class="col-auto">
+          <div v-if="statisticsScope === 'CUSTOM'" class="col-auto source-intake-stat-toolbar__apply">
             <q-btn outline color="primary" label="Apply" :loading="statisticsLoading" @click="applyStatisticsDateRange" />
           </div>
-          <div class="col-12 col-md text-caption text-grey-7 source-intake-stat-toolbar__hint">
+          <div class="col text-caption text-grey-7 source-intake-stat-toolbar__hint">
             {{ statisticsScopeLabel }} · mailbox received date, fallback sent date · {{ statisticsLoading ? 'Loading…' : '' }}
           </div>
         </div>
@@ -1743,6 +1783,21 @@ export default {
   text-transform: uppercase;
 }
 
+.source-intake-executive-headline {
+  align-items: center;
+  color: #455a64;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px 18px;
+  line-height: 1.4;
+  margin: 2px 0 4px;
+}
+
+.source-intake-executive-headline span {
+  white-space: nowrap;
+}
+
 .source-intake-kpi {
   background: #fff;
   border: 1px solid #dfe7eb;
@@ -1799,7 +1854,10 @@ export default {
 }
 
 .source-intake-stat-toolbar {
+  align-items: center;
   border-bottom: 1px solid #edf1f3;
+  display: flex;
+  flex-wrap: wrap;
   min-height: 34px;
 }
 
@@ -1812,8 +1870,31 @@ export default {
   text-transform: uppercase;
 }
 
+.source-intake-stat-toolbar__label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.source-intake-stat-toolbar__scope {
+  flex: 1 1 190px;
+  max-width: 220px;
+  min-width: 175px;
+}
+
+.source-intake-date-field {
+  flex: 1 1 180px;
+  max-width: 205px;
+  min-width: 165px;
+}
+
+.source-intake-stat-toolbar__apply {
+  flex: 0 0 auto;
+}
+
 .source-intake-stat-toolbar__hint {
+  flex: 1 1 220px;
   line-height: 1.35;
+  min-width: 180px;
 }
 
 .source-intake-statline {
@@ -1890,6 +1971,17 @@ export default {
 }
 
 @media (max-width: 900px) {
+  .source-intake-stat-toolbar__label,
+  .source-intake-stat-toolbar__scope,
+  .source-intake-date-field,
+  .source-intake-stat-toolbar__apply,
+  .source-intake-stat-toolbar__hint {
+    flex-basis: 100%;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+  }
+
   .source-intake-management-grid {
     grid-template-columns: 1fr;
   }
