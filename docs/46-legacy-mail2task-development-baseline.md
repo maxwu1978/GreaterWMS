@@ -67,6 +67,46 @@ current rollout role hints; generic warehouse accounts continue to use the
 broader compatibility role matrix until CIO configures a formal staff-role
 registry.
 
+## Current personnel relationship update
+
+Recorded 2026-08-27 from the current operating model. This section is a
+business-role record only; it does not change the Mail2Task page, API, or
+permissions in this revision. It supersedes the earlier planning assumption
+that Sunny would perform the actual paperwork operation or remain the final
+operator of outbound documents.
+
+```text
+Kelly <-> Xuejie
+  Mutual backup coverage. Their work is intentionally complementary and
+  should not be forced into rigid exclusive subcategories.
+
+Kelly
+  Primary: ocean freight.
+  Secondary: domestic transportation and weekend air-freight support.
+
+Xuejie
+  Primary: domestic transportation.
+  Support: ocean freight work together with Kelly.
+
+Teddy
+  Primary: air freight and its associated domestic transportation.
+  Boundary: Teddy's work does not overlap with Xuejie's domestic-transport
+  responsibility.
+
+Sunny
+  Future scope: inbound and outbound appointment coordination only.
+  Paperwork: receives information and forwards it directly to Maggie.
+  Boundary: does not process the actual paperwork or files.
+```
+
+The practical routing rule is therefore: route air-freight and associated
+domestic-transport work to Teddy; route ocean-freight work to Kelly with
+Xuejie as backup/support; route ordinary domestic-transport work to Xuejie
+unless it is part of Teddy's air-freight scope; and route paperwork execution
+to Maggie after Sunny forwards the information. When a message cannot be
+assigned to one of these boundaries, keep the task in review rather than
+inventing a finer split.
+
 The Mail2Task page keeps the original GreaterWMS Vue 2 + Quasar shell and adds
 only the task/ref, task status, owner/handoff, assignment, approval, and WMS
 reference controls. The Dashboard remains the warehouse execution board.
