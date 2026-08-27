@@ -2,6 +2,24 @@ from django.db import models
 from django.db.models import Q
 
 
+MAIL_FLOW_CHOICES = (
+    ('CLIENT_TO_LOGISTICS', 'Client to Peak Logistics'),
+    ('EXTERNAL_TO_LOGISTICS', 'External service to Peak Logistics'),
+    ('LOGISTICS_TO_WAREHOUSE', 'Peak Logistics to Warehouse'),
+    ('WAREHOUSE_TO_LOGISTICS', 'Warehouse to Peak Logistics'),
+    ('LOGISTICS_TO_EXTERNAL', 'Peak Logistics to External service'),
+    ('WAREHOUSE_TO_EXTERNAL', 'Warehouse to External service'),
+    ('INTERNAL', 'Internal coordination'),
+    ('REVIEW', 'Review direction'),
+)
+
+MAIL_TIME_PRECISION_CHOICES = (
+    ('EXACT', 'Exact time'),
+    ('DATE_ONLY', 'Date only'),
+    ('UNKNOWN', 'Unknown'),
+)
+
+
 class SourceEvidence(models.Model):
     """Immutable-ish provenance record for an external warehouse instruction."""
 
@@ -282,6 +300,13 @@ class SourceIntakeRecord(models.Model):
     last_error = models.TextField(blank=True, default='')
     classification_confidence = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     metadata = models.JSONField(default=dict)
+    flow = models.CharField(max_length=32, choices=MAIL_FLOW_CHOICES, default='REVIEW')
+    due_at = models.DateTimeField(blank=True, null=True)
+    due_type = models.CharField(max_length=32, blank=True, default='')
+    due_precision = models.CharField(max_length=16, choices=MAIL_TIME_PRECISION_CHOICES, default='UNKNOWN')
+    event_at = models.DateTimeField(blank=True, null=True)
+    event_type = models.CharField(max_length=32, blank=True, default='')
+    event_precision = models.CharField(max_length=16, choices=MAIL_TIME_PRECISION_CHOICES, default='UNKNOWN')
     sent_at = models.DateTimeField(blank=True, null=True)
     received_at = models.DateTimeField(blank=True, null=True)
     reviewed_at = models.DateTimeField(blank=True, null=True)
@@ -374,6 +399,7 @@ class MailTask(models.Model):
     subject = models.CharField(max_length=1000, blank=True, default='')
     external_reference = models.CharField(max_length=255, blank=True, default='')
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=OPEN)
+    flow = models.CharField(max_length=32, choices=MAIL_FLOW_CHOICES, default='REVIEW')
     assigned_role = models.CharField(max_length=32, choices=TASK_ROLE_CHOICES, default=WMS_OPERATOR)
     assigned_staff_id = models.PositiveBigIntegerField(blank=True, null=True)
     assigned_staff_name = models.CharField(max_length=255, blank=True, default='')
@@ -383,6 +409,13 @@ class MailTask(models.Model):
     wms_entity_type = models.CharField(max_length=64, blank=True, default='')
     wms_entity_ref = models.CharField(max_length=255, blank=True, default='')
     wms_handoff_note = models.TextField(blank=True, default='')
+    due_at = models.DateTimeField(blank=True, null=True)
+    due_type = models.CharField(max_length=32, blank=True, default='')
+    due_precision = models.CharField(max_length=16, choices=MAIL_TIME_PRECISION_CHOICES, default='UNKNOWN')
+    event_at = models.DateTimeField(blank=True, null=True)
+    event_type = models.CharField(max_length=32, blank=True, default='')
+    event_precision = models.CharField(max_length=16, choices=MAIL_TIME_PRECISION_CHOICES, default='UNKNOWN')
+    last_mail_at = models.DateTimeField(blank=True, null=True)
     completed_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,4 +1,5 @@
 import hashlib
+from datetime import date, datetime
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -77,6 +78,8 @@ from .views import (
     SourceIntakeListView,
     SourceIntakeUpdateView,
     _intake_payload,
+    _mail_task_executive_summary,
+    _mail_task_time_state,
 )
 from .agent import (
     agent_roles_for_operation,
@@ -91,8 +94,220 @@ from .agent import (
     _record_entity_provenance,
 )
 from .intake import ensure_source_intake_record, source_next_action_display, update_source_intake
-from .mailtask import apply_mail_task_action, assign_mail_task, task_next_action_display
+from .mailtask import apply_mail_task_action, assign_mail_task, mail_flow_from_metadata, task_next_action_display
+from .mailstats import build_mailtask_statistics, parse_statistics_scope
 from .permissions import AgentPreviewPermission, SourceIntakePermission
+
+
+class MailTaskFlowAndScheduleTests(TestCase):
+    def source(self, message_id, metadata, content_hash):
+        return SourceEvidence.objects.create(
+            openid='tenant',
+            mailbox_account='psreceiving@peaksmartlogistics.com',
+            message_id=message_id,
+            thread_id='thread-flow',
+            source_type=SourceEvidence.EMAIL,
+            operation='external.instruction',
+            content_hash=content_hash,
+            metadata=metadata,
+        )
+
+    def test_explicit_flow_and_schedule_are_projected_without_fake_midnight_precision(self):
+        source = self.source(
+            '<flow-1@example.com>',
+            {
+                'subject': 'DO FCIU9133149',
+                'sender_email': 'lwerner@conglobal.com',
+                'mail_flow': 'EXTERNAL -> LOGISTICS',
+                'sent_at': '2026-08-26T09:18:00-05:00',
+                'received_at': '2026-08-26T09:19:00-05:00',
+                'due_at': '2026-08-26T10:00:00-05:00',
+                'due_type': 'SITE_PROCESS',
+                'event_at': '2026-08-26T11:00:00-05:00',
+                'event_type': 'DELIVERY_APPOINTMENT',
+            },
+            'a' * 64,
+        )
+        record, _ = ensure_source_intake_record(source)
+        task = record.task
+
+        self.assertEqual(record.flow, 'EXTERNAL_TO_LOGISTICS')
+        self.assertEqual(record.due_at.hour, 10)
+        self.assertEqual(record.event_at.hour, 11)
+        self.assertEqual(record.due_precision, 'EXACT')
+        self.assertEqual(task.flow, 'EXTERNAL_TO_LOGISTICS')
+        self.assertEqual(task.last_mail_at.hour, 9)
+        self.assertEqual(task.due_at.hour, 10)
+        self.assertEqual(task.event_at.hour, 11)
+        summary = _mail_task_executive_summary([record], now=datetime(2026, 8, 26, 12, 0))
+        self.assertEqual(summary['active'], 1)
+        self.assertEqual(summary['overdue'], 1)
+        self.assertEqual(summary['due_today'], 0)
+        self.assertEqual(summary['wms_pending'], 1)
+
+    def test_date_only_schedule_keeps_date_only_precision(self):
+        source = self.source(
+            '<flow-2@example.com>',
+            {
+                'subject': 'ISF cutoff',
+                'sender_role': 'LOGISTICS',
+                'recipient_role': 'EXTERNAL',
+                'sent_at': '2026-08-25T08:34:00-05:00',
+                'received_at': '2026-08-25T08:35:00-05:00',
+                'due_at': '2026-08-28',
+                'due_type': 'ISF_CUTOFF',
+            },
+            'b' * 64,
+        )
+        record, _ = ensure_source_intake_record(source)
+        self.assertEqual(mail_flow_from_metadata(source.metadata), 'LOGISTICS_TO_EXTERNAL')
+        self.assertEqual(record.flow, 'LOGISTICS_TO_EXTERNAL')
+        self.assertEqual(record.due_precision, 'DATE_ONLY')
+        self.assertEqual(record.due_at.hour, 0)
+        self.assertEqual(_mail_task_time_state(record, now=datetime(2026, 8, 28, 12, 0)), 'DUE_TODAY')
+        self.assertEqual(_mail_task_time_state(record, now=datetime(2026, 8, 27, 12, 0)), 'SCHEDULED')
+
+    def test_newer_follow_up_updates_task_flow_and_schedule(self):
+        first, _ = ensure_source_intake_record(self.source(
+            '<flow-3@example.com>',
+            {
+                'subject': 'Appointment request FCIU9133149',
+                'external_reference': 'FCIU9133149',
+                'mail_flow': 'EXTERNAL_TO_LOGISTICS',
+                'sent_at': '2026-08-24T09:07:00-05:00',
+                'received_at': '2026-08-24T09:08:00-05:00',
+                'event_at': '2026-08-26T11:00:00-05:00',
+                'event_type': 'APPOINTMENT',
+            },
+            'c' * 64,
+        ))
+        follow_up, _ = ensure_source_intake_record(self.source(
+            '<flow-4@example.com>',
+            {
+                'subject': 'RE: Appointment request FCIU9133149',
+                'external_reference': 'FCIU9133149',
+                'mail_flow': 'EXTERNAL_TO_LOGISTICS',
+                'sent_at': '2026-08-26T09:18:00-05:00',
+                'received_at': '2026-08-26T09:19:00-05:00',
+                'due_at': '2026-08-26T10:00:00-05:00',
+                'due_type': 'SITE_PROCESS',
+                'event_at': '2026-08-26T11:00:00-05:00',
+                'event_type': 'APPOINTMENT',
+            },
+            'd' * 64,
+        ))
+
+        first.task.refresh_from_db()
+        self.assertEqual(first.task_id, follow_up.task_id)
+        self.assertEqual(first.task.flow, 'EXTERNAL_TO_LOGISTICS')
+        self.assertEqual(first.task.due_at.hour, 10)
+        self.assertEqual(first.task.last_mail_at.day, 26)
+
+    def test_orphan_intake_is_reviewed_but_not_counted_as_wms_pending(self):
+        record = SimpleNamespace(
+            task_id=None,
+            task=None,
+            due_at=None,
+            due_precision='UNKNOWN',
+            event_at=None,
+            event_precision='UNKNOWN',
+            operation='UNKNOWN',
+            status='CAPTURED',
+            external_reference='',
+            flow='REVIEW',
+            exception_summary='',
+        )
+
+        summary = _mail_task_executive_summary([record], now=datetime(2026, 8, 26, 12, 0))
+
+        self.assertEqual(summary['active'], 1)
+        self.assertEqual(summary['wms_pending'], 0)
+        self.assertEqual(summary['data_review'], 1)
+        self.assertEqual(summary['schedule_missing'], 1)
+
+    def test_canonical_statistics_keep_mail_and_task_grains_aligned(self):
+        first, _ = ensure_source_intake_record(self.source(
+            '<stats-1@example.com>',
+            {
+                'subject': 'Inbound OI-050001',
+                'external_reference': 'OI-050001',
+                'business_operation': 'INBOUND',
+                'mail_flow': 'EXTERNAL_TO_LOGISTICS',
+                'sender_email': 'carrier@example.com',
+                'sent_at': '2026-08-25T09:00:00-05:00',
+            },
+            'e' * 64,
+        ))
+        follow_up, _ = ensure_source_intake_record(self.source(
+            '<stats-2@example.com>',
+            {
+                'subject': 'Re: Inbound OI-050001',
+                'external_reference': 'OI-050001',
+                'business_operation': 'INBOUND',
+                'mail_flow': 'EXTERNAL_TO_LOGISTICS',
+                'sender_email': 'carrier@example.com',
+                'sent_at': '2026-08-25T10:00:00-05:00',
+            },
+            'f' * 64,
+        ))
+        self.assertEqual(first.task_id, follow_up.task_id)
+        MailboxSyncRun.objects.create(
+            openid='tenant',
+            mailbox_account='psreceiving@peaksmartlogistics.com',
+            status=MailboxSyncRun.SUCCEEDED,
+            fetched_count=3,
+            captured_count=2,
+            review_count=0,
+            metadata={
+                'classification': {
+                    'total': 3,
+                    'unique': 3,
+                    'duplicates': 0,
+                    'accepted_operational': 2,
+                    'review_required': 0,
+                    'excluded_non_operational': 1,
+                    'attachments_saved': 4,
+                    'attachment_files': 3,
+                }
+            },
+        )
+
+        stats = build_mailtask_statistics('tenant')
+
+        self.assertEqual(stats['mailbox']['scanned'], 3)
+        self.assertEqual(stats['mailbox']['operational_written'], 2)
+        self.assertEqual(stats['mailbox']['accepted'], 2)
+        self.assertEqual(stats['mailbox']['excluded'], 1)
+        self.assertEqual(stats['source']['total'], 2)
+        self.assertEqual(stats['task']['total'], 1)
+        self.assertEqual(stats['task']['linked_emails'], 2)
+        self.assertEqual(stats['task']['multi_email_tasks'], 1)
+        self.assertEqual(stats['task']['operation_counts']['INBOUND'], 1)
+        self.assertEqual(stats['management']['sender_groups'][0]['key'], 'EXTERNAL_SERVICE')
+        self.assertEqual(stats['management']['direction_counts'][1]['key'], 'CLIENT_TO_LOGISTICS')
+        self.assertEqual(
+            stats['management']['people'][0]['responsibility'],
+            'Ocean freight, documentation, and external coordination',
+        )
+        self.assertEqual(stats['management']['sender_groups'][0]['label'], 'External service senders')
+        self.assertEqual(stats['management']['direction_counts'][1]['label'], 'Delta customer → Peak Logistics')
+
+        ranged = build_mailtask_statistics(
+            'tenant',
+            date_scope='CUSTOM',
+            start_date=date(2026, 8, 25),
+            end_date=date(2026, 8, 25),
+        )
+        self.assertEqual(ranged['scope']['mode'], 'CUSTOM')
+        self.assertEqual(ranged['source']['total'], 2)
+        self.assertEqual(ranged['task']['total'], 1)
+        self.assertEqual(ranged['mailbox']['basis'], 'CAPTURED_SOURCE_RECORDS')
+        self.assertEqual(
+            parse_statistics_scope({'statistics_scope': 'CUSTOM', 'start_date': '2026-08-25', 'end_date': '2026-08-26'})['start_date'],
+            date(2026, 8, 25),
+        )
+        with self.assertRaises(ValueError):
+            parse_statistics_scope({'statistics_scope': 'CUSTOM', 'start_date': '2026-08-26'})
 
 
 class AgentPreviewPermissionTests(TestCase):
@@ -346,6 +561,10 @@ class MailTaskWorkflowTests(TestCase):
         self.assertEqual(response.data['items'][0]['task_email_count'], 2)
         self.assertEqual(response.data['items'][0]['task_next_action_code'], 'PREPARE_WMS')
         self.assertEqual(response.data['items'][0]['task_next_action_label'], 'Prepare WMS')
+        self.assertEqual(response.data['statistics']['source']['total'], 2)
+        self.assertEqual(response.data['statistics']['task']['total'], 1)
+        self.assertEqual(response.data['statistics']['task']['linked_emails'], 2)
+        self.assertEqual(response.data['statistics']['task']['multi_email_tasks'], 1)
 
 
 class SourceProvenanceWorkflowTests(TestCase):

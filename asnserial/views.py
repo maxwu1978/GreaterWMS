@@ -74,9 +74,17 @@ from .permissions import AgentPreviewPermission, SourceIntakePermission
 from .mailtask import (
     apply_mail_task_action,
     assign_mail_task,
+    mail_flow_label,
     task_actors,
     task_payload as mail_task_payload,
 )
+from .mailstats import (
+    build_mailtask_statistics,
+    executive_summary_for_records,
+    parse_statistics_scope,
+    mail_task_time_state as _mail_task_time_state,
+)
+from .mailtime import MAILBOX_TIME_ZONE
 
 
 EXCEPTION_STATUSES = {
@@ -378,6 +386,14 @@ class SourceCaptureView(APIView):
                 'status': intake.status,
                 'operation': intake.operation,
                 'document_type': intake.document_type,
+                'flow': intake.flow,
+                'flow_label': mail_flow_label(intake.flow),
+                'due_at': intake.due_at.isoformat() if intake.due_at else None,
+                'due_type': intake.due_type,
+                'due_precision': intake.due_precision,
+                'event_at': intake.event_at.isoformat() if intake.event_at else None,
+                'event_type': intake.event_type,
+                'event_precision': intake.event_precision,
                 'created': created,
                 'next_action': intake.next_action,
                 'next_action_code': next_action['code'],
@@ -408,6 +424,11 @@ def _source_body_preview(source, limit=240):
     if len(body) <= limit:
         return body
     return '%s…' % body[:limit - 1].rstrip()
+
+
+def _mail_task_executive_summary(records, now=None):
+    """Backward-compatible wrapper for the canonical statistics module."""
+    return executive_summary_for_records(records, now=now)
 
 
 def _email_provenance_payload(source, record):
@@ -472,6 +493,15 @@ def _intake_payload(record, detail=False, request=None):
         'exception_summary': record.exception_summary,
         'last_error': record.last_error,
         'classification_confidence': record.classification_confidence,
+        'flow': record.flow,
+        'flow_label': mail_flow_label(record.flow),
+        'due_at': record.due_at,
+        'due_type': record.due_type,
+        'due_precision': record.due_precision,
+        'event_at': record.event_at,
+        'event_type': record.event_type,
+        'event_precision': record.event_precision,
+        'time_status': _mail_task_time_state(record),
         'sent_at': record.sent_at or source.sent_at,
         'sent_at_raw': str(original_email.get('sent_at_raw') or '')[:255],
         'received_at': record.received_at,
@@ -495,6 +525,8 @@ def _intake_payload(record, detail=False, request=None):
             'assigned_role_label': task_data['assigned_role_label'],
             'assigned_staff_id': task_data['assigned_staff_id'],
             'assigned_staff_name': task_data['assigned_staff_name'],
+            'flow': task_data['flow'],
+            'flow_label': task_data['flow_label'],
             'wms_handoff_status': task_data['wms_handoff_status'],
             'wms_handoff_label': task_data['wms_handoff_label'],
             'wms_entity_system': task_data['wms_entity_system'],
@@ -504,6 +536,13 @@ def _intake_payload(record, detail=False, request=None):
             'task_next_action': task_data['task_next_action'],
             'task_next_action_code': task_data['task_next_action_code'],
             'task_next_action_label': task_data['task_next_action_label'],
+            'due_at': task_data['due_at'],
+            'due_type': task_data['due_type'],
+            'due_precision': task_data['due_precision'],
+            'event_at': task_data['event_at'],
+            'event_type': task_data['event_type'],
+            'event_precision': task_data['event_precision'],
+            'last_mail_at': task_data['last_mail_at'],
             'task_email_count': task_data['task_email_count'],
             'task_actions': task_data['task_actions'],
             'task_updated_at': task_data['updated_at'],
@@ -565,10 +604,35 @@ class SourceIntakeListView(APIView):
     permission_classes = [SourceIntakePermission]
 
     def get(self, request):
+        try:
+            statistics_scope = parse_statistics_scope(request.query_params)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
         queryset = SourceIntakeRecord.objects.filter(
             openid=request.auth.openid,
         ).select_related('source', 'sync_run', 'task').prefetch_related('task__intake_records')
-        for field in ('status', 'operation', 'document_type', 'mailbox_account'):
+        all_source_records = list(SourceIntakeRecord.objects.filter(
+            openid=request.auth.openid,
+        ).select_related('source', 'task').order_by('-updated_at', '-id'))
+        portfolio_queryset = SourceIntakeRecord.objects.filter(
+            openid=request.auth.openid,
+        ).select_related('task').order_by('-updated_at', '-id')
+        portfolio_records = []
+        portfolio_task_ids = set()
+        for record in portfolio_queryset:
+            task_key = record.task_id or 'source:%s' % record.id
+            if task_key in portfolio_task_ids:
+                continue
+            portfolio_task_ids.add(task_key)
+            portfolio_records.append(record)
+        statistics = build_mailtask_statistics(
+            request.auth.openid,
+            source_records=all_source_records,
+            task_records=portfolio_records,
+            **statistics_scope,
+        )
+        executive_summary = statistics['executive_summary']
+        for field in ('status', 'operation', 'document_type', 'mailbox_account', 'flow'):
             value = str(request.query_params.get(field) or '').strip()
             if value:
                 queryset = queryset.filter(**{field: value.upper() if field != 'mailbox_account' else value})
@@ -602,6 +666,40 @@ class SourceIntakeListView(APIView):
                 continue
             seen_task_ids.add(task_key)
             task_records.append(record)
+        # The board is operationally ordered: actionable tasks with a known
+        # deadline first, then the business event time. Records without either
+        # time retain the queryset order (updated_at) so old data does not
+        # jump around merely because it has no schedule metadata.
+        original_order = {record.id: index for index, record in enumerate(task_records)}
+
+        def _datetime_sort_value(value):
+            if value is None:
+                return None
+            if timezone.is_aware(value):
+                value = value.astimezone(MAILBOX_TIME_ZONE).replace(tzinfo=None)
+            return value
+
+        def _mail_task_sort_key(record):
+            task = record.task
+            due_at = _datetime_sort_value(getattr(task, 'due_at', None) or record.due_at)
+            event_at = _datetime_sort_value(getattr(task, 'event_at', None) or record.event_at)
+            last_mail_at = _datetime_sort_value(
+                getattr(task, 'last_mail_at', None)
+                or record.sent_at
+                or record.received_at
+            )
+            status = getattr(task, 'status', '')
+            return (
+                1 if status == 'COMPLETED' else 0,
+                0 if due_at is not None else 1,
+                due_at or datetime.max,
+                0 if event_at is not None else 1,
+                event_at or datetime.max,
+                -last_mail_at.timestamp() if last_mail_at is not None else 0,
+                original_order[record.id],
+            )
+
+        task_records.sort(key=_mail_task_sort_key)
         total = len(task_records)
         counts = {
             row['status']: row['count']
@@ -624,7 +722,22 @@ class SourceIntakeListView(APIView):
             'has_more': offset + limit < total,
             'counts': counts,
             'task_counts': task_counts,
+            'executive_summary': executive_summary,
+            'statistics': statistics,
         })
+
+
+class MailTaskStatisticsView(APIView):
+    """Return the same canonical statistics used by Mail2Task and the Agent."""
+
+    permission_classes = [SourceIntakePermission]
+
+    def get(self, request):
+        try:
+            statistics_scope = parse_statistics_scope(request.query_params)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        return Response(build_mailtask_statistics(request.auth.openid, **statistics_scope))
 
 
 class SourceIntakeDetailView(APIView):

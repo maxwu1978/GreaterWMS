@@ -24,6 +24,7 @@ from .models import (
     SourceIntakeEvent,
     SourceIntakeRecord,
 )
+from .mailtime import latest_mail_datetime
 
 
 TASK_ROLE_LABELS = {
@@ -66,6 +67,68 @@ HANDOFF_STATUS_LABELS = {
     MailTask.RETURNED_TO_MAGGIE: 'Returned to Maggie',
     MailTask.HANDOFF_COMPLETED: 'Completed',
     MailTask.HANDOFF_BLOCKED: 'Blocked',
+}
+
+MAIL_FLOW_LABELS = {
+    'CLIENT_TO_LOGISTICS': 'Client → Peak Logistics',
+    'EXTERNAL_TO_LOGISTICS': 'External service → Peak Logistics',
+    'LOGISTICS_TO_WAREHOUSE': 'Peak Logistics → Warehouse',
+    'WAREHOUSE_TO_LOGISTICS': 'Warehouse → Peak Logistics',
+    'LOGISTICS_TO_EXTERNAL': 'Peak Logistics → External service',
+    'WAREHOUSE_TO_EXTERNAL': 'Warehouse → External service',
+    'INTERNAL': 'Internal coordination',
+    'REVIEW': 'Review direction',
+}
+
+MAIL_FLOW_ALIASES = {
+    'CLIENT_TO_LOGISTICS': 'CLIENT_TO_LOGISTICS',
+    'CLIENT->LOGISTICS': 'CLIENT_TO_LOGISTICS',
+    'CLIENT_TO_LOG': 'CLIENT_TO_LOGISTICS',
+    'CLIENT->LOG': 'CLIENT_TO_LOGISTICS',
+    'EXTERNAL_TO_LOGISTICS': 'EXTERNAL_TO_LOGISTICS',
+    'EXTERNAL_SERVICE_TO_LOGISTICS': 'EXTERNAL_TO_LOGISTICS',
+    'EXTERNAL->LOGISTICS': 'EXTERNAL_TO_LOGISTICS',
+    'EXTERNAL->LOG': 'EXTERNAL_TO_LOGISTICS',
+    'LOGISTICS_TO_WAREHOUSE': 'LOGISTICS_TO_WAREHOUSE',
+    'LOGISTICS_TO_WH': 'LOGISTICS_TO_WAREHOUSE',
+    'LOGISTICS->WAREHOUSE': 'LOGISTICS_TO_WAREHOUSE',
+    'LOGISTICS->WH': 'LOGISTICS_TO_WAREHOUSE',
+    'WAREHOUSE_TO_LOGISTICS': 'WAREHOUSE_TO_LOGISTICS',
+    'WAREHOUSE_TO_LOG': 'WAREHOUSE_TO_LOGISTICS',
+    'WAREHOUSE->LOGISTICS': 'WAREHOUSE_TO_LOGISTICS',
+    'WAREHOUSE->LOG': 'WAREHOUSE_TO_LOGISTICS',
+    'LOGISTICS_TO_EXTERNAL': 'LOGISTICS_TO_EXTERNAL',
+    'LOGISTICS_TO_EXT': 'LOGISTICS_TO_EXTERNAL',
+    'LOGISTICS->EXTERNAL': 'LOGISTICS_TO_EXTERNAL',
+    'LOGISTICS->EXT': 'LOGISTICS_TO_EXTERNAL',
+    'WAREHOUSE_TO_EXTERNAL': 'WAREHOUSE_TO_EXTERNAL',
+    'WAREHOUSE_TO_EXT': 'WAREHOUSE_TO_EXTERNAL',
+    'WAREHOUSE->EXTERNAL': 'WAREHOUSE_TO_EXTERNAL',
+    'WAREHOUSE->EXT': 'WAREHOUSE_TO_EXTERNAL',
+    'INTERNAL': 'INTERNAL',
+    'INTERNAL_COORDINATION': 'INTERNAL',
+    'REVIEW': 'REVIEW',
+    'REVIEW_DIRECTION': 'REVIEW',
+}
+
+PARTY_ROLE_ALIASES = {
+    'CLIENT': 'CLIENT',
+    'CUSTOMER': 'CLIENT',
+    'DELTA': 'CLIENT',
+    'EXTERNAL': 'EXTERNAL',
+    'EXT': 'EXTERNAL',
+    'EXTERNAL_SERVICE': 'EXTERNAL',
+    'SERVICE_PROVIDER': 'EXTERNAL',
+    'FORWARDER': 'EXTERNAL',
+    'CARRIER': 'EXTERNAL',
+    'BROKER': 'EXTERNAL',
+    'LOGISTICS': 'LOGISTICS',
+    'PEAK_LOGISTICS': 'LOGISTICS',
+    'PEAK_LOG': 'LOGISTICS',
+    'WAREHOUSE': 'WAREHOUSE',
+    'WH': 'WAREHOUSE',
+    'WAREHOUSE_DEPARTMENT': 'WAREHOUSE',
+    'INTERNAL': 'INTERNAL',
 }
 
 ACTION_LABELS = {
@@ -116,6 +179,62 @@ ACTION_STATES = {
 
 def _text(value, limit=1000):
     return str(value or '').strip()[:limit]
+
+
+def normalize_mail_flow(value):
+    """Normalize a flow value without hard-coding external company names."""
+    raw = _text(value, 64).upper().replace('→', '->').replace('—', '-').replace('–', '-')
+    raw = re.sub(r'\s*->\s*', '->', raw)
+    raw = re.sub(r'\s+', '_', raw).replace(' ', '_')
+    return MAIL_FLOW_ALIASES.get(raw, 'REVIEW')
+
+
+def mail_flow_label(value):
+    return MAIL_FLOW_LABELS.get(str(value or '').upper(), MAIL_FLOW_LABELS['REVIEW'])
+
+
+def _party_role(value):
+    raw = _text(value, 64).upper().replace('→', '->')
+    raw = re.sub(r'[^A-Z_]+', '_', raw).strip('_')
+    return PARTY_ROLE_ALIASES.get(raw, '')
+
+
+def mail_flow_from_metadata(metadata):
+    """Read an explicit flow or compose one from explicit party roles.
+
+    The Skill should provide ``mail_flow`` or ``sender_role`` and
+    ``recipient_role`` when the headers establish the organizational
+    direction. Names and company strings are never guessed here.
+    """
+    if not isinstance(metadata, dict):
+        return 'REVIEW'
+    for key in ('mail_flow', 'message_flow', 'email_flow', 'flow'):
+        value = metadata.get(key)
+        if value not in (None, ''):
+            normalized = normalize_mail_flow(value)
+            if normalized != 'REVIEW':
+                return normalized
+    sender_role = _party_role(
+        metadata.get('sender_role')
+        or metadata.get('from_role')
+        or metadata.get('source_party_role')
+    )
+    recipient_role = _party_role(
+        metadata.get('recipient_role')
+        or metadata.get('to_role')
+        or metadata.get('target_party_role')
+    )
+    pairs = {
+        ('CLIENT', 'LOGISTICS'): 'CLIENT_TO_LOGISTICS',
+        ('EXTERNAL', 'LOGISTICS'): 'EXTERNAL_TO_LOGISTICS',
+        ('LOGISTICS', 'WAREHOUSE'): 'LOGISTICS_TO_WAREHOUSE',
+        ('WAREHOUSE', 'LOGISTICS'): 'WAREHOUSE_TO_LOGISTICS',
+        ('LOGISTICS', 'EXTERNAL'): 'LOGISTICS_TO_EXTERNAL',
+        ('WAREHOUSE', 'EXTERNAL'): 'WAREHOUSE_TO_EXTERNAL',
+    }
+    if sender_role == recipient_role == 'INTERNAL':
+        return 'INTERNAL'
+    return pairs.get((sender_role, recipient_role), 'REVIEW')
 
 
 def _normalized_operation(value):
@@ -312,15 +431,48 @@ def _new_task_defaults(source, record):
         'subject': _text(record.subject, 1000),
         'external_reference': _text(record.external_reference, 255),
         'status': MailTask.OPEN,
+        'flow': record.flow or 'REVIEW',
         'assigned_role': assigned_role,
         'next_action': 'Maggie: review the email and prepare the WMS handoff.' if assigned_role == MailTask.WMS_OPERATOR else 'Sunny: review and assign the operational next step.',
         'wms_handoff_status': MailTask.TO_MAGGIE if assigned_role == MailTask.WMS_OPERATOR else MailTask.TO_SUNNY,
+        'due_at': record.due_at,
+        'due_type': record.due_type,
+        'due_precision': record.due_precision,
+        'event_at': record.event_at,
+        'event_type': record.event_type,
+        'event_precision': record.event_precision,
+        'last_mail_at': latest_mail_datetime(record.sent_at, record.received_at),
     }
     target = _default_staff_for_role(source.openid, assigned_role)
     if target:
         defaults['assigned_staff_id'] = target.id
         defaults['assigned_staff_name'] = target.staff_name
     return defaults
+
+
+def _sync_task_time_and_flow(task, record):
+    """Project the newest source mail's direction and schedule onto the task."""
+    incoming_last_mail = latest_mail_datetime(record.sent_at, record.received_at)
+    current_last_mail = task.last_mail_at
+    is_newer = current_last_mail is None or (
+        incoming_last_mail is not None and incoming_last_mail >= current_last_mail
+    )
+    if not is_newer:
+        return []
+
+    updates = []
+    if record.flow and record.flow != 'REVIEW' and task.flow != record.flow:
+        task.flow = record.flow
+        updates.append('flow')
+    for field in ('due_at', 'due_type', 'due_precision', 'event_at', 'event_type', 'event_precision'):
+        value = getattr(record, field, None)
+        if value not in (None, '') and value != getattr(task, field):
+            setattr(task, field, value)
+            updates.append(field)
+    if incoming_last_mail is not None and incoming_last_mail != current_last_mail:
+        task.last_mail_at = incoming_last_mail
+        updates.append('last_mail_at')
+    return updates
 
 
 def ensure_mail_task(source, record):
@@ -345,6 +497,7 @@ def ensure_mail_task(source, record):
     if task.operation == MailTask.UNKNOWN and defaults['operation'] != MailTask.UNKNOWN:
         task.operation = defaults['operation']
         updates.append('operation')
+    updates.extend(_sync_task_time_and_flow(task, record))
     if updates:
         task.save(update_fields=updates + ['updated_at'])
 
@@ -638,6 +791,8 @@ def task_payload(task, request=None, detail=False):
         'task_status': task.status,
         'task_status_label': task_status_label(task.status),
         'operation': task.operation,
+        'flow': task.flow,
+        'flow_label': mail_flow_label(task.flow),
         'subject': task.subject,
         'external_reference': task.external_reference,
         'assigned_role': task.assigned_role,
@@ -653,6 +808,13 @@ def task_payload(task, request=None, detail=False):
         'task_next_action': task.next_action,
         'task_next_action_code': next_action['code'],
         'task_next_action_label': next_action['label'],
+        'due_at': task.due_at,
+        'due_type': task.due_type,
+        'due_precision': task.due_precision,
+        'event_at': task.event_at,
+        'event_type': task.event_type,
+        'event_precision': task.event_precision,
+        'last_mail_at': task.last_mail_at,
         'task_email_count': len(linked_records),
         'task_actions': available_task_actions(task, request=request),
         'created_at': task.created_at,
@@ -693,8 +855,13 @@ def task_payload(task, request=None, detail=False):
                     'source_evidence_id': item.source_id,
                     'subject': item.subject,
                     'sender_email': item.sender_email,
+                    'flow': item.flow,
+                    'flow_label': mail_flow_label(item.flow),
+                    'sent_at': item.sent_at,
                     'status': item.status,
                     'received_at': item.received_at,
+                    'due_at': item.due_at,
+                    'event_at': item.event_at,
                 }
                 for item in linked_records
             ],

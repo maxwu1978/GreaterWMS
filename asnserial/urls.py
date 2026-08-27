@@ -30,6 +30,7 @@ urlpatterns = [
     path('sources/audits/', views.OperationAuditListView.as_view(), name='operation-audit-list'),
     path('intake/', views.SourceIntakeListView.as_view(), name='source-intake-list'),
     path('intake/task-actors/', views.MailTaskActorsView.as_view(), name='mailtask-actors'),
+    path('intake/statistics/', views.MailTaskStatisticsView.as_view(), name='mailtask-statistics'),
     path('intake/sync-runs/', views.MailboxSyncRunCreateView.as_view(), name='mailbox-sync-run-create'),
     path('intake/sync-state/', views.MailboxSyncStateView.as_view(), name='mailbox-sync-state'),
     path('intake/sync-runs/<int:pk>/complete/', views.MailboxSyncRunCompleteView.as_view(), name='mailbox-sync-run-complete'),

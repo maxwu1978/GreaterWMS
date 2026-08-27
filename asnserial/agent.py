@@ -4,7 +4,6 @@ import secrets
 from datetime import timedelta
 
 from django.db import transaction
-from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
@@ -19,6 +18,7 @@ from .models import (
     SourceIntakeRecord,
 )
 from .intake import _source_value
+from .mailtime import parse_mail_datetime
 
 
 AGENT_CLIENT = 'greaterwms-cli'
@@ -232,16 +232,7 @@ def _scrub_evidence_value(value):
 
 def _evidence_datetime(value):
     """Parse source timestamps without silently substituting capture time."""
-    if not value:
-        return None
-    parsed = parse_datetime(str(value).replace('Z', '+00:00'))
-    if parsed is None:
-        return None
-    if timezone.is_naive(parsed) and timezone.is_aware(timezone.now()):
-        return timezone.make_aware(parsed, timezone.get_current_timezone())
-    if timezone.is_aware(parsed) and not timezone.is_aware(timezone.now()):
-        return timezone.make_naive(parsed, timezone.get_current_timezone())
-    return parsed
+    return parse_mail_datetime(value)
 
 
 def _merge_source_metadata(existing, incoming):

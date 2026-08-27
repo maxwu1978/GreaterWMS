@@ -9,13 +9,16 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from .models import (
+    MAIL_FLOW_CHOICES,
+    MAIL_TIME_PRECISION_CHOICES,
     MailboxSyncRun,
     SourceAttachment,
     SourceEvidence,
     SourceIntakeEvent,
     SourceIntakeRecord,
 )
-from .mailtask import ensure_mail_task
+from .mailtask import ensure_mail_task, mail_flow_from_metadata
+from .mailtime import mail_time_precision, parse_mail_datetime
 
 
 INTAKE_ROLES = frozenset({
@@ -247,6 +250,39 @@ def _parse_datetime(value):
     return parsed
 
 
+def _mail_schedule(metadata):
+    """Extract typed task times while retaining raw values in metadata."""
+    metadata = metadata if isinstance(metadata, dict) else {}
+    original = _original_email(metadata)
+    packages = (original, metadata) if original else (metadata,)
+
+    def value(*keys):
+        for package in packages:
+            if not isinstance(package, dict):
+                continue
+            found = _metadata_value(package, *keys)
+            if found not in (None, ''):
+                return found
+        return ''
+
+    due_raw = value('due_at', 'deadline_at', 'due', 'deadline')
+    event_raw = value('event_at', 'business_event_at', 'event_time', 'event')
+    due_precision = value('due_precision', 'deadline_precision')
+    event_precision = value('event_precision', 'business_event_precision')
+    flow = mail_flow_from_metadata(metadata)
+    if flow == 'REVIEW' and original:
+        flow = mail_flow_from_metadata(original)
+    return {
+        'flow': flow,
+        'due_at': parse_mail_datetime(due_raw),
+        'due_type': _text(value('due_type', 'deadline_type'), 32).upper(),
+        'due_precision': mail_time_precision(due_raw, due_precision),
+        'event_at': parse_mail_datetime(event_raw),
+        'event_type': _text(value('event_type', 'business_event_type'), 32).upper(),
+        'event_precision': mail_time_precision(event_raw, event_precision),
+    }
+
+
 def _confidence(value):
     if value in (None, ''):
         return None
@@ -265,6 +301,8 @@ def _operation(metadata, source):
         return SourceIntakeRecord.INBOUND
     if value.startswith('outbound') or value in {'dn', 'delivery', 'shipping'}:
         return SourceIntakeRecord.OUTBOUND
+    if value in {'supporting', 'transport', 'coordination', 'transportation'}:
+        return SourceIntakeRecord.SUPPORTING
     if source.source_type == SourceEvidence.EMAIL:
         return SourceIntakeRecord.UNKNOWN
     return SourceIntakeRecord.SUPPORTING
@@ -350,6 +388,7 @@ def _event(record, status, event_type, message='', actor_type='', actor_name='',
 def ensure_source_intake_record(source, sync_run=None, duplicate=False):
     """Create the board record when a source is captured, without business writes."""
     metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    schedule = _mail_schedule(metadata)
     defaults = {
         'sync_run': sync_run,
         'openid': source.openid,
@@ -366,9 +405,10 @@ def ensure_source_intake_record(source, sync_run=None, duplicate=False):
         'exception_summary': _text(_metadata_value(metadata, 'exception_summary', 'conflict_summary'), 4000),
         'classification_confidence': _confidence(metadata.get('classification_confidence')),
         'metadata': safe_source_metadata(metadata),
-        'sent_at': source.sent_at or _parse_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
-        'received_at': _parse_datetime(_metadata_value(metadata, 'received_at', 'email_received_at')),
+        'sent_at': source.sent_at or parse_mail_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
+        'received_at': parse_mail_datetime(_metadata_value(metadata, 'received_at', 'email_received_at')),
     }
+    defaults.update(schedule)
     record, created = SourceIntakeRecord.objects.get_or_create(source=source, defaults=defaults)
     if not created and (sync_run_id := getattr(sync_run, 'id', None)):
         if record.sync_run_id is None:
@@ -382,9 +422,11 @@ def ensure_source_intake_record(source, sync_run=None, duplicate=False):
             'sender_email': _text(_source_value(metadata, 'sender_email', 'from_email', 'sender'), 255),
             'subject': _text(_source_value(metadata, 'subject'), 1000),
             'external_reference': _text(_source_value(metadata, 'external_reference', 'reference', 'container_tracking'), 255),
-            'sent_at': source.sent_at or _parse_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
+            'sent_at': source.sent_at or parse_mail_datetime(_source_value(metadata, 'sent_at', 'email_sent_at')),
+            'received_at': parse_mail_datetime(_metadata_value(metadata, 'received_at', 'email_received_at')),
             'metadata': safe_source_metadata(metadata),
         }
+        current.update(schedule)
         changed_fields = []
         for field, value in current.items():
             if field == 'metadata':
@@ -432,7 +474,8 @@ def update_source_intake(record, data, actor_type='', actor_name='', allow_termi
         'operation', 'document_type', 'status', 'sender_name', 'sender_email', 'subject',
         'external_reference', 'matched_entity_type', 'matched_entity_ref', 'owner_role',
         'next_action', 'exception_summary', 'last_error', 'classification_confidence',
-        'received_at', 'reviewed_at', 'completed_at', 'metadata',
+        'flow', 'due_at', 'due_type', 'due_precision', 'event_at', 'event_type',
+        'event_precision', 'received_at', 'reviewed_at', 'completed_at', 'metadata',
     }
     values = {key: value for key, value in data.items() if key in allowed}
     if not values:
@@ -451,13 +494,19 @@ def update_source_intake(record, data, actor_type='', actor_name='', allow_termi
                     'to_status': new_status,
                 })
         values['status'] = new_status
-    for field in ('operation', 'document_type', 'status', 'owner_role'):
+    for field in ('operation', 'document_type', 'status', 'owner_role', 'flow', 'due_precision', 'event_precision'):
         if field in values and isinstance(values[field], str):
             values[field] = values[field].strip().upper()
     if 'operation' in values and values['operation'] not in dict(SourceIntakeRecord.OPERATION_CHOICES):
         raise ValidationError({'operation': 'Unsupported intake operation'})
     if 'document_type' in values and values['document_type'] not in dict(SourceIntakeRecord.DOCUMENT_CHOICES):
         raise ValidationError({'document_type': 'Unsupported source document type'})
+    if 'flow' in values and values['flow'] not in dict(MAIL_FLOW_CHOICES):
+        raise ValidationError({'flow': 'Unsupported mail flow'})
+    if 'due_precision' in values and values['due_precision'] not in dict(MAIL_TIME_PRECISION_CHOICES):
+        raise ValidationError({'due_precision': 'Unsupported due time precision'})
+    if 'event_precision' in values and values['event_precision'] not in dict(MAIL_TIME_PRECISION_CHOICES):
+        raise ValidationError({'event_precision': 'Unsupported event time precision'})
     if 'classification_confidence' in values:
         values['classification_confidence'] = _confidence(values['classification_confidence'])
     for field in ('sender_name', 'sender_email', 'subject', 'external_reference', 'matched_entity_type', 'matched_entity_ref', 'owner_role', 'next_action'):
@@ -469,7 +518,10 @@ def update_source_intake(record, data, actor_type='', actor_name='', allow_termi
     if 'metadata' in values and not isinstance(values['metadata'], dict):
         raise ValidationError({'metadata': 'metadata must be a JSON object'})
     if 'received_at' in values:
-        values['received_at'] = _parse_datetime(values['received_at'])
+        values['received_at'] = parse_mail_datetime(values['received_at'])
+    for field in ('due_at', 'event_at'):
+        if field in values:
+            values[field] = parse_mail_datetime(values[field])
     for field in ('reviewed_at', 'completed_at'):
         if field in values:
             values[field] = _parse_datetime(values[field]) or timezone.now()
