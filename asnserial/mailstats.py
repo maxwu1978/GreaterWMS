@@ -384,28 +384,43 @@ def _mailbox_stats(openid, source_records, latest_run, date_scoped=False):
     )
     if date_scoped:
         # A date-scoped report has no per-message scan ledger.  Use captured
-        # source records as the honest denominator and mark unavailable
-        # mailbox-wide exclusion metrics as unknown rather than reusing the
-        # latest all-mailbox sync totals.
-        scoped_attachment_parts = attachments
-        scoped_accepted = source_status_counts.get(SourceIntakeRecord.CAPTURED, 0)
-        scoped_review = source_status_counts.get(SourceIntakeRecord.REVIEW_REQUIRED, 0)
-        scoped_failed = source_status_counts.get(SourceIntakeRecord.FAILED, 0)
+        # source records as the honest denominator, excluding audit-only
+        # duplicate projections. Keep the duplicate status breakdown below so
+        # the audit trail remains visible without inflating the mailbox count.
+        operational_records = [
+            record for record in source_records
+            if getattr(record, 'status', '') != SourceIntakeRecord.DUPLICATE
+        ]
+        operational_source_ids = [record.source_id for record in operational_records]
+        scoped_attachments = SourceAttachment.objects.filter(source_id__in=operational_source_ids)
+        scoped_attachment_parts = scoped_attachments.count()
+        scoped_accepted = sum(
+            1 for record in operational_records
+            if getattr(record, 'status', '') == SourceIntakeRecord.CAPTURED
+        )
+        scoped_review = sum(
+            1 for record in operational_records
+            if getattr(record, 'status', '') == SourceIntakeRecord.REVIEW_REQUIRED
+        )
+        scoped_failed = sum(
+            1 for record in operational_records
+            if getattr(record, 'status', '') == SourceIntakeRecord.FAILED
+        )
         return {
             'account': mailbox_account,
             'sync_run_id': latest_run.id if latest_run else None,
             'sync_status': latest_run.status if latest_run else 'NOT_RUN',
-            'scanned': captured,
-            'unique': captured,
+            'scanned': len(operational_records),
+            'unique': len(operational_records),
             'duplicate': 0,
-            'operational_written': captured,
+            'operational_written': len(operational_records),
             'accepted': scoped_accepted,
             'review': scoped_review,
             'excluded': None,
             'failed': scoped_failed,
             'attachment_parts': scoped_attachment_parts,
-            'attachments_db_records': attachments,
-            'unique_attachment_files': attachments,
+            'attachments_db_records': scoped_attachments.count(),
+            'unique_attachment_files': scoped_attachments.count(),
             'source_status_counts': source_status_counts,
             'scan_finished_at': metadata.get('scanFinishedAt') or '',
             'basis': 'CAPTURED_SOURCE_RECORDS',

@@ -349,6 +349,8 @@ class MailTaskFlowAndScheduleTests(TestCase):
         self.assertEqual(stats['source']['total'], 1)
         self.assertEqual(stats['task']['total'], 1)
         self.assertEqual(stats['task']['linked_emails'], 1)
+        self.assertEqual(stats['mailbox']['scanned'], 1)
+        self.assertEqual(stats['mailbox']['accepted'], 1)
         self.assertEqual(stats['management']['people'][0]['count'], 1)
 
 
