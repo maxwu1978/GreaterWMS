@@ -1,7 +1,7 @@
 <template>
   <q-layout
     view="hHh LpR fFf"
-    :style="{ height: $q.screen.height, width: $q.screen.width }"
+    :style="{ height: $q.screen.height }"
   >
     <q-header reveal elevated class="bg-primary text-white">
       <q-toolbar class="main-headers text-white shadow-18 rounded-borders">
@@ -510,7 +510,6 @@
       class="main-page"
       :style="{
         height: container_height,
-        width: $q.screen.width,
       }"
     >
       <router-view />
