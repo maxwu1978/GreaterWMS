@@ -24,6 +24,7 @@ from staging.services import (
     reserve_staging_slots,
 )
 from utils.md5 import Md5
+from utils.page import ReceivingTransportPagination
 
 from .models import (
     ReceivingDetail,
@@ -378,10 +379,11 @@ class ReceivingRecordListView(APIView):
             qs = qs.filter(status=status)
         if receipt_no:
             qs = qs.filter(receipt_no=receipt_no)
-        return Response({
-            'count': qs.count(),
-            'results': [_record_data(record) for record in qs[:200]],
-        })
+        paginator = ReceivingTransportPagination()
+        page = paginator.paginate_queryset(qs.order_by('-id'), request, view=self)
+        return paginator.get_paginated_response([
+            _record_data(record) for record in page
+        ])
 
     @transaction.atomic
     def post(self, request):

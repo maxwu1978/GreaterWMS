@@ -1,7 +1,7 @@
 <template>
   <q-layout
     view="hHh LpR fFf"
-    :style="{ height: $q.screen.height, width: $q.screen.width }"
+    :style="{ height: $q.screen.height }"
   >
     <q-header reveal elevated class="bg-primary text-white">
       <q-toolbar class="main-headers text-white shadow-18 rounded-borders">
@@ -315,7 +315,7 @@
             <q-item-section>{{ $t("menuItem.dashboard") }}</q-item-section>
           </q-item>
           <q-item
-            v-if="isPlatformAdmin"
+            v-if="canUseMail2Task"
             clickable
             :to="{ name: 'mail2task' }"
             @click="linkChange('mail2task')"
@@ -510,7 +510,6 @@
       class="main-page"
       :style="{
         height: container_height,
-        width: $q.screen.width,
       }"
     >
       <router-view />
@@ -761,6 +760,7 @@
 import { get, getauth, post, baseurl } from 'boot/axios_request'
 import { LocalStorage, SessionStorage, openURL } from 'quasar'
 import Bus from 'boot/bus.js'
+import { isMail2TaskPreview } from 'src/utils/mail2taskPreview'
 
 export default {
   data () {
@@ -816,8 +816,17 @@ export default {
   },
   computed: {
     isPlatformAdmin () {
-      return (String(this.staff_type || '').trim().toLowerCase() === 'admin') ||
+      return (
+        String(this.staff_type || '').trim().toLowerCase() === 'admin' ||
         (String(this.activeTab || '').trim().toLowerCase() === 'admin' && this.authin === '1')
+      )
+    },
+    canUseMail2Task () {
+      const role = String(this.staff_type || '').trim().toLowerCase()
+      return isMail2TaskPreview() || (this.authin === '1' && (
+        this.isPlatformAdmin ||
+        ['manager', 'supervisor', 'inbound', 'outbound', 'stockcontrol', 'warehouse', 'qc', 'driver', 'logistics'].includes(role)
+      ))
     }
   },
   methods: {
@@ -1108,6 +1117,15 @@ export default {
   },
   created () {
     var _this = this
+    if (isMail2TaskPreview()) {
+      _this.authin = '1'
+      _this.login = false
+      _this.staff_type = 'Preview'
+      _this.activeTab = 'user'
+      _this.login_name = 'LOCAL PREVIEW'
+      _this.link = 'mail2task'
+      return
+    }
     if (LocalStorage.has('openid')) {
       _this.openid = LocalStorage.getItem('tenant_openid') || LocalStorage.getItem('openid')
       _this.activeTab = LocalStorage.getItem('login_mode') || 'admin'
@@ -1138,8 +1156,8 @@ export default {
   },
   mounted () {
     var _this = this
-    _this.warehouseOptionsGet()
-    _this.link = localStorage.getItem('menulink')
+    if (!isMail2TaskPreview()) _this.warehouseOptionsGet()
+    _this.link = isMail2TaskPreview() ? 'mail2task' : localStorage.getItem('menulink')
     Bus.$on('needLogin', (val) => {
       _this.isLoggedIn()
     })

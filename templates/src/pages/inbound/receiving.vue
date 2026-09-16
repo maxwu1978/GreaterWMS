@@ -3,7 +3,7 @@
     <div class="row items-center q-mb-sm">
       <div class="text-h6">Physical Receiving</div>
       <q-space />
-      <q-btn flat round icon="refresh" :loading="loading" @click="load" />
+      <q-btn flat round icon="refresh" :loading="loading" @click="reload" />
     </div>
     <q-table
       flat
@@ -13,8 +13,10 @@
       :data="rows"
       :columns="columns"
       :loading="loading"
-      hide-bottom
+      :pagination.sync="pagination"
+      :rows-per-page-options="[10, 30, 50, 100]"
       no-data-label="No receiving records"
+      @request="onRequest"
     >
       <template v-slot:body-cell-status="props">
         <q-td :props="props">
@@ -89,6 +91,12 @@ export default {
     return {
       loading: false,
       rows: [],
+      pagination: {
+        page: 1,
+        rowsPerPage: 30,
+        rowsNumber: 0
+      },
+      requestId: 0,
       driverDialog: false,
       assigning: false,
       assignmentRow: null,
@@ -111,21 +119,48 @@ export default {
   },
   watch: {
     '$route.query.receipt_no' () {
-      this.load()
+      this.reload()
     }
   },
   methods: {
-    load () {
+    reload () {
+      this.load({
+        ...this.pagination,
+        page: 1
+      })
+    },
+    onRequest (props) {
+      this.load(props.pagination)
+    },
+    load (requestedPagination) {
       if (!this.$q.localStorage.has('auth')) return
+      const pagination = requestedPagination || this.pagination
+      const requestId = ++this.requestId
       this.loading = true
       const receiptNo = this.$route.query && this.$route.query.receipt_no
-      const path = receiptNo
-        ? 'receiving/records/?receipt_no=' + encodeURIComponent(receiptNo)
-        : 'receiving/records/'
+      const params = [
+        'page=' + encodeURIComponent(pagination.page),
+        'max_page=' + encodeURIComponent(pagination.rowsPerPage)
+      ]
+      if (receiptNo) params.push('receipt_no=' + encodeURIComponent(receiptNo))
+      const path = 'receiving/records/?' + params.join('&')
       getauth(path)
-        .then(response => { this.rows = response.results || [] })
-        .catch(() => {})
-        .finally(() => { this.loading = false })
+        .then(response => {
+          if (requestId !== this.requestId) return
+          this.rows = response.results || []
+          this.pagination = {
+            ...pagination,
+            rowsNumber: Number(response.count || 0)
+          }
+        })
+        .catch(() => {
+          if (requestId === this.requestId) {
+            this.$q.notify({ type: 'negative', message: 'Unable to load receiving records' })
+          }
+        })
+        .finally(() => {
+          if (requestId === this.requestId) this.loading = false
+        })
     },
     quantity (row) {
       return (row.details || []).reduce((total, detail) => total + Number(detail.actual_qty || 0), 0)
@@ -156,7 +191,7 @@ export default {
       })
         .then(() => {
           this.driverDialog = false
-          this.load()
+          this.reload()
         })
         .catch(() => {})
         .finally(() => { this.assigning = false })
