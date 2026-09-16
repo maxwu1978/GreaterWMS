@@ -1,5 +1,7 @@
 # Legacy GreaterWMS Mail2Task Development Baseline
 
+> Historical development record. For the reconciled delivery branch, canonical workspace and merge gates, see [Unified legacy baseline](47-unified-legacy-baseline.md). Historical branch names below are not current deployment selectors.
+
 Effective date: 2026-08-26
 
 ## Source of truth

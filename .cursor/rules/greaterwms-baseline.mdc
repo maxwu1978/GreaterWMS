@@ -1,0 +1,10 @@
+---
+description: Keep GreaterWMS work on the verified legacy delivery baseline
+alwaysApply: true
+---
+
+Read and follow the repository AGENTS.md. Before editing, run `python3 scripts/check_workspace.py --require-work-branch` and record the result. The repository must be maxwu1978/GreaterWMS, not wms-quickstart or an old detached V2.1.49 checkout.
+
+Use the Django backend and Vue 2 / Quasar frontend under templates/. Preserve the separate Mail2Task route and warehouse-only Dashboard. Use existing GreaterWMS components and page conventions. Do not import the React migration tree or silently restore the obsolete dashboard mail panel during conflict resolution.
+
+Report the actual diff, tests, screenshots and remaining limitations. Do not claim that static checks, mocked UI data or an old production tag establish live production correctness.

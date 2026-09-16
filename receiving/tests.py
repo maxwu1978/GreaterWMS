@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
 
 from asn.models import AsnDetailModel, AsnListModel
 from asn.views import AsnDetailViewSet
@@ -80,6 +80,15 @@ class ReceivingFlowTests(TestCase):
             GET={},
         )
 
+    def list_records(self, **params):
+        request = self.request({})
+        request.GET = params
+        request.query_params = params
+        request.build_absolute_uri = lambda: 'http://testserver/receiving/records/'
+        view = ReceivingRecordListView()
+        view.request = request
+        return view.get(request)
+
     def call(self, view_class, data, add_staging=True):
         data = dict(data)
         if view_class is ReceivingRecordListView and add_staging and not data.get('staging_bins'):
@@ -89,6 +98,69 @@ class ReceivingFlowTests(TestCase):
         view = view_class()
         view.request = request
         return view.post(request)
+
+    def test_receiving_list_paginates_filtered_tenant_records(self):
+        for number in range(201):
+            ReceivingRecord.objects.create(
+                receipt_no='RC-PAGE-%03d' % number,
+                customer='Customer A',
+                openid=self.openid,
+                received_at=timezone.now(),
+            )
+        ReceivingRecord.objects.create(
+            receipt_no='RC-OTHER-TENANT',
+            customer='Customer B',
+            openid='other-tenant',
+            received_at=timezone.now(),
+        )
+
+        first_page = self.list_records(page='1', max_page='200')
+        second_page = self.list_records(page='2', max_page='200')
+        capped_page = self.list_records(page='1', max_page='999')
+        returned = [
+            row['receipt_no']
+            for row in first_page.data['results'] + second_page.data['results']
+        ]
+
+        self.assertEqual(first_page.data['count'], 201)
+        self.assertEqual(len(first_page.data['results']), 200)
+        self.assertEqual(len(capped_page.data['results']), 200)
+        self.assertIsNotNone(first_page.data['next'])
+        self.assertIsNone(first_page.data['previous'])
+        self.assertEqual(len(second_page.data['results']), 1)
+        self.assertIsNone(second_page.data['next'])
+        self.assertIsNotNone(second_page.data['previous'])
+        self.assertEqual(len(returned), 201)
+        self.assertEqual(len(set(returned)), 201)
+        self.assertNotIn('RC-OTHER-TENANT', returned)
+        with self.assertRaises(NotFound):
+            self.list_records(page='invalid', max_page='200')
+
+    def test_receiving_list_returns_short_result_sets_and_receipt_filter(self):
+        for number in range(8):
+            ReceivingRecord.objects.create(
+                receipt_no='RC-SHORT-%03d' % number,
+                customer='Customer A',
+                openid=self.openid,
+                received_at=timezone.now(),
+            )
+        ReceivingRecord.objects.create(
+            receipt_no='RC-SHORT-OTHER',
+            customer='Customer B',
+            openid='other-tenant',
+            received_at=timezone.now(),
+        )
+
+        response = self.list_records()
+        filtered = self.list_records(receipt_no='RC-SHORT-003', page='1', max_page='30')
+
+        self.assertEqual(response.data['count'], 8)
+        self.assertEqual(len(response.data['results']), 8)
+        self.assertEqual(filtered.data['count'], 1)
+        self.assertEqual(
+            [row['receipt_no'] for row in filtered.data['results']],
+            ['RC-SHORT-003'],
+        )
 
     def test_goods_can_be_received_before_asn_then_reconciled_after_putaway(self):
         created = self.call(ReceivingRecordListView, {
